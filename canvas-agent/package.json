@@ -1,12 +1,13 @@
 {
-  "name": "@basketikun/canvas-agent",
+  "name": "dream-canvas-agent",
   "version": "0.6.0",
+  "private": true,
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "canvas-agent": "dist/index.js"
+    "dream-canvas-agent": "dist/index.js"
   },
   "files": [
     "dist",
@@ -18,8 +19,7 @@
     "debug": "tsx src/index.ts --debug",
     "test": "tsx --test src/config.test.ts src/canvas/operations.test.ts src/canvas/session.test.ts src/agent/codex-client.test.ts src/agent/codex-history.test.ts src/agent/message-metadata.test.ts src/skills/store.test.ts src/utils/agent-runtime.test.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "prepack": "npm run build"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -39,8 +39,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

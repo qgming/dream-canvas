@@ -1,0 +1,32 @@
+{
+  "name": "dream-canvas",
+  "version": "0.1.0",
+  "description": "通过本地 Agent 让 Codex 读取和操作梦想画布。",
+  "author": {
+    "name": "qgming",
+    "url": "https://github.com/qgming"
+  },
+  "homepage": "https://github.com/qgming/dream-canvas",
+  "repository": "https://github.com/qgming/dream-canvas",
+  "license": "MIT",
+  "keywords": ["dream-canvas", "canvas", "mcp", "agent"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "梦想画布",
+    "shortDescription": "使用 Codex 操作当前画布。",
+    "longDescription": "连接本仓库的本地 Agent，读取画布、创建节点、连接流程，并通过网页确认执行生成操作。",
+    "developerName": "qgming",
+    "category": "Productivity",
+    "capabilities": ["Canvas", "MCP", "Creative Workflow"],
+    "websiteURL": "https://github.com/qgming/dream-canvas",
+    "defaultPrompt": [
+      "打开梦想画布",
+      "读取当前画布并总结节点结构",
+      "根据选中节点创建一组生图提示词"
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
+  }
+}

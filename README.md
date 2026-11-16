@@ -1,98 +1,34 @@
-<p align="center">
-  <img src="web/public/logo.svg" width="96" alt="dream-canvas logo">
-</p>
+# 梦想画布（dream-canvas）
 
-<h1 align="center">梦想画布 (dream-canvas)</h1>
-
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f97316?style=flat-square" alt="License"></a>
-  <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white" alt="Vite"></a>
-  <a href="https://reactrouter.com/"><img src="https://img.shields.io/badge/React_Router-7-ca4245?style=flat-square&logo=reactrouter&logoColor=white" alt="React Router"></a>
-</p>
-
-<p align="center">
-  <a href="#核心功能">核心功能</a> · <a href="#快速开始">快速开始</a> · <a href="#效果展示">效果展示</a> · <a href="#开源协议">开源协议</a> · <a href="canvas-agent/README.md">本地 Canvas Agent</a> · <a href="plugins/canvas/README.md">节点插件开发</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
-</p>
-
-梦想画布（dream-canvas）是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
-
-## 关于本项目
-
-本项目基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)（MIT License）v0.20.0 二次开发，中文名为「梦想画布」，由 [qgming](https://github.com/qgming) 独立维护。
-
-- 独立仓库，非 GitHub Fork，与上游不存在 git 历史关联，也不跟随上游发布节奏。
-- 原始版权归原作者所有：`Copyright (c) 2026 basketikun`，完整许可见 [LICENSE](LICENSE)。
-- 上游 README 中的赞助商、推广链接、社群与联系方式等内容已从本仓库移除，本项目不代表上游立场。
-- 如需上游原版，请访问 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)。
-
-> [!CAUTION]
-> 项目目前处于开发阶段，不保证历史数据兼容。各种本地存储格式都可能直接调整。
+面向图片创作的 AI 画布工作台，基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) v0.20.0 二次开发，由 [qgming](https://github.com/qgming) 维护。
 
 ## 核心功能
 
-- 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
-- AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成。
-- 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
-- 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
-- Codex App 插件：提供 Codex app 插件，安装后会自动注册 MCP 并尝试拉起本地 Agent。
-- 插件系统：支持通过 URL 动态安装 / 启用 / 更新 / 卸载远程节点插件，并提供 TypeScript SDK 自行开发画布节点插件。
-- 自定义接口调用：可自定义生图 / 视频接口的调用方式，灵活适配各类中转站与自建服务。
-- 提示词库：内置 7 个开源提示词来源并支持自定义标准 JSON 来源，由浏览器前端直连并缓存到 IndexedDB。
-
-内置节点只有文本、图片、视频、音频、生成配置、组六种，Markdown、SVG、HTML、3D 全景、便利贴等节点通过插件扩展，开发方式见 [节点插件开发](plugins/canvas/README.md)。
+- 无限画布：多项目、节点与连线、小地图、撤销重做、导入导出。
+- AI 创作：图片、文本、视频、音频生成与参考图编辑，支持 OpenAI / Gemini 格式和自定义调用脚本。
+- 素材与提示词：本地素材库、提示词来源管理与工作台生成记录。
+- 画布扩展：[节点插件](plugins/canvas/README.md)，在网页画布内增加自定义节点类型。
+- Codex 集成：[Codex 插件](plugins/codex/README.md)，通过 [Canvas Agent](canvas-agent/README.md) 读取和操作画布。
+- 本地工具：[请求代理](canvas-proxy/README.md)，用于转发浏览器请求。
 
 ## 快速开始
 
-AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
-
-### 本地开发
+安装 Node.js 22.12+（建议使用 LTS 版本，包含 npm），然后在仓库中运行：
 
 ```bash
-git clone https://github.com/qgming/dream-canvas.git
-cd dream-canvas/web
-bun install
-bun run dev
+cd web
+npm install
+npm run dev
 ```
 
-未安装 bun 时可用 npm：`npm install --legacy-peer-deps`（`@ant-design/pro-components` 的 peer 依赖仍声明 antd 5，直接 `npm install` 会报 `ERESOLVE`），然后 `npm run dev`。
+打开终端输出的地址，进入配置填写自己的 Base URL 和 API Key。依赖统一使用 npm 管理，提交 `package-lock.json`；按锁文件安装时使用 `npm ci`。
 
-### Docker 运行
+画布、素材和生成记录主要保存在浏览器本地；AI API Key 同样保存在浏览器本地，请求由前端直连所配置的服务。WebDAV 同步需要自行配置。项目处于开发阶段，不保证历史数据兼容。
 
-```bash
-# 本地构建并启动
-docker compose -f docker-compose.local.yml up -d --build
+## 静态托管
 
-# 或使用 CI 推送到 GHCR 的镜像（打 tag 触发 Docker image workflow 后可用）
-docker compose up -d
-```
-
-运行后默认端口 3000，可访问 `http://localhost:3000`。
-
-首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
-
-如果默认的 OpenAI 接口调用方式与你的 API 不同，可自定义生图 / 视频脚本调用。
-
-## 效果展示
-
-<table width="100%">
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/TDFvGWDT/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/zVwJq3YS/image.png" alt="image" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/PvY3qhhK/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/7D04LwN/image.png" alt="image" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/bj30FtS5/5.png" alt="5" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/hxRvjw51/image.png" alt="image" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/jkWsF8q1/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/XrnfXHx7/image.png" alt="image" border="0"></td>
-  </tr>
-</table>
+在 `web/` 中执行 `npm run build`，将 `web/dist/` 托管到支持 SPA 路由回退的静态服务器，所有前端页面路由回退到 `index.html`。平台部署模板和自动发布流程由使用者自行配置。
 
 ## 开源协议
 
-本项目使用 [MIT License](LICENSE)，原始版权声明 `Copyright (c) 2026 basketikun` 保留在 LICENSE 文件中。任何人都可以免费使用、复制、修改、分发、再授权和商业使用本项目，也可以用于闭源产品。
+使用 [MIT License](LICENSE)，保留原始版权声明 `Copyright (c) 2026 basketikun`。安全问题反馈见 [SECURITY.md](SECURITY.md)。

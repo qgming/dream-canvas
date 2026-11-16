@@ -1,10 +1,12 @@
-# Infinite Canvas 画布节点插件
+# 梦想画布节点插件
+
+在浏览器画布内扩展节点类型，使用画布中的「节点插件」管理器加载。Codex 的 MCP 与 Skill 集成见 [Codex 插件](../codex/README.md)。
 
 给画布扩展自定义节点。每个插件是一个**独立目录**,用 **TypeScript** 编写,自带 `package.json` / `build.mjs` / `src/index.tsx` / `dist/`,互不耦合,可单独构建、发布、升级。
 
 内置节点只有文本、图片、视频、音频、生成配置、组六种;其余节点(Markdown、SVG、HTML、3D 全景、便利贴……)都是插件。
 
-作者只写节点 UI 与逻辑,**类型、JSX、宿主 React、构建全部由 [`@infinite-canvas/plugin-sdk`](./sdk/README.md) 提供**,写 TSX 全程有代码提示;产物仍是宿主加载器现有契约的 ESM(React external、宿主单例)。
+作者只写节点 UI 与逻辑,**类型、JSX、宿主 React、构建全部由 [`@dream-canvas/plugin-sdk`](./sdk/README.md) 提供**,写 TSX 全程有代码提示;产物仍是宿主加载器现有契约的 ESM(React external、宿主单例)。
 
 ## 目录约定
 
@@ -47,7 +49,7 @@ npm run dev     # watch,改动自动构建并同步
 
 ## 官方插件注册表
 
-本项目官方插件由 CI 集中构建后发布到孤儿分支 `plugins-dist`(**构建产物不进 git**),画布「节点插件」面板顶部的**官方插件**区经 jsDelivr 从该分支远程拉取并一键安装;第三方插件仍走下方「第三方插件」的 JS URL 安装。构建脚本与发布说明见 [`registry/`](./registry/README.md);清单地址可用 `VITE_PLUGIN_REGISTRY_URL` 覆盖成自建来源。
+本仓库插件通过 [`registry/`](./registry/README.md) 集中构建并同步到 `web/public/plugins/official/`，画布「节点插件」面板的官方插件区默认读取本地清单。未构建时显示空列表；需要自行托管时可用 `VITE_PLUGIN_REGISTRY_URL` 指定清单地址。第三方插件仍支持通过 JS URL 安装。
 
 ## 本地开发
 
@@ -68,8 +70,8 @@ VITE_DEV_PLUGINS=/plugins/markdown.js,/plugins/svg.js
 默认导出 `definePlugin({...})`(对象形式,**无需再 `const { React } = runtime`**):
 
 ```tsx
-import { definePlugin, useState } from "@infinite-canvas/plugin-sdk";
-import type { CanvasNodeContentProps } from "@infinite-canvas/plugin-sdk";
+import { definePlugin, useState } from "@dream-canvas/plugin-sdk";
+import type { CanvasNodeContentProps } from "@dream-canvas/plugin-sdk";
 
 function Content({ ctx }: CanvasNodeContentProps) {
     const [n, setN] = useState(0);

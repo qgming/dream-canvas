@@ -98,7 +98,7 @@ export function createProxyServer() {
         }
         const target = readTarget(req.url || "/");
         if (!target) {
-            sendJson(res, 200, { app: "infinite-canvas", proxy: pkg.name, version: pkg.version, usage: "/<full-target-url>" });
+            sendJson(res, 200, { app: "dream-canvas", proxy: pkg.name, version: pkg.version, usage: "/<full-target-url>" });
             return;
         }
         const startedAt = Date.now();
@@ -119,7 +119,7 @@ export function createProxyServer() {
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-    console.log(`${pkg.name} v${pkg.version}\n\nUsage: npx ${pkg.name}@latest [--port 23210] [--host 127.0.0.1]\n\nForwards http://<host>:<port>/<full-target-url> to <full-target-url> with permissive CORS headers.`);
+    console.log(`${pkg.name} v${pkg.version}\n\n用法（仓库根目录）: node canvas-proxy/index.js [--port 23210] [--host 127.0.0.1]\n\n将 http://<host>:<port>/<完整目标地址> 转发到目标地址，并添加 CORS 响应头。`);
     process.exit(0);
 }
 
@@ -128,5 +128,5 @@ const host = readArg(args, "host", process.env.HOST || "127.0.0.1");
 
 createProxyServer().listen(port, host, () => {
     console.log(`${pkg.name} v${pkg.version} listening on http://${host}:${port}`);
-    console.log(`Fill this address into Infinite Canvas → 配置 → 本地代理: http://${host}:${port}`);
+    console.log(`请将此地址填入梦想画布 → 配置 → 本地代理: http://${host}:${port}`);
 });

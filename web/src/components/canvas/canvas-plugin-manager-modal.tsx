@@ -38,10 +38,10 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
         }
     }, []);
 
-    // Fetch the official registry when opening the panel, but only if it has not been loaded yet.
+    // Read the registry once each time the panel opens, including when the list is empty.
     useEffect(() => {
-        if (open && official.length === 0 && !loadingOfficial && !officialError) void loadOfficial();
-    }, [open, official.length, loadingOfficial, officialError, loadOfficial]);
+        if (open) void loadOfficial();
+    }, [open, loadOfficial]);
 
     const handleInstallUrl = async () => {
         const target = url.trim();

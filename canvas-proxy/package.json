@@ -1,12 +1,13 @@
 {
-  "name": "@basketikun/canvas-proxy",
+  "name": "dream-canvas-proxy",
   "version": "0.1.0",
-  "description": "Minimal local forwarding proxy that lets the Infinite Canvas web app call AI provider APIs without CORS restrictions.",
+  "private": true,
+  "description": "梦想画布本地请求转发代理",
   "license": "MIT",
   "type": "module",
   "main": "./index.js",
   "bin": {
-    "canvas-proxy": "index.js"
+    "dream-canvas-proxy": "index.js"
   },
   "files": [
     "index.js",
@@ -17,8 +18,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

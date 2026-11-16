@@ -1,14 +1,14 @@
 {
-  "name": "infinite-canvas-local",
+  "name": "dream-canvas-local",
   "interface": {
-    "displayName": "Infinite Canvas"
+    "displayName": "梦想画布 Codex 插件"
   },
   "plugins": [
     {
-      "name": "infinite-canvas",
+      "name": "dream-canvas",
       "source": {
         "source": "local",
-        "path": "./plugins/infinite-canvas"
+        "path": "./plugins/codex"
       },
       "policy": {
         "installation": "AVAILABLE",

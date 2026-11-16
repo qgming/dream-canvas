@@ -1,14 +1,13 @@
-// 官方插件集中构建:一次进程构建所有官方插件 + 生成清单,产物进 dist/(已 gitignore)。
+// 官方插件集中构建:生成 bundle 与清单，并同步到 web/public/plugins/official。
 // 官方插件目录本身不各自安装依赖:统一从本目录 node_modules 解析 SDK(nodePaths)。
-// CI(publish-plugins.yml)把 dist/ 强推到 plugins-dist 分支,前端经 jsDelivr 远程拉取。
-// 本地自测:`npm install && npm run build`,再把 VITE_PLUGIN_REGISTRY_URL 指向本地 dist。
 import { build } from "esbuild";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outDir = join(root, "dist");
+const publicDir = join(root, "..", "..", "..", "web", "public", "plugins", "official");
 const nodeModules = join(root, "node_modules");
 
 // 官方插件登记表:新增官方插件在此登记即可。
@@ -31,6 +30,7 @@ async function readPluginVersion(dir) {
 
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
+await mkdir(publicDir, { recursive: true });
 
 for (const plugin of OFFICIAL) {
     await build({
@@ -42,12 +42,13 @@ for (const plugin of OFFICIAL) {
         target: "es2020",
         // automatic JSX → SDK 的 jsx-runtime(内部用宿主 React),react external
         jsx: "automatic",
-        jsxImportSource: "@infinite-canvas/plugin-sdk",
+        jsxImportSource: "@dream-canvas/plugin-sdk",
         loader: { ".ts": "ts", ".tsx": "tsx", ".css": "text" },
         external: ["react", "react-dom"],
         minify: true,
         nodePaths: [nodeModules],
     });
+    await cp(join(outDir, `${plugin.id}.js`), join(publicDir, `${plugin.id}.js`));
     console.log(`built ${plugin.id}.js`);
 }
 
@@ -65,5 +66,7 @@ const manifest = {
         })),
     ),
 };
-await writeFile(join(outDir, "official-plugins.json"), JSON.stringify(manifest, null, 4) + "\n");
-console.log(`wrote official-plugins.json (${OFFICIAL.length} plugins) → dist/`);
+const source = JSON.stringify(manifest, null, 4) + "\n";
+await writeFile(join(outDir, "official-plugins.json"), source);
+await writeFile(join(publicDir, "official-plugins.json"), source);
+console.log(`synced official-plugins.json (${OFFICIAL.length} plugins) → web/public/plugins/official/`);
