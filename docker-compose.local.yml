@@ -1,9 +1,10 @@
 services:
   app:
-    image: infinite-canvas:local
+    image: dream-canvas:local
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: dream-canvas
     ports:
       - "3000:3000"
     restart: unless-stopped

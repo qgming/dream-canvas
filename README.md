@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/content/docs/overview/quick-start.mdx">快速开始</a> · <a href="docs/content/docs/overview/features.mdx">功能介绍</a> · <a href="docs/content/docs/overview/docker.mdx">Docker 部署</a> · <a href="docs/content/docs/canvas/canvas-node-manual.mdx">画布节点操作手册</a> · <a href="docs/content/docs/canvas/canvas-shortcuts.mdx">画布快捷键</a> · <a href="canvas-agent/README.md">本地 Canvas Agent</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
+  <a href="#核心功能">核心功能</a> · <a href="#快速开始">快速开始</a> · <a href="#效果展示">效果展示</a> · <a href="#开源协议">开源协议</a> · <a href="canvas-agent/README.md">本地 Canvas Agent</a> · <a href="plugins/canvas/README.md">节点插件开发</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
 </p>
 
 梦想画布（dream-canvas）是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
@@ -39,7 +39,7 @@
 - 自定义接口调用：可自定义生图 / 视频接口的调用方式，灵活适配各类中转站与自建服务。
 - 提示词库：内置 7 个开源提示词来源并支持自定义标准 JSON 来源，由浏览器前端直连并缓存到 IndexedDB。
 
-完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
+内置节点只有文本、图片、视频、音频、生成配置、组六种，Markdown、SVG、HTML、3D 全景、便利贴等节点通过插件扩展，开发方式见 [节点插件开发](plugins/canvas/README.md)。
 
 ## 快速开始
 
@@ -50,15 +50,19 @@ AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器�
 ```bash
 git clone https://github.com/qgming/dream-canvas.git
 cd dream-canvas/web
-npm install
-npm run dev
+bun install
+bun run dev
 ```
+
+未安装 bun 时可用 npm：`npm install --legacy-peer-deps`（`@ant-design/pro-components` 的 peer 依赖仍声明 antd 5，直接 `npm install` 会报 `ERESOLVE`），然后 `npm run dev`。
 
 ### Docker 运行
 
 ```bash
-git clone https://github.com/qgming/dream-canvas.git
-cd dream-canvas
+# 本地构建并启动
+docker compose -f docker-compose.local.yml up -d --build
+
+# 或使用 CI 推送到 GHCR 的镜像（打 tag 触发 Docker image workflow 后可用）
 docker compose up -d
 ```
 

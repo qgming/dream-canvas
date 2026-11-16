@@ -1,13 +1,13 @@
 {
   "name": "infinite-canvas",
   "version": "0.1.0",
-  "description": "Use ZCode to read and operate Infinite Canvas through the local Canvas Agent MCP server.",
+  "description": "Use ZCode to read and operate 梦想画布 (dream-canvas) through the local Canvas Agent MCP server.",
   "author": {
-    "name": "basketikun",
-    "url": "https://canvas.best/"
+    "name": "qgming",
+    "url": "https://github.com/qgming"
   },
-  "homepage": "https://canvas.best/",
-  "repository": "https://github.com/basketikun/infinite-canvas",
+  "homepage": "https://github.com/qgming/dream-canvas",
+  "repository": "https://github.com/qgming/dream-canvas",
   "license": "MIT",
   "keywords": ["infinite-canvas", "canvas", "mcp", "agent"],
   "skills": "skills",
