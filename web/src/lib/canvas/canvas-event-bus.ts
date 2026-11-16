@@ -1,6 +1,8 @@
 import localforage from "localforage";
 
 import type { PluginStorage } from "@/types/canvas-plugin";
+import { captureSession } from "@/services/api/client";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 // Lightweight canvas event bus for communication between nodes and plugins.
 type Handler = (payload: unknown) => void;
@@ -26,22 +28,27 @@ export function onCanvasEvent(event: string, handler: Handler) {
     return () => set!.delete(handler);
 }
 
-// Private plugin storage isolated by pluginId namespace.
+// Browser-only plugin preferences are scoped by account; project data belongs in node metadata.
 const stores = new Map<string, LocalForage>();
 
 export function createPluginStorage(pluginId: string): PluginStorage {
+    const owner = useAuthStore.getState().user?.id;
+    const assertSession = captureSession();
+    const scopedKey = (key: string) => { assertSession(); if (!owner) throw new Error("请先登录后使用插件存储"); return `${owner}/${key}`; };
     let store = stores.get(pluginId);
     if (!store) {
         store = localforage.createInstance({ name: "infinite-canvas-plugins", storeName: pluginId });
         stores.set(pluginId, store);
     }
     return {
-        get: (key) => store!.getItem(key),
+        get: async <T = unknown>(key: string) => { const value = await store!.getItem<T>(scopedKey(key)); assertSession(); return value; },
         set: async (key, value) => {
-            await store!.setItem(key, value);
+            await store!.setItem(scopedKey(key), value);
+            assertSession();
         },
         remove: async (key) => {
-            await store!.removeItem(key);
+            await store!.removeItem(scopedKey(key));
+            assertSession();
         },
     };
 }

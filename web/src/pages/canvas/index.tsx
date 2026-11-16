@@ -1,19 +1,19 @@
 import { useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button } from "antd";
+import { Alert, App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { readZip } from "@/lib/zip";
-import { setMediaBlob } from "@/services/file-storage";
-import { setImageBlob } from "@/services/image-storage";
+import { uploadAsset, type ServerAsset } from "@/services/api/assets";
+import { replacePackageAssets } from "@/lib/canvas/asset-package";
+import { canvasExportSchema } from "@/lib/canvas/project-schema";
+import { captureSession } from "@/services/api/client";
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
-import type { CanvasExportFile } from "@/types/canvas-export";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { hasAgentUrlBootstrap } from "@/lib/agent/agent-url-bootstrap";
 
 export default function CanvasPage() {
     const { message } = App.useApp();
@@ -24,6 +24,7 @@ export default function CanvasPage() {
     const autoOpenRef = useRef(false);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const projects = useCanvasStore((state) => state.projects);
+    const loadError = useCanvasStore((state) => state.error);
     const createProject = useCanvasStore((state) => state.createProject);
     const importProject = useCanvasStore((state) => state.importProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
@@ -33,47 +34,54 @@ export default function CanvasPage() {
     const agentMode = mode === "new" || mode === "recent" || mode === "choose";
     const agentQuery = agentMode ? `?${searchParams.toString()}` : "";
     const enterProject = (id: string) => {
-        const agentHash = hasAgentUrlBootstrap(window.location.hash) ? window.location.hash : "";
-        navigate(`/canvas/${id}${agentQuery}${agentHash}`, { replace: Boolean(agentHash) });
+        navigate(`/canvas/${id}${agentQuery}`);
     };
-    const createAndEnter = () => enterProject(createProject(t("canvas.defaultTitle", { count: projects.length + 1 })));
+    const createAndEnter = async () => {
+        try { enterProject(await createProject(t("canvas.defaultTitle", { count: projects.length + 1 }))); }
+        catch (error) { navigate("/canvas", { replace: true }); message.error(error instanceof Error ? error.message : "创建失败"); }
+    };
     const importCanvas = async (file?: File) => {
         if (!file) return;
+        const assertSession = captureSession();
         try {
             const zip = await readZip(file);
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
-            const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(item.project));
+            const result = canvasExportSchema.safeParse(JSON.parse(await projectFile.text()));
+            if (!result.success) throw new Error("项目包版本、画布内容或媒体清单不正确，未上传或导入任何内容");
+            const data = result.data;
+            const files = new Map<string, ServerAsset>();
+            for (const project of data.projects) for (const item of project.files) {
+                assertSession();
+                if (!item.storageKey.startsWith("asset:")) throw new Error("仅支持当前服务端格式的项目包，不迁移旧本地数据");
+                if (files.has(item.storageKey)) continue;
+                const blob = zip.get(item.path);
+                if (!blob) throw new Error("项目包缺少媒体原件");
+                files.set(item.storageKey, await uploadAsset(blob.type ? blob : blob.slice(0, blob.size, item.mimeType), project.project.title));
+            }
+            for (const item of data.projects) { assertSession(); await importProject(replacePackageAssets(item.project, files)); }
+            window.dispatchEvent(new Event("assets-changed"));
             message.success(t("canvas.imported", { count: data.projects.length }));
-        } catch {
-            message.error(t("canvas.importFailed"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t("canvas.importFailed"));
         } finally {
             if (inputRef.current) inputRef.current.value = "";
         }
     };
 
     useEffect(() => {
-        if (!hydrated || autoOpenRef.current || (mode !== "new" && mode !== "recent")) return;
+        if (!hydrated || loadError || autoOpenRef.current || (mode !== "new" && mode !== "recent")) return;
         autoOpenRef.current = true;
-        enterProject(mode === "new" ? createProject(t("canvas.defaultTitle", { count: projects.length + 1 })) : projects[0]?.id || createProject(t("canvas.defaultTitle", { count: projects.length + 1 })));
-    }, [createProject, hydrated, mode, projects, t]);
+        if (mode === "recent" && projects[0]) enterProject(projects[0].id);
+        else void createAndEnter();
+    }, [createProject, hydrated, loadError, mode, projects, t]);
 
-    if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">{t("canvas.opening")}</main>;
+    if (hydrated && !loadError && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">{t("canvas.opening")}</main>;
 
     return (
         <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
+                {loadError ? <Alert type="error" title={loadError} action={<Button onClick={() => void useCanvasStore.getState().loadProjects()}>重试读取</Button>} /> : null}
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
                     <div>
                         <p className="text-xs text-stone-500">{t("canvas.library")}</p>
@@ -82,7 +90,7 @@ export default function CanvasPage() {
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `${t("canvas.title")}-${selectedIds.length}`)}>
+                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `${t("canvas.title")}-${selectedIds.length}`).catch((error: unknown) => { message.error(error instanceof Error ? error.message : "项目导出失败"); })}>
                                     {t("canvas.exportSelected")}
                                 </Button>
                                 <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>

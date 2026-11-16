@@ -4,6 +4,8 @@ import { runPromptSource, type RawPrompt } from "./prompt-source-runtime";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import i18n from "@/i18n";
 import type { PromptSource } from "./prompt-source-presets";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { captureSession } from "./client";
 
 export type Prompt = RawPrompt & {
     sourceId: string;
@@ -53,8 +55,8 @@ function enabledSources() {
     return usePromptSourceStore.getState().sources.filter((source) => source.enabled);
 }
 
-function cacheKey(sourceId: string) {
-    return `prompt-source:${sourceId}`;
+function cacheKey(sourceId: string, owner = useAuthStore.getState().user?.id) {
+    return `${owner || "anonymous"}/prompt-source:${sourceId}`;
 }
 
 function sourceSignature(source: PromptSource) {
@@ -75,17 +77,17 @@ function withSourceMeta(source: PromptSource, items: RawPrompt[]): Prompt[] {
     }));
 }
 
-async function readSourceCache(sourceId: string) {
-    return promptCacheStore.getItem<SourceCache>(cacheKey(sourceId));
+async function readSourceCache(sourceId: string, owner = useAuthStore.getState().user?.id) {
+    return promptCacheStore.getItem<SourceCache>(cacheKey(sourceId, owner));
 }
 
-async function refreshSourceRecord(source: PromptSource): Promise<PromptSourceRefreshResult> {
-    const previous = await readSourceCache(source.id);
+async function refreshSourceRecord(source: PromptSource, owner: string | undefined): Promise<PromptSourceRefreshResult> {
+    const previous = await readSourceCache(source.id, owner);
     try {
         const items = withSourceMeta(source, await runPromptSource(source));
         const lastSuccessAt = new Date().toISOString();
         const cache: SourceCache = { sourceId: source.id, items, count: items.length, fetchedAt: Date.now(), lastSuccessAt, lastError: "", signature: sourceSignature(source) };
-        await promptCacheStore.setItem(cacheKey(source.id), cache);
+        await promptCacheStore.setItem(cacheKey(source.id, owner), cache);
         return { sourceId: source.id, sourceName: source.name, count: items.length, lastSuccessAt, lastError: "", success: true };
     } catch (error) {
         const lastError = error instanceof Error ? error.message : String(error);
@@ -98,32 +100,40 @@ async function refreshSourceRecord(source: PromptSource): Promise<PromptSourceRe
             lastError,
             signature: previous?.signature || sourceSignature(source),
         };
-        await promptCacheStore.setItem(cacheKey(source.id), cache);
+        await promptCacheStore.setItem(cacheKey(source.id, owner), cache);
         return { sourceId: source.id, sourceName: source.name, count: cache.count, lastSuccessAt: cache.lastSuccessAt, lastError, success: false };
     }
 }
 
-function getOrStartRefresh(source: PromptSource) {
-    const current = loadingSources.get(source.id);
+function getOrStartRefresh(source: PromptSource, owner = useAuthStore.getState().user?.id) {
+    const key = cacheKey(source.id, owner);
+    const current = loadingSources.get(key);
     if (current) return current;
-    const loading = refreshSourceRecord(source).finally(() => loadingSources.delete(source.id));
-    loadingSources.set(source.id, loading);
+    const loading = refreshSourceRecord(source, owner).finally(() => loadingSources.delete(key));
+    loadingSources.set(key, loading);
     return loading;
 }
 
 async function getSourcePrompts(source: PromptSource): Promise<Prompt[]> {
-    const cached = await readSourceCache(source.id);
+    const owner = useAuthStore.getState().user?.id;
+    const assertSession = captureSession();
+    const cached = await readSourceCache(source.id, owner);
+    assertSession();
     if (cached) {
         const stale = cached.signature !== sourceSignature(source) || Date.now() - cached.fetchedAt >= cacheTtlMs;
-        if (stale) void getOrStartRefresh(source).catch(() => undefined);
+        if (stale) void getOrStartRefresh(source, owner).catch(() => undefined);
         return withSourceMeta(source, cached.items);
     }
-    const result = await getOrStartRefresh(source);
+    const result = await getOrStartRefresh(source, owner);
+    assertSession();
     if (!result.success) throw new Error(result.lastError);
-    return (await readSourceCache(source.id))?.items || [];
+    const updated = await readSourceCache(source.id, owner);
+    assertSession();
+    return updated?.items || [];
 }
 
 async function getAllPrompts(): Promise<Prompt[]> {
+    const assertSession = captureSession();
     const settled = await Promise.all(
         enabledSources().map(async (source) => {
             try {
@@ -133,6 +143,7 @@ async function getAllPrompts(): Promise<Prompt[]> {
             }
         }),
     );
+    assertSession();
     return settled.flat();
 }
 
@@ -160,37 +171,48 @@ export async function fetchSourcePrompts(sourceId: string): Promise<Prompt[]> {
 }
 
 export async function refreshSource(sourceId: string): Promise<PromptSourceRefreshResult> {
+    const assertSession = captureSession();
     const source = usePromptSourceStore.getState().sources.find((item) => item.id === sourceId);
     if (!source) throw new Error(i18n.t("prompts.sourceMissing"));
     const result = await getOrStartRefresh(source);
+    assertSession();
     if (!result.success) throw new Error(result.lastError);
     return result;
 }
 
 export async function refreshAllSources(): Promise<PromptSourceRefreshSummary> {
-    const results = await Promise.all(enabledSources().map(getOrStartRefresh));
+    const assertSession = captureSession();
+    const results = await Promise.all(enabledSources().map((source) => getOrStartRefresh(source)));
+    assertSession();
     return summarizeRefresh(results);
 }
 
 export async function refreshDueSources(maxAgeMs: number): Promise<PromptSourceRefreshSummary> {
+    const owner = useAuthStore.getState().user?.id;
+    const assertSession = captureSession();
     const sources = await Promise.all(
         enabledSources().map(async (source) => {
-            const cached = await readSourceCache(source.id);
+            const cached = await readSourceCache(source.id, owner);
             const lastSuccess = cached?.lastSuccessAt ? new Date(cached.lastSuccessAt).getTime() : 0;
             return !lastSuccess || Boolean(cached?.lastError) || Date.now() - lastSuccess >= maxAgeMs || cached?.signature !== sourceSignature(source) ? source : null;
         }),
     );
-    const results = await Promise.all(sources.filter((source): source is PromptSource => Boolean(source)).map(getOrStartRefresh));
+    assertSession();
+    const results = await Promise.all(sources.filter((source): source is PromptSource => Boolean(source)).map((source) => getOrStartRefresh(source, owner)));
+    assertSession();
     return summarizeRefresh(results);
 }
 
 export async function fetchPromptSourceStatuses(): Promise<Record<string, PromptSourceStatus>> {
+    const owner = useAuthStore.getState().user?.id;
+    const assertSession = captureSession();
     const entries = await Promise.all(
         usePromptSourceStore.getState().sources.map(async (source) => {
-            const cache = await readSourceCache(source.id);
+            const cache = await readSourceCache(source.id, owner);
             return [source.id, { sourceId: source.id, count: cache?.items?.length || 0, lastSuccessAt: cache?.lastSuccessAt || "", lastError: cache?.lastError || "" }] as const;
         }),
     );
+    assertSession();
     return Object.fromEntries(entries);
 }
 

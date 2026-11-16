@@ -1,15 +1,15 @@
 import { Check, Download, Pencil, Trash2, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Input } from "antd";
+import { App, Button, Input } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { hasAgentUrlBootstrap } from "@/lib/agent/agent-url-bootstrap";
 
 export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const { i18n, t } = useTranslation();
+    const { message } = App.useApp();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const renameProject = useCanvasStore((state) => state.renameProject);
@@ -24,12 +24,11 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const editing = editingId === project.id;
     const selected = selectedIds.includes(project.id);
     const open = () => {
-        const agentHash = hasAgentUrlBootstrap(window.location.hash) ? window.location.hash : "";
-        navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}${agentHash}`, { replace: Boolean(agentHash) });
+        navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
     };
-    const saveTitle = () => {
-        renameProject(project.id, editingTitle);
-        stopEditing();
+    const saveTitle = async () => {
+        try { await renameProject(project.id, editingTitle); stopEditing(); }
+        catch (error) { message.error(error instanceof Error ? error.message : "重命名失败"); }
     };
 
     return (
@@ -71,7 +70,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || t("canvas.title"))} aria-label={t("canvas.project.export")} />
+                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || t("canvas.title")).catch((error: unknown) => { message.error(error instanceof Error ? error.message : "项目导出失败"); })} aria-label={t("canvas.project.export")} />
                             <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label={t("canvas.project.rename")} />
                             <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label={t("canvas.project.delete")} />
                         </>

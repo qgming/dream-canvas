@@ -7,8 +7,8 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { useAgentStore, type AgentCanvasReference, type AgentPendingApproval, type AgentSkillReference } from "@/stores/use-agent-store";
-import { resolveAgentMessageAssetUrl, revealAgentLocalFile } from "@/services/api/canvas-agent";
+import { useAgentStore, type AgentCanvasReference, type AgentChatItem, type AgentPendingApproval, type AgentSkillReference } from "@/stores/use-agent-store";
+import { resolveAgentMessageAssetUrl } from "@/services/api/canvas-agent";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
 
@@ -25,24 +25,8 @@ const streamdownAnimation = { duration: 20, stagger: 0, sep: "word" } as const;
 
 function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProps) {
     const { t } = useTranslation();
-    const { message } = App.useApp();
     const copyText = useCopyText();
     const localPath = localFilePath(url);
-    const [opening, setOpening] = useState(false);
-    const open = async () => {
-        if (!localPath) return onConfirm();
-        const { url: endpoint, token } = useAgentStore.getState();
-        setOpening(true);
-        try {
-            await revealAgentLocalFile(endpoint, token, localPath);
-            message.success(t("agent.message.revealed"));
-            onClose();
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : t("agent.message.openLocalFailed"));
-        } finally {
-            setOpening(false);
-        }
-    };
     return (
         <Modal open={isOpen} onCancel={onClose} footer={null} centered width={420} title={t(localPath ? "agent.message.openLocal" : "agent.message.openExternal")}>
             <div className="text-sm text-black/55 dark:text-white/55">
@@ -53,8 +37,8 @@ function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProp
                 <Button type="text" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.message.pathCopied" : "agent.message.linkCopied"))}>
                     {t(localPath ? "agent.message.copyPath" : "agent.message.copyLink")}
                 </Button>
-                <Button type="text" loading={opening} icon={localPath ? <FolderOpen className="size-4" /> : <ExternalLink className="size-4" />} onClick={open}>
-                    {t(localPath ? "agent.message.showInFolder" : "agent.message.continueOpen")}
+                <Button type="text" disabled={Boolean(localPath)} icon={<ExternalLink className="size-4" />} onClick={onConfirm}>
+                    {localPath ? "本地路径无法从服务器打开" : t("agent.message.continueOpen")}
                 </Button>
             </div>
         </Modal>
@@ -294,7 +278,7 @@ function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?:
     );
 }
 
-type AgentCommandItem = Pick<AgentChatMessageItem, "id" | "text" | "detail">;
+type AgentCommandItem = Pick<AgentChatItem, "id" | "text" | "detail" | "threadId" | "turnId" | "itemId">;
 
 export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();
@@ -317,7 +301,7 @@ export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[];
             <summary className="cursor-pointer list-none py-1">{header}</summary>
             {items.length === 1
                 ? <AgentSingleCommand item={items[0]} theme={theme} />
-                : <div className="ml-6 mt-1">{items.map((item, index) => <AgentCommandEntry key={item.id} item={item} index={index} theme={theme} />)}</div>
+                : <div className="ml-6 mt-1">{items.map((item, index) => <AgentCommandEntry key={`${item.threadId}:${item.turnId}:${item.itemId || item.id}`} item={item} index={index} theme={theme} />)}</div>
             }
         </details>
     );

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Download, Home, Images, Menu, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
+import { Bot, Download, Images, Keyboard, Menu, PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Redo2, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Dropdown, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -18,7 +18,6 @@ export function CanvasTopBar({
     onCancelTitleEditing,
     canUndo,
     canRedo,
-    onHome,
     onProjects,
     onCreateProject,
     onDeleteProject,
@@ -28,7 +27,6 @@ export function CanvasTopBar({
     onUndo,
     onRedo,
     agentOpen,
-    compactAgentStatus,
     onToggleAgent,
 }: {
     title: string;
@@ -40,7 +38,6 @@ export function CanvasTopBar({
     onCancelTitleEditing: () => void;
     canUndo: boolean;
     canRedo: boolean;
-    onHome: () => void;
     onProjects: () => void;
     onCreateProject: () => void;
     onDeleteProject: () => void;
@@ -50,7 +47,6 @@ export function CanvasTopBar({
     onUndo: () => void;
     onRedo: () => void;
     agentOpen: boolean;
-    compactAgentStatus: { connected: boolean; enabled: boolean; activity: string };
     onToggleAgent: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
@@ -89,7 +85,6 @@ export function CanvasTopBar({
                         trigger={["click"]}
                         menu={{
                             items: [
-                                { key: "home", icon: <Home className="size-4" />, label: t("canvas.home"), onClick: onHome },
                                 { key: "projects", icon: <Images className="size-4" />, label: t("canvas.projects"), onClick: onProjects },
                                 { type: "divider" },
                                 { key: "new", icon: <Plus className="size-4" />, label: t("canvas.create"), onClick: onCreateProject },
@@ -133,11 +128,12 @@ export function CanvasTopBar({
                             </button>
                         )}
                     </div>
-                    <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} />
+                    <CompactAgentStatus onClick={onToggleAgent} />
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1.5">
-                    <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} onOpenPlugins={onOpenPlugins} />
+                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></button>
+                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></button>
                     <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
                     <Button
                         type="text"
@@ -182,14 +178,17 @@ function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
     );
 }
 
-function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
+function CompactAgentStatus({ onClick }: { onClick: () => void }) {
+    const connected = useAgentStore((state) => state.connected);
+    const enabled = useAgentStore((state) => state.enabled);
+    const activity = useAgentStore((state) => state.activity);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const { t } = useTranslation();
-    const label = status.connected ? t("canvas.agentConnected") : status.enabled ? t("canvas.agentConnecting", { activity: status.activity || t("canvas.connecting") }) : t("canvas.agentDisconnected");
-    const dotColor = status.connected ? "#22c55e" : status.enabled ? "#f59e0b" : theme.node.muted;
+    const label = connected ? t("canvas.agentConnected") : enabled ? t("canvas.agentConnecting", { activity: activity || t("canvas.connecting") }) : t("canvas.agentDisconnected");
+    const dotColor = connected ? "#22c55e" : enabled ? "#f59e0b" : theme.node.muted;
     return (
-        <button type="button" className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75" style={{ color: status.connected ? "#16a34a" : status.enabled ? "#d97706" : theme.node.muted }} onClick={onClick} title={t("canvas.openAgent")}>
+        <button type="button" className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75" style={{ color: connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted }} onClick={onClick} title={t("canvas.openAgent")}>
             <span className="size-2 rounded-full" style={{ background: dotColor }} />
             <span className="max-w-[140px] truncate">{label}</span>
         </button>

@@ -44,6 +44,7 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
     return {
         generationType: type,
         model: config.model,
+        modelParameters: config.modelParameters ? { [config.model]: config.modelParameters } : undefined,
         size: config.size,
         quality: config.quality,
         ...(config.background ? { background: config.background } : {}),
@@ -55,6 +56,7 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
 export function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
     return {
         model: config.model,
+        modelParameters: config.modelParameters ? { [config.model]: config.modelParameters } : undefined,
         audioVoice: config.audioVoice,
         audioFormat: config.audioFormat,
         audioSpeed: config.audioSpeed,

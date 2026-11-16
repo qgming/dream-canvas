@@ -29,8 +29,8 @@ type AgentBridgeParams = {
 };
 
 /**
- * Bridge between the canvas and local Agent: publish the current snapshot and apply/undo capabilities
- * to the Agent store for the local Codex panel. All members except applyAgentOps are internal.
+ * Publish this page's selection and snapshot for mentions and node plugins.
+ * Server business tools must use the backend service instead of this page bridge.
  */
 export function useAgentBridge(params: AgentBridgeParams) {
     const { projectId, title, nodes, connections, selectedNodeIds, viewport, nodesRef, connectionsRef, selectedNodeIdsRef, viewportRef, generateNodeRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setViewport, setContextMenu } =

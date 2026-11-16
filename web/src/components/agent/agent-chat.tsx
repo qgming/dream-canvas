@@ -81,7 +81,7 @@ export function AgentChatTimeline({
                 <div ref={contentRef} className="space-y-4 px-4 pt-4">
                     {timeline.map((entry) => entry.type === "commands"
                         ? <AgentCommandGroupRow key={entry.id} items={entry.items} theme={theme} />
-                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} theme={theme} />)}
+                        : <AgentChatMessageRow key={`${entry.item.threadId}:${entry.item.turnId}:${entry.item.itemId || entry.item.id}`} item={entry.item} theme={theme} />)}
                     {pendingTool ? (
                         <AgentPendingToolCard
                             summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)}
@@ -108,7 +108,7 @@ export function AgentTaskProgress({ theme, busy }: { theme: (typeof canvasThemes
     if (!plan) return null;
     return (
         <div className="shrink-0 px-4 pt-2">
-            <AgentToolCard key={plan.id} title={plan.title || t("agent.events.progress")} text={plan.text} detail={plan.detail} theme={theme} />
+            <AgentToolCard key={`${plan.threadId}:${plan.turnId}:${plan.itemId || plan.id}`} title={plan.title || t("agent.events.progress")} text={plan.text} detail={plan.detail} theme={theme} />
         </div>
     );
 }
@@ -139,7 +139,7 @@ function groupTimelineMessages(messages: AgentChatItem[]) {
     let commandScope = "";
     const flushCommands = () => {
         if (!commands.length) return;
-        timeline.push({ type: "commands", id: `commands:${commands[0].id}`, items: commands });
+        timeline.push({ type: "commands", id: `commands:${commands[0].threadId}:${commands[0].turnId}:${commands[0].itemId || commands[0].id}`, items: commands });
         commands = [];
         commandScope = "";
     };

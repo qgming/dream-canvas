@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
-import { imageToDataUrl } from "@/services/image-storage";
+import { uploadImage } from "@/services/image-storage";
+import { captureSession } from "@/services/api/client";
+import { useGenerationTarget } from "./use-generation-target";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { decodeChannelModel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
@@ -18,9 +21,9 @@ import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/type
 type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 type PluginHostParams = {
+    projectId: string;
     effectiveConfig: AiConfig;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
-    openConfigDialog: (open: boolean) => void;
     theme: CanvasTheme;
     nodesRef: MutableRefObject<CanvasNodeData[]>;
     connectionsRef: MutableRefObject<CanvasConnection[]>;
@@ -36,58 +39,80 @@ type PluginHostParams = {
  */
 export function usePluginHost(params: PluginHostParams) {
     const { t } = useTranslation();
-    const { effectiveConfig, isAiConfigReady, openConfigDialog, theme, nodesRef, connectionsRef, viewportRef, setNodes, setDialogNodeId, applyAgentOps } = params;
+    const openModelSettings = useOpenModelSettings();
+    const { projectId, effectiveConfig, isAiConfigReady, theme, nodesRef, connectionsRef, viewportRef, setNodes, setDialogNodeId, applyAgentOps } = params;
+    const prepareTarget = useGenerationTarget(projectId, nodesRef, connectionsRef);
+    const assertSession = useRef(captureSession()).current;
 
     // Host capabilities available to plugin nodes; methods receive nodeId and are not bound to a specific node.
     const pluginAi = useMemo<CanvasPluginAi>(() => {
-        // Convert plugin reference images (data URLs or URLs) into the ReferenceImage[] expected by the host generation API.
-        const toReferences = (refs?: string[]): ReferenceImage[] => (refs || []).filter(Boolean).map((src, index) => ({ id: `plugin-ref-${index}`, name: `ref-${index}.png`, type: "image/png", dataUrl: src }));
+        const toReferences = async (refs?: string[], signal?: AbortSignal): Promise<ReferenceImage[]> => {
+            assertSession();
+            return Promise.all((refs || []).filter(Boolean).map(async (src, index) => {
+                assertSession();
+                const asset = await uploadImage(src, { signal });
+                return { id: `plugin-ref-${index}`, name: `ref-${index}.png`, type: asset.mimeType, dataUrl: asset.url, storageKey: asset.storageKey };
+            }));
+        };
+        const target = (nodeId?: string, signal?: AbortSignal) => {
+            if (!nodeId) throw new Error("插件生成需要明确目标节点，请通过节点上下文调用");
+            return prepareTarget(nodeId, signal);
+        };
         // Open the configuration dialog and throw when AI is not configured, allowing the plugin to handle the error.
         const ensureReady = (config: AiConfig) => {
             if (!isAiConfigReady(config, config.model)) {
-                openConfigDialog(true);
+                openModelSettings();
                 throw new Error(t("canvas.plugins.aiConfigRequired"));
             }
         };
         return {
             generateImage: async (prompt, options) => {
-                const config = { ...buildGenerationConfig(effectiveConfig, undefined, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model } : {}), ...(options?.size ? { size: options.size } : {}) };
+                assertSession();
+                const node = nodesRef.current.find((node) => node.id === options?.nodeId);
+                if (!node) throw new Error("插件生成的目标节点不存在");
+                const config = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}), ...(options?.size ? { size: options.size } : {}), ...(options?.parameters ? { modelParameters: options.parameters } : {}) };
                 ensureReady(config);
-                const references = toReferences(options?.references);
-                const items = references.length ? await requestEdit(config, prompt, references, { signal: options?.signal }) : await requestGeneration(config, prompt, { signal: options?.signal });
-                const images = await Promise.all(items.map(async (item) => {
-                    try {
-                        return await imageToDataUrl({ dataUrl: item.dataUrl }, { signal: options?.signal });
-                    } catch (error) {
-                        if (options?.signal?.aborted) throw error;
-                        return item.dataUrl;
-                    }
-                }));
-                return { images };
+                const references = await toReferences(options?.references, options?.signal);
+                assertSession();
+                const bound = await target(options?.nodeId, options?.signal);
+                const items = references.length ? await requestEdit(config, prompt, references, { ...bound, signal: options?.signal }) : await requestGeneration(config, prompt, { ...bound, signal: options?.signal });
+                return { images: items.map((item) => item.dataUrl) };
             },
             generateVideo: async (prompt, options) => {
+                assertSession();
+                const node = nodesRef.current.find((node) => node.id === options?.nodeId);
+                if (!node) throw new Error("插件生成的目标节点不存在");
                 const config = {
-                    ...buildGenerationConfig(effectiveConfig, undefined, "video"),
-                    ...(options?.model ? { model: options.model } : {}),
+                    ...buildGenerationConfig(effectiveConfig, node, "video"),
+                    ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}),
                     ...(options?.size ? { size: options.size } : {}),
                     ...(options?.seconds ? { videoSeconds: options.seconds } : {}),
+                    ...(options?.parameters ? { modelParameters: options.parameters } : {}),
                 };
                 ensureReady(config);
-                const file = await storeGeneratedVideo(await requestVideoGeneration(config, prompt, toReferences(options?.references), { signal: options?.signal }));
+                const references = await toReferences(options?.references, options?.signal);
+                assertSession();
+                const bound = await target(options?.nodeId, options?.signal);
+                const file = await storeGeneratedVideo(await requestVideoGeneration(config, prompt, references, { ...bound, signal: options?.signal }));
                 return { url: file.url, mimeType: file.mimeType, width: file.width, height: file.height, durationMs: file.durationMs };
             },
             generateText: async (prompt, options) => {
-                const config = { ...buildGenerationConfig(effectiveConfig, undefined, "text"), ...(options?.model ? { model: options.model } : {}) };
+                assertSession();
+                const node = nodesRef.current.find((node) => node.id === options?.nodeId);
+                if (!node) throw new Error("插件生成的目标节点不存在");
+                const config = { ...buildGenerationConfig(effectiveConfig, node, "text"), ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}), ...(options?.parameters ? { modelParameters: options.parameters } : {}) };
                 ensureReady(config);
                 const messages: AiTextMessage[] = [...(options?.system ? [{ role: "system" as const, content: options.system }] : []), { role: "user" as const, content: prompt }];
-                const text = await requestImageQuestion(config, messages, (delta) => options?.onDelta?.(delta), { signal: options?.signal });
+                const bound = await target(options?.nodeId, options?.signal);
+                let previous = "";
+                const text = await requestImageQuestion(config, messages, (value) => { options?.onDelta?.(value.startsWith(previous) ? value.slice(previous.length) : value); previous = value; }, { ...bound, signal: options?.signal });
                 return { text };
             },
             // List configured models for a capability; labels use the model name without the channel prefix.
             listModels: (capability) => selectableModelsByCapability(effectiveConfig, capability as ModelCapability | undefined).map((value) => ({ value, label: decodeChannelModel(value)?.model || value })),
             defaultModel: (capability) => buildGenerationConfig(effectiveConfig, undefined, capability).model,
         };
-    }, [effectiveConfig, isAiConfigReady, openConfigDialog, t]);
+    }, [assertSession, effectiveConfig, isAiConfigReady, nodesRef, openModelSettings, prepareTarget, t]);
 
     const pluginHost = useMemo<CanvasPluginHost>(
         () => ({

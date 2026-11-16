@@ -410,14 +410,15 @@ export function toolAction(name: string) {
 }
 
 export function routeName(path: string) {
-    if (path === "/") return tr("routes.home");
+    if (path === "/") return tr("routes.canvas");
     if (path === "/canvas") return tr("routes.canvas");
     if (path.startsWith("/canvas/")) return tr("routes.canvasProject");
     if (path.startsWith("/image")) return tr("routes.image");
     if (path.startsWith("/video")) return tr("routes.video");
     if (path.startsWith("/prompts")) return tr("routes.prompts");
     if (path.startsWith("/assets")) return tr("routes.assets");
-    if (path.startsWith("/config")) return tr("routes.config");
+    if (path.startsWith("/settings")) return i18n.t("navigation.settings");
+    if (path.startsWith("/tasks")) return i18n.t("navigation.tasks");
     return path;
 }
 

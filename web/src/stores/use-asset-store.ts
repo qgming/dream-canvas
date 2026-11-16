@@ -1,114 +1,94 @@
 import { create } from "zustand";
-import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
-import { nanoid } from "nanoid";
-import { localForageStorage } from "@/lib/localforage-storage";
-import { cleanupUnusedImages, ensureImagePreview, previewUrlFor, resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import * as api from "@/services/api/assets";
+import { decideApproval, requestApproval } from "@/services/api/projects";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { previewUrlFor } from "@/services/image-storage";
+import { captureSession } from "@/services/api/client";
 
-export type AssetKind = "text" | "image" | "video";
+export type AssetKind = "text" | "image" | "video" | "audio";
+type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; tags: string[]; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; error?: string };
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
 export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
 export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
-export type Asset = TextAsset | ImageAsset | VideoAsset;
-
-type AssetBase<T extends AssetKind> = {
-    id: string;
-    kind: T;
-    title: string;
-    coverUrl: string;
-    tags: string[];
-    source?: string;
-    note?: string;
-    createdAt: string;
-    updatedAt: string;
-    metadata?: Record<string, unknown>;
-};
-
+export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
+export type Asset = TextAsset | ImageAsset | VideoAsset | AudioAsset;
+type AssetInput = Asset extends infer T ? T extends Asset ? Omit<T, "id" | "createdAt" | "updatedAt"> : never : never;
 type AssetStore = {
-    hydrated: boolean;
-    assets: Asset[];
-    addAsset: (asset: Omit<Asset, "id" | "createdAt" | "updatedAt">) => string;
-    updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => void;
-    removeAsset: (id: string) => void;
-    replaceAssets: (assets: Asset[]) => void;
+    hydrated: boolean; assets: Asset[]; error: string; deleting: api.ServerAsset[];
+    loadAssets: () => Promise<void>;
+    reset: () => void;
+    addAsset: (asset: AssetInput) => Promise<string>;
+    updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => Promise<void>;
+    removeAsset: (id: string) => Promise<void>;
     cleanupImages: (extra?: unknown) => void;
 };
 
-// 卡片用缩略图渲染，自定义封面（远程地址或单独上传的封面）保持原样。
-export function assetCoverUrl(asset: Asset) {
-    const own = asset.kind === "image" ? asset.data.dataUrl : "";
-    const cover = asset.coverUrl || own;
-    return asset.kind === "image" && cover === own ? previewUrlFor(asset.data.storageKey) || cover : cover;
+function fromServer(record: api.ServerAsset): Asset {
+    const meta = record.metadata || {};
+    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", tags: Array.isArray(meta.tags) ? meta.tags as string[] : [], source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: record.error };
+    if (record.kind === "text") return { ...base, kind: "text", data: { content: typeof meta.content === "string" ? meta.content : "" } };
+    const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType };
+    if (record.kind === "image") return { ...base, kind: "image", data: { ...data, dataUrl: api.assetUrl(record.id) } };
+    if (record.kind === "video") return { ...base, kind: "video", data: { ...data, url: api.assetUrl(record.id) } };
+    return { ...base, kind: "audio", data: { ...data, url: api.assetUrl(record.id) } };
 }
 
-const ASSET_STORE_KEY = "infinite-canvas:asset_store";
+export function assetCoverUrl(asset: Asset) {
+    const own = asset.kind === "image" ? asset.data.dataUrl : "";
+    return asset.kind === "image" && (!asset.coverUrl || asset.coverUrl === own) ? previewUrlFor(asset.data.storageKey) || own : asset.coverUrl;
+}
 
-const assetStorage: PersistStorage<AssetStore> = {
-    getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
-        if (!value) return null;
-        const parsed = JSON.parse(value) as StorageValue<AssetStore>;
-        parsed.state.assets = await Promise.all(
-            parsed.state.assets.map(async (asset) => {
-                if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
-                if (asset.kind !== "image") return asset;
-                if (asset.data.storageKey) {
-                    void ensureImagePreview(asset.data.storageKey);
-                    return {
-                        ...asset,
-                        coverUrl: asset.coverUrl.startsWith("blob:") ? await resolveImageUrl(asset.data.storageKey, asset.coverUrl) : asset.coverUrl,
-                        data: { ...asset.data, dataUrl: await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl) },
-                    };
-                }
-                if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
-                const image = await uploadImage(asset.data.dataUrl);
-                return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
-            }),
-        );
-        return parsed;
+let loadSequence = 0;
+export const useAssetStore = create<AssetStore>((set, get) => ({
+    hydrated: false, assets: [], error: "", deleting: [],
+    reset: () => { loadSequence++; set({ hydrated: false, assets: [], error: "", deleting: [] }); },
+    loadAssets: async () => {
+        const owner = useAuthStore.getState().user?.id;
+        if (!owner) return;
+        const sequence = ++loadSequence;
+        try {
+            const [records, deleting] = await Promise.all([api.listAssets(), api.listDeletingAssets()]);
+            if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) {
+                for (const previous of get().assets) if (!records.some((record) => record.id === previous.id)) window.dispatchEvent(new CustomEvent("asset-deleted", { detail: previous.id }));
+                set({ assets: records.map(fromServer), deleting, hydrated: true, error: "" });
+            }
+        } catch (error) { if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ hydrated: true, error: error instanceof Error ? error.message : "读取资产失败" }); }
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
-};
-
-export const useAssetStore = create<AssetStore>()(
-    persist(
-        (set, get) => ({
-            hydrated: false,
-            assets: [],
-            addAsset: (asset) => {
-                const now = new Date().toISOString();
-                const id = nanoid();
-                set((state) => ({ assets: [{ ...asset, id, createdAt: now, updatedAt: now } as Asset, ...state.assets] }));
-                return id;
-            },
-            updateAsset: (id, patch) =>
-                set((state) => ({
-                    assets: state.assets.map((asset) => (asset.id === id ? ({ ...asset, ...patch, updatedAt: new Date().toISOString() } as Asset) : asset)),
-                })),
-            removeAsset: (id) =>
-                set((state) => {
-                    const assets = state.assets.filter((asset) => asset.id !== id);
-                    get().cleanupImages({ assets });
-                    return { assets };
-                }),
-            replaceAssets: (assets) => set({ assets }),
-            cleanupImages: (extra) => {
-                window.setTimeout(async () => {
-                    const { useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
-                    await cleanupUnusedImages({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
-                    await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
-                }, 0);
-            },
-        }),
-        {
-            name: ASSET_STORE_KEY,
-            storage: assetStorage,
-            partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
-            onRehydrateStorage: () => () => {
-                useAssetStore.setState({ hydrated: true });
-            },
-        },
-    ),
-);
+    addAsset: async (input) => {
+        const assertSession = captureSession();
+        const metadata = { ...input.metadata, coverUrl: input.coverUrl, tags: input.tags, source: input.source, note: input.note, ...(input.kind === "text" ? input.data : {}) };
+        let id: string;
+        if (input.kind === "text") id = (await api.createTextAsset(input.title, metadata)).id;
+        else {
+            id = api.assetId((input.data as ImageAsset["data"]).storageKey) || "";
+            if (!id) throw new Error("媒体尚未保存到资产库");
+            await api.updateAsset(id, input.title, metadata);
+        }
+        assertSession();
+        await get().loadAssets();
+        assertSession();
+        return id;
+    },
+    updateAsset: async (id, patch) => {
+        const assertSession = captureSession();
+        const current = get().assets.find((asset) => asset.id === id);
+        if (!current) throw new Error("资产不存在");
+        const next = { ...current, ...patch } as Asset;
+        await api.updateAsset(id, next.title, { ...next.metadata, coverUrl: next.coverUrl, tags: next.tags, source: next.source, note: next.note, ...(next.kind === "text" ? next.data : {}) });
+        assertSession();
+        await get().loadAssets();
+    },
+    removeAsset: async (id) => {
+        const assertSession = captureSession();
+        const approval = await requestApproval("delete_asset", id);
+        assertSession();
+        const result = await decideApproval(approval.id, true);
+        assertSession();
+        await get().loadAssets();
+        assertSession();
+        window.dispatchEvent(new CustomEvent("asset-deleted", { detail: id }));
+        if ("deleteState" in result) throw new Error("资产已标记删除，文件清理待处理，请在删除记录中重试");
+    },
+    cleanupImages: () => {},
+}));

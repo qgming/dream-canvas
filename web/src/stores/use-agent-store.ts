@@ -39,10 +39,6 @@ export type AgentConversationState = {
 };
 export type AgentPanelTab = "chat" | "setup" | "history" | "skills" | "log";
 
-const CONNECT_TIMEOUT_MS = 6000;
-let agentSource: EventSource | null = null;
-let connectTimer: ReturnType<typeof setTimeout> | null = null;
-
 type AgentStore = {
     width: number;
     panelOpen: boolean;
@@ -101,8 +97,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     panelMounted: true,
     panelClosing: false,
     canvasContext: null,
-    url: typeof window === "undefined" ? "http://127.0.0.1:17371" : localStorage.getItem("canvas-agent-url") || "http://127.0.0.1:17371",
-    token: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-token") || "",
+    url: "/api",
+    token: "",
     connected: false,
     enabled: false,
     silentConnect: false,
@@ -120,12 +116,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     activeTurnId: "",
     workspacePath: "",
     loadingThreads: false,
-    activeTab: "setup",
+    activeTab: "chat",
     confirmTools: false,
-    permissionMode: typeof window === "undefined" ? "request" : (localStorage.getItem("canvas-agent-permission-mode") as AgentPermissionMode) || "request",
+    permissionMode: "request",
     models: [],
-    model: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-model") || "",
-    reasoningEffort: typeof window === "undefined" ? "" : (localStorage.getItem("canvas-agent-reasoning-effort") as AgentReasoningEffort) || "",
+    model: "",
+    reasoningEffort: "",
     activity: i18n.t("agent.state.ready"),
     conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} },
     bootstrapStatus: null,
@@ -144,30 +140,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     },
     togglePanel: () => (get().panelOpen ? get().closePanel() : get().openPanel()),
     setCanvasContext: (canvasContext) => set({ canvasContext }),
-    connectAgent: (options) => {
-        const silent = options?.silent ?? false;
-        const endpoint = get().url.trim().replace(/\/$/, "");
-        const token = get().token.trim();
-        if (!endpoint || !token) return set({ connectError: silent ? "" : i18n.t("agent.state.connectionRequired") });
-        try {
-            const parsed = new URL(endpoint);
-            if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
-        } catch {
-            return set({ connectError: silent ? "" : i18n.t("agent.state.invalidUrl") });
-        }
-        localStorage.setItem("canvas-agent-url", endpoint);
-        localStorage.setItem("canvas-agent-token", token);
-        // Only set enabled here; LocalAgentPanel's effect owns SSE initialization.
-        set({ url: endpoint, token, enabled: true, silentConnect: silent, fragmentBootstrap: false, activity: i18n.t("agent.status.connecting"), connectError: "" });
-    },
-    disconnectAgent: (patch = {}) => {
-        agentSource?.close();
-        agentSource = null;
-        if (connectTimer) clearTimeout(connectTimer);
-        connectTimer = null;
-        set({ enabled: false, connected: false, silentConnect: false, fragmentBootstrap: false, activity: i18n.t("agent.state.offline"), conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} }, bootstrapStatus: null, mcpStartupStatuses: {}, ...patch });
-    },
+    connectAgent: () => set({ connected: true, enabled: true, connectError: "" }),
+    disconnectAgent: (patch = {}) => set({ connected: false, enabled: false, sending: false, waiting: false, model: "", tokenUsage: null, eventLogs: [], canvasContext: null, activity: "等待业务服务", ...patch }),
     addMessage: (item) => set((state) => ({ messages: [...state.messages, item] })),
-    addEventLog: (item) => set((state) => ({ eventLogs: [...state.eventLogs.slice(-160), item] })),
+    addEventLog: (item) => set((state) => ({ eventLogs: [...state.eventLogs, item] })),
     clearEventLogs: () => set({ eventLogs: [] }),
 }));

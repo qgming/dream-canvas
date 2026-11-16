@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { captureSession } from "@/services/api/client";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -170,8 +171,14 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
 }
 
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
-    const { imageToDataUrl } = await import("@/services/image-storage");
-    return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))) };
+    const assertSession = captureSession();
+    const { uploadImage } = await import("@/services/image-storage");
+    assertSession();
+    return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => {
+        assertSession();
+        const stored = await uploadImage(image.storageKey || image.dataUrl);
+        return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, type: stored.mimeType };
+    })) };
 }
 
 function readNodeTextInput(node: CanvasNodeData) {

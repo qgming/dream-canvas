@@ -1,16 +1,18 @@
 import { Copy, Download, PencilLine, Search, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
-import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
-import { getMediaBlob } from "@/services/file-storage";
+import { formatBytes } from "@/lib/image-utils";
+import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
+import { retryAssetCleanup } from "@/services/api/assets";
+import { captureSession } from "@/services/api/client";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -24,7 +26,7 @@ type AssetFormValues = {
 
 type ImageDraft = ImageAsset["data"] | null;
 
-const kindOptions = ["all", "text", "image", "video"] as const;
+const kindOptions = ["all", "text", "image", "video", "audio"] as const;
 
 export default function AssetsPage() {
     const { message } = App.useApp();
@@ -35,6 +37,8 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
+    const assetError = useAssetStore((state) => state.error);
+    const deleting = useAssetStore((state) => state.deleting);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
@@ -48,11 +52,14 @@ export default function AssetsPage() {
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
+    const [mediaDraft, setMediaDraft] = useState<UploadedFile | null>(null);
+    const [saving, setSaving] = useState(false);
+    const editorRevision = useRef(0);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
-    const validAssets = useMemo(() => assets.filter((asset) => asset.kind === "text" || asset.kind === "image" || asset.kind === "video"), [assets]);
+    const validAssets = assets;
 
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
@@ -74,17 +81,21 @@ export default function AssetsPage() {
     }, [filteredAssets.length, pageSize]);
 
     const openCreate = () => {
+        editorRevision.current++;
         setEditingAsset(null);
         setImageDraft(null);
+        setMediaDraft(null);
         setFormKind("text");
         form.setFieldsValue({ kind: "text", title: "", coverUrl: "", tags: [], source: t("assets.manual"), note: "", content: "" });
         setIsAssetOpen(true);
     };
 
     const openEdit = (asset: Asset) => {
+        editorRevision.current++;
         setEditingAsset(asset);
         setFormKind(asset.kind);
         setImageDraft(asset.kind === "image" ? asset.data : null);
+        setMediaDraft(null);
         form.setFieldsValue({
             kind: asset.kind,
             title: asset.title,
@@ -97,8 +108,11 @@ export default function AssetsPage() {
         setIsAssetOpen(true);
     };
 
-    const saveAsset = async () => {
+    const closeEditor = () => { editorRevision.current++; setIsAssetOpen(false); };
+    const saveAsset = async () => { if (saving) return; const assertSession = captureSession(); const revision = editorRevision.current; setSaving(true); try {
         const values = await form.validateFields();
+        assertSession();
+        if (revision !== editorRevision.current) return;
         const base = {
             title: values.title.trim(),
             coverUrl: values.coverUrl?.trim() || (values.kind === "image" && imageDraft ? imageDraft.dataUrl : ""),
@@ -110,29 +124,57 @@ export default function AssetsPage() {
 
         if (values.kind === "text") {
             const asset = { ...base, kind: "text" as const, data: { content: (values.content || "").trim() } };
-            editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
-        } else {
+            await (editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset));
+        } else if (editingAsset) {
+            await updateAsset(editingAsset.id, base);
+        } else if (values.kind === "image") {
             if (!imageDraft) {
                 message.error(t("assets.selectImage"));
                 return;
             }
             const asset = { ...base, kind: "image" as const, data: imageDraft };
-            editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
+            await addAsset(asset);
+        } else {
+            if (!mediaDraft) { message.error("请选择视频或音频原件"); return; }
+            const data = { ...mediaDraft, width: mediaDraft.width || 0, height: mediaDraft.height || 0 };
+            if (values.kind === "video") await addAsset({ ...base, kind: "video", data });
+            else await addAsset({ ...base, kind: "audio", data });
         }
-
+        assertSession();
+        if (revision !== editorRevision.current) return;
         message.success(editingAsset ? t("assets.updated") : t("assets.saved"));
-        setIsAssetOpen(false);
+        closeEditor();
+        } catch (error) { if (error instanceof Error) message.error(error.message); }
+        finally { setSaving(false); }
     };
 
     const readCoverFile = async (file?: File) => {
         if (!file) return;
-        const dataUrl = await readFileAsDataUrl(file);
-        form.setFieldValue("coverUrl", dataUrl);
+        const assertSession = captureSession();
+        const revision = editorRevision.current;
+        const image = await uploadImage(file);
+        assertSession();
+        if (revision !== editorRevision.current) return;
+        form.setFieldValue("coverUrl", image.url);
     };
 
     const readImageFile = async (file?: File) => {
-        if (!file || !file.type.startsWith("image/")) return;
+        if (!file) return;
+        const assertSession = captureSession();
+        const revision = editorRevision.current;
+        const kind = formKind;
+        if (kind === "video" || kind === "audio") {
+            const media = await uploadMediaFile(file, kind);
+            assertSession();
+            if (revision !== editorRevision.current || form.getFieldValue("kind") !== kind) return;
+            setMediaDraft(media);
+            if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
+            return;
+        }
+        if (!file.type.startsWith("image/")) return;
         const image = await uploadImage(file);
+        assertSession();
+        if (revision !== editorRevision.current || form.getFieldValue("kind") !== kind) return;
         const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
         setImageDraft(draft);
         if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
@@ -145,14 +187,14 @@ export default function AssetsPage() {
     };
 
     const downloadImage = async (asset: Asset) => {
-        if (asset.kind !== "image" && asset.kind !== "video") return;
+        if (asset.kind === "text") return;
         try {
             const blob = await readAssetMediaBlob(asset);
             if (!blob) {
                 message.error(t("assets.downloadFailed"));
                 return;
             }
-            const ext = asset.data.mimeType?.split("/")[1]?.split("+")[0] || (asset.kind === "video" ? "mp4" : "png");
+            const ext = asset.data.mimeType?.split("/")[1]?.split("+")[0] || (asset.kind === "audio" ? "mp3" : asset.kind === "video" ? "mp4" : "png");
             saveAs(blob, `${asset.title || "asset"}.${ext}`);
         } catch {
             message.error(t("assets.downloadFailed"));
@@ -164,20 +206,23 @@ export default function AssetsPage() {
             message.warning(t("assets.noneToExport"));
             return;
         }
-        await exportAssets(validAssets, t("assets.packageName"));
+        try { await exportAssets(validAssets, t("assets.packageName")); }
+        catch (error) { message.error(error instanceof Error ? error.message : "导出资产失败"); }
     };
 
     const importAssetZip = async (file?: File) => {
         if (!file) return;
+        const assertSession = captureSession();
         try {
             const importedAssets = await readAssetPackage(file);
-            importedAssets.forEach((asset) => {
+            for (const asset of importedAssets) {
+                assertSession();
                 const payload = { ...asset } as Record<string, unknown>;
                 delete payload.id;
                 delete payload.createdAt;
                 delete payload.updatedAt;
-                addAsset(payload as Parameters<typeof addAsset>[0]);
-            });
+                await addAsset(payload as Parameters<typeof addAsset>[0]);
+            }
             message.success(t("assets.imported", { count: importedAssets.length }));
         } catch {
             message.error(t("assets.importFailed"));
@@ -186,16 +231,17 @@ export default function AssetsPage() {
         }
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deletingAsset) return;
-        removeAsset(deletingAsset.id);
-        message.success(t("assets.deleted"));
-        setDeletingAsset(null);
+        try { await removeAsset(deletingAsset.id); message.success(t("assets.deleted")); setDeletingAsset(null); }
+        catch (error) { message.error(error instanceof Error ? error.message : "删除失败"); }
     };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-stone-900 dark:text-stone-100">
             <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
+                {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>重试读取</Button>} /> : null}
+                {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={`${asset.title}：删除待处理`} description={asset.error || "原件尚未清理完成"} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => message.error(error instanceof Error ? error.message : "清理失败")); }}>重试清理</Button>} />)}
                 <div className="pb-8">
                     <div className="mx-auto max-w-5xl text-center">
                         <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">{t("assets.title")}</h1>
@@ -293,16 +339,19 @@ export default function AssetsPage() {
                 </div>
             </main>
 
-            <Modal title={editingAsset ? t("assets.edit") : t("assets.add")} open={isAssetOpen} width={980} onCancel={() => setIsAssetOpen(false)} onOk={() => void saveAsset()} okText={t("common.save")} cancelText={t("common.cancel")} destroyOnHidden>
+            <Modal title={editingAsset ? t("assets.edit") : t("assets.add")} open={isAssetOpen} width={980} onCancel={closeEditor} onOk={() => void saveAsset()} confirmLoading={saving} okText={t("common.save")} cancelText={t("common.cancel")} destroyOnHidden>
                 <div className="grid gap-6 pt-1 lg:grid-cols-[minmax(0,1fr)_320px]">
                     <Form form={form} layout="vertical" requiredMark={false} initialValues={{ kind: "text", tags: [] }}>
                         <Form.Item name="kind" label={t("assets.type")}>
                             <Select
+                                disabled={Boolean(editingAsset)}
                                 options={[
                                     { label: t("assets.kinds.text"), value: "text" },
                                     { label: t("assets.kinds.image"), value: "image" },
+                                    { label: t("assets.kinds.video"), value: "video" },
+                                    { label: t("assets.kinds.audio"), value: "audio" },
                                 ]}
-                                onChange={(value) => setFormKind(value)}
+                                onChange={(value) => { editorRevision.current++; setFormKind(value); setImageDraft(null); setMediaDraft(null); }}
                             />
                         </Form.Item>
                         <Form.Item name="title" label={t("assets.fields.title")} rules={[{ required: true, message: t("assets.fields.titleRequired") }]}>
@@ -332,20 +381,21 @@ export default function AssetsPage() {
                                 <Input.TextArea rows={8} placeholder={t("assets.fields.textPlaceholder")} />
                             </Form.Item>
                         ) : (
-                            <Form.Item label={t("assets.fields.imageContent")} required>
+                            <Form.Item label={`${t(`assets.kinds.${formKind}`)}原件`} required>
                                 <div className="rounded-lg border border-dashed border-stone-300 p-4 dark:border-stone-700">
-                                    <Button icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
-                                        {t("assets.selectImageFile")}
+                                    <Button disabled={Boolean(editingAsset)} icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
+                                        {formKind === "image" ? t("assets.selectImageFile") : `选择${t(`assets.kinds.${formKind}`)}文件`}
                                     </Button>
-                                    {imageDraft ? (
+                                    {editingAsset ? <p className="mt-2 text-xs text-muted-foreground">原件保持不变；替换文件请新增资产，避免改变其他项目引用的内容。</p> : null}
+                                    {formKind === "image" && imageDraft ? (
                                         <Typography.Text type="secondary" className="ml-3 text-xs">
                                             {imageDraft.width}x{imageDraft.height} · {formatBytes(imageDraft.bytes)}
                                         </Typography.Text>
-                                    ) : (
+                                    ) : mediaDraft ? <Typography.Text type="secondary" className="ml-3 text-xs">{formatBytes(mediaDraft.bytes)} · {mediaDraft.mimeType}</Typography.Text> : !editingAsset ? (
                                         <Typography.Text type="secondary" className="ml-3 text-xs">
-                                            {t("assets.noImageSelected")}
+                                            尚未选择文件
                                         </Typography.Text>
-                                    )}
+                                    ) : null}
                                 </div>
                             </Form.Item>
                         )}
@@ -383,28 +433,28 @@ export default function AssetsPage() {
                     accept="image/*"
                     className="hidden"
                     onChange={(event) => {
-                        void readCoverFile(event.target.files?.[0]);
+                        void readCoverFile(event.target.files?.[0]).catch((error: unknown) => message.error(error instanceof Error ? error.message : "上传失败"));
                         event.target.value = "";
                     }}
                 />
                 <input
                     ref={imageInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={formKind === "video" ? "video/*" : formKind === "audio" ? "audio/*" : "image/*"}
                     className="hidden"
                     onChange={(event) => {
-                        void readImageFile(event.target.files?.[0]);
+                        void readImageFile(event.target.files?.[0]).catch((error: unknown) => message.error(error instanceof Error ? error.message : "上传失败"));
                         event.target.value = "";
                     }}
                 />
             </Modal>
 
-            <AssetDrawer asset={previewAsset} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
+            <AssetDrawer asset={previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || null : null} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
 
             <Modal title={t("assets.deleteTitle")} open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
-                {t("assets.deleteConfirm", { name: deletingAsset?.title })}
+                <p>全局删除「{deletingAsset?.title}」及其文件副本。所有项目中的媒体将显示为「资产已删除」，节点、提示词和参数仍会保留。</p>
             </Modal>
         </div>
     );
@@ -423,7 +473,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
                     {cover ? (
-                        <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+                        <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
                     ) : (
                         <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
                     )}
@@ -458,17 +508,15 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                 <Button size="small" onClick={onOpen}>
                     {t("common.view")}
                 </Button>
-                {asset.kind !== "video" ? (
-                    <Button size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
-                        {t("common.edit")}
-                    </Button>
-                ) : null}
+                <Button size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
+                    {t("common.edit")}
+                </Button>
                 {asset.kind === "text" ? (
                     <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void onCopy(asset)}>
                         {t("common.copy")}
                     </Button>
                 ) : null}
-                {asset.kind === "image" || asset.kind === "video" ? (
+                {asset.kind !== "text" ? (
                     <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
                         {t("common.download")}
                     </Button>
@@ -505,14 +553,17 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                             ))}
                         </Space>
                     </div>
+                    <p className="text-sm text-muted-foreground">文件保存：{asset.saveState === "saved" ? "已保存" : asset.saveState === "saving" ? "保存中" : "保存失败"} · 云同步：{asset.syncState === "synced" ? "已同步" : asset.syncState === "syncing" ? "同步中" : asset.syncState === "failed" ? "同步失败" : "仅本地"}{asset.error ? ` · ${asset.error}` : ""}</p>
                     <div className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
                         <Typography.Text type="secondary" className="block text-xs">
                             {t("assets.fields.textContent")}
                         </Typography.Text>
                         {asset.kind === "text" ? (
                             <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
+                        ) : asset.kind === "audio" ? (
+                            <audio src={asset.data.url} controls preload="none" className="mt-2 w-full" />
                         ) : asset.kind === "video" ? (
-                            <video src={asset.data.url} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
+                            <video src={asset.data.url} controls preload="none" className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : (
                             <Typography.Text className="mt-2 block">
                                 {asset.data.width}x{asset.data.height} · {formatBytes(asset.data.bytes)} · {asset.data.mimeType}
@@ -531,9 +582,9 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                                 {t("assets.copyText")}
                             </Button>
                         ) : null}
-                        {asset.kind === "image" || asset.kind === "video" ? (
+                        {asset.kind !== "text" ? (
                             <Button type="primary" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
-                                {asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
+                                {asset.kind === "audio" ? "下载音频" : asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
                             </Button>
                         ) : null}
                     </Space>
@@ -543,13 +594,13 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
     );
 }
 
-async function readAssetMediaBlob(asset: Extract<Asset, { kind: "image" | "video" }>) {
+async function readAssetMediaBlob(asset: Exclude<Asset, { kind: "text" }>) {
     const storageKey = asset.data.storageKey;
     if (storageKey) {
         const stored = asset.kind === "image" ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
         if (stored) return stored;
     }
-    const url = asset.kind === "video" ? asset.data.url : asset.data.dataUrl || asset.coverUrl;
+    const url = asset.kind === "image" ? asset.data.dataUrl || asset.coverUrl : asset.data.url;
     if (!url) return null;
     const response = await fetch(url);
     return response.ok ? response.blob() : null;
@@ -557,6 +608,7 @@ async function readAssetMediaBlob(asset: Extract<Asset, { kind: "image" | "video
 
 function assetSummary(asset: Asset) {
     if (asset.kind === "text") return asset.data.content;
+    if (asset.kind === "audio") return `${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
     return `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
 }
 

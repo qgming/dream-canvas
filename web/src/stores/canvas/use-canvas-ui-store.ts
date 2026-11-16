@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 type CanvasUiStore = {
+    activeProjectId: string | null;
     editingProjectId: string | null;
     editingProjectTitle: string;
     selectedProjectIds: string[];
@@ -14,6 +15,7 @@ type CanvasUiStore = {
 };
 
 export const useCanvasUiStore = create<CanvasUiStore>((set) => ({
+    activeProjectId: null,
     editingProjectId: null,
     editingProjectTitle: "",
     selectedProjectIds: [],

@@ -22,7 +22,12 @@ export function buildNodeContext(host: CanvasPluginHost, node: CanvasNodeData, t
         applyOps: (ops) => host.applyOps(ops),
         emit: (event, payload) => emitCanvasEvent(event, payload),
         on: (event, handler) => onCanvasEvent(event, handler),
-        ai: host.ai,
+        ai: {
+            ...host.ai,
+            generateImage: (prompt, options) => host.ai.generateImage(prompt, { ...options, nodeId: node.id }),
+            generateVideo: (prompt, options) => host.ai.generateVideo(prompt, { ...options, nodeId: node.id }),
+            generateText: (prompt, options) => host.ai.generateText(prompt, { ...options, nodeId: node.id }),
+        },
         openPanel: () => host.openPanel(node.id),
         closePanel: () => host.closePanel(),
         storage,

@@ -1,12 +1,13 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
-import localforage from "localforage";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
+import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { ModelParameters } from "@/components/model-parameters";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -21,6 +22,8 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
+import { readWorkbenchRecords, saveWorkbenchRecord, deleteWorkbenchRecord } from "@/services/api/workbench-records";
+import { captureSession } from "@/services/api/client";
 
 type GeneratedImage = {
     id: string;
@@ -41,6 +44,7 @@ type GenerationResult = {
 };
 
 type GenerationLog = {
+    recordVersion?: number;
     id: string;
     createdAt: number;
     title: string;
@@ -59,13 +63,11 @@ type GenerationLog = {
     images: GeneratedImage[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count" | "modelParameters">;
 
-type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
 
-const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 
 export default function ImagePage() {
     const { message } = App.useApp();
@@ -77,9 +79,10 @@ export default function ImagePage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const openModelSettings = useOpenModelSettings();
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [parameters, setParameters] = useState<Record<string, Record<string, unknown>>>({});
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -100,6 +103,7 @@ export default function ImagePage() {
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
+    const assertSession = useRef(captureSession()).current;
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -116,6 +120,7 @@ export default function ImagePage() {
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
+        assertSession();
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
@@ -128,6 +133,7 @@ export default function ImagePage() {
 
     const addReferencesFromClipboard = async () => {
         try {
+            assertSession();
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
             if (!blobs.length) {
@@ -136,6 +142,7 @@ export default function ImagePage() {
             }
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
+                    assertSession();
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
@@ -158,7 +165,7 @@ export default function ImagePage() {
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
             message.warning(t("workbench.configFirst"));
-            openConfigDialog(true);
+            openModelSettings();
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.configIncomplete") });
             return;
         }
@@ -180,6 +187,7 @@ export default function ImagePage() {
         const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
 
         const result = await Promise.allSettled(tasks);
+        try { assertSession(); } catch { return; }
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
@@ -241,7 +249,7 @@ export default function ImagePage() {
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
-        addAsset({
+        await addAsset({
             kind: "image",
             title: t("imageWorkbench.resultTitle", { count: index + 1 }),
             coverUrl: stored.url,
@@ -277,7 +285,7 @@ export default function ImagePage() {
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("image", id))]).then(refreshLogs).catch((error: unknown) => message.error(error instanceof Error ? error.message : "记录删除失败"));
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -287,16 +295,18 @@ export default function ImagePage() {
     };
 
     const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+        assertSession();
+        void saveWorkbenchRecord("image", serializeLog(log)).then(refreshLogs).catch((error: unknown) => message.error(error instanceof Error ? error.message : "记录保存失败"));
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => { try { setLogs(await readStoredLogs()); } catch (error) { message.error(error instanceof Error ? error.message : "读取记录失败"); } };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
+        setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
@@ -312,15 +322,16 @@ export default function ImagePage() {
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
             message.warning(t("workbench.configFirst"));
-            openConfigDialog(true);
+            openModelSettings();
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, count: "1", modelParameters: parameters[model] }, references: [...references] };
     };
 
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
+            assertSession();
             const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
@@ -479,8 +490,9 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                             </div>
+                            <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
 
                         <div className="mt-auto pt-6">
@@ -542,7 +554,7 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -554,7 +566,8 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
+    const openModelSettings = useOpenModelSettings();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -562,7 +575,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
@@ -770,17 +783,8 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
 }
 
 async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            values.push(value);
-        });
-        const logs = await Promise.all(values.map(normalizeLog));
-        return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
+    const records = await readWorkbenchRecords<GenerationLog>("image");
+    return (await Promise.all(records.map(normalizeLog))).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
@@ -798,6 +802,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     );
     const config = normalizeLogConfig(log);
     return {
+        recordVersion: log.recordVersion,
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || i18n.t("workbench.untitled"),
@@ -828,6 +833,7 @@ function serializeLog(log: GenerationLog): GenerationLog {
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     return {
         model: log.config?.model || log.model || "",
+        modelParameters: log.config?.modelParameters,
         imageModel: log.config?.imageModel || log.model || "",
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
@@ -876,6 +882,7 @@ function buildLog({
 }): GenerationLog {
     const logConfig = {
         model: config.model,
+        modelParameters: config.modelParameters,
         imageModel: config.imageModel,
         quality: config.quality,
         size: config.size,

@@ -5,7 +5,7 @@ import { Check, ChevronDown, CircleAlert, FilePenLine, LoaderCircle, LockKeyhole
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { createCodexSkill, createCodexSkillDraft, deleteCodexSkill, fetchCodexSkill, postState, setCodexSkillEnabled, updateCodexSkill, type AgentSkillDetail, type AgentSkillDraft, type AgentSkillInterface, type AgentSkillScope, type AgentSkillSummary } from "@/services/api/canvas-agent";
+import { createCodexSkill, createCodexSkillDraft, deleteCodexSkill, fetchCodexSkill, setCodexSkillEnabled, updateCodexSkill, type AgentSkillDetail, type AgentSkillDraft, type AgentSkillInterface, type AgentSkillScope, type AgentSkillSummary } from "@/services/api/canvas-agent";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentChatItem } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -97,15 +97,12 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         const connectionRevision = useAgentSkillStore.getState().connectionRevision;
         setGeneratingSource(source);
         try {
-            if (source === "canvas") {
-                const synced = await postState(endpoint, token, clientId, agent.canvasContext?.snapshot || null);
-                if (!synced) throw new Error(t("agent.skillManager.syncFailed"));
-            }
             if (!connectionIsCurrent(connectionRevision)) return;
             const response = await createCodexSkillDraft(endpoint, token, {
                 source,
                 threadId: agent.activeThreadId,
                 clientId,
+                projectId: agent.canvasContext?.snapshot.projectId,
                 ...(agent.model ? { model: agent.model } : {}),
                 ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}),
             });
@@ -136,6 +133,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     };
     const saveSkill = async () => {
         if (!editor) return;
+        const connectionRevision = useAgentSkillStore.getState().connectionRevision;
         let values: SkillFormValues;
         try {
             values = await form.validateFields();
@@ -145,6 +143,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             if (firstError) requestAnimationFrame(() => form.scrollToField(firstError.name, { block: "center" }));
             return;
         }
+        if (!connectionIsCurrent(connectionRevision)) return;
         const name = editor.mode === "edit" ? editor.detail.name : values.name.trim();
         const skillInterface = compactInterface(values);
         if (skillInterface?.defaultPrompt && !mentionsSkill(skillInterface.defaultPrompt, name)) {
@@ -153,8 +152,6 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             requestAnimationFrame(() => form.scrollToField("defaultPrompt", { block: "center" }));
             return;
         }
-        const connectionRevision = useAgentSkillStore.getState().connectionRevision;
-        if (!connectionIsCurrent(connectionRevision)) return;
         setSaving(true);
         try {
             const input = { description: values.description.trim(), instructions: values.instructions.trim(), interface: skillInterface || null };
@@ -273,8 +270,8 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: theme.node.stroke }}>
                 <div className="flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-sm font-semibold">{t("agent.skillManager.localSkills")}</div>
-                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t("agent.skillManager.localDescription")}</div>
+                        <div className="text-sm font-semibold">个人 Skill</div>
+                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>Skill 保存于服务端，供此账号的助手使用。</div>
                     </div>
                     <div className="flex items-center gap-1">
                         <Tooltip title={t("agent.skillManager.reload")}>
@@ -379,7 +376,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 }}
                 onOk={() => void saveSkill()}
             >
-                <div className="mb-5 text-xs" style={{ color: theme.node.muted }}>{t("agent.skillManager.saveLocation")} · <span className="font-mono">.agents/skills</span></div>
+                <div className="mb-5 text-xs" style={{ color: theme.node.muted }}>保存于此账号的服务端 Skill 库</div>
                 <Form key={editor?.mode === "edit" ? editor.detail.revision : `create:${editor?.values?.name || "blank"}`} form={form} initialValues={editorValues} layout="vertical" requiredMark="optional" preserve={false}>
                     <div className="mb-3 text-xs font-medium" style={{ color: theme.node.muted }}>{t("agent.skillManager.basicInfo")}</div>
                     <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">

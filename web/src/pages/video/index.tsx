@@ -1,13 +1,14 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
-import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
+import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
+import { ModelParameters } from "@/components/model-parameters";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoModeLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -15,13 +16,15 @@ import { clampVideoSeconds } from "@/lib/media-size";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { createVideoGenerationTask, waitForVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { captureSession } from "@/services/api/client";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
+import { readWorkbenchRecords, saveWorkbenchRecord, deleteWorkbenchRecord } from "@/services/api/workbench-records";
 
 type GeneratedVideo = {
     id: string;
@@ -42,6 +45,7 @@ type GenerationResult = {
 };
 
 type GenerationLog = {
+    recordVersion?: number;
     id: string;
     createdAt: number;
     title: string;
@@ -60,12 +64,10 @@ type GenerationLog = {
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "modelParameters">;
 
-type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
 
-const LOG_STORE_KEY = "infinite-canvas:video_generation_logs";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 
 export default function VideoPage() {
     const { message } = App.useApp();
@@ -78,9 +80,10 @@ export default function VideoPage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const openModelSettings = useOpenModelSettings();
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [parameters, setParameters] = useState<Record<string, Record<string, unknown>>>({});
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -101,6 +104,10 @@ export default function VideoPage() {
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
+    const assertSession = useRef(captureSession()).current;
+    const watching = useRef(new Map<string, AbortController>());
+
+    useEffect(() => () => { watching.current.forEach((controller) => controller.abort()); }, []);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -112,10 +119,11 @@ export default function VideoPage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs();
+        void refreshLogs().catch((error: unknown) => message.error(error instanceof Error ? error.message : "读取记录失败"));
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
+        assertSession();
         const selectedFiles = Array.from(files || []);
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/"));
         if (unsupported.length) message.warning(t("videoWorkbench.unsupportedFiles"));
@@ -150,6 +158,7 @@ export default function VideoPage() {
 
     const addReferencesFromClipboard = async () => {
         try {
+            assertSession();
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
             if (!blobs.length) {
@@ -158,6 +167,7 @@ export default function VideoPage() {
             }
             const nextReferences = await Promise.all(
                 blobs.slice(0, 7 - references.length).map(async (blob, index) => {
+                    assertSession();
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
@@ -183,12 +193,20 @@ export default function VideoPage() {
         setResults([{ id: nanoid(), status: "pending" }]);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
+        let submitted: GenerationLog | undefined;
         try {
+            assertSession();
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending", task });
-            await saveLog(log, false);
-            void pollGenerationLog(log, snapshot.config, agentTaskId);
+            submitted = log;
+            const saved = await saveLog(log, false);
+            void pollGenerationLog(saved, snapshot.config, agentTaskId);
         } catch (error) {
+            if (submitted) {
+                message.error("任务已提交，工作台记录保存失败，请通过任务列表核对；本次没有重复提交");
+                setRunning(false);
+                return;
+            }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
@@ -228,10 +246,10 @@ export default function VideoPage() {
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
             message.warning(t("workbench.configFirst"));
-            openConfigDialog(true);
+            openModelSettings();
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references] };
+        return { text, config: buildVideoConfig({ ...effectiveConfig, modelParameters: parameters[model] }, model), references: [...references] };
     };
 
     const retryResult = () => {
@@ -242,8 +260,8 @@ export default function VideoPage() {
         saveAs(video.url, "video.mp4");
     };
 
-    const saveResultToAssets = (video: GeneratedVideo) => {
-        addAsset({
+    const saveResultToAssets = async (video: GeneratedVideo) => {
+        await addAsset({
             kind: "video",
             title: t("videoWorkbench.resultTitle"),
             coverUrl: "",
@@ -280,7 +298,7 @@ export default function VideoPage() {
             .filter((log) => selectedLogIds.includes(log.id))
             .map((log) => log.video?.storageKey)
             .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(() => refreshLogs());
+        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("video", id))]).then(() => refreshLogs()).catch((error: unknown) => message.error(error instanceof Error ? error.message : "删除记录失败"));
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -290,12 +308,15 @@ export default function VideoPage() {
     };
 
     const saveLog = async (log: GenerationLog, resumePending = true) => {
-        await logStore.setItem(log.id, serializeLog(log));
+        assertSession();
+        const saved = await saveWorkbenchRecord("video", serializeLog(log));
         await refreshLogs(resumePending);
+        return { ...log, recordVersion: saved.recordVersion };
     };
 
     const refreshLogs = async (resumePending = true) => {
         const nextLogs = await readStoredLogs();
+        assertSession();
         setLogs(nextLogs);
         if (resumePending) resumePendingLogs(nextLogs);
         return nextLogs;
@@ -310,43 +331,33 @@ export default function VideoPage() {
     const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig, agentTaskId?: string) => {
         if (!log.task || activeLogIdsRef.current.has(log.id)) return;
         activeLogIdsRef.current.add(log.id);
+        const controller = new AbortController();
+        watching.current.set(log.id, controller);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
-                if (state.status === "completed") {
-                    const stored = await storeGeneratedVideo(state.result);
-                    const nextVideo: GeneratedVideo = {
-                        id: nanoid(),
-                        url: stored.url,
-                        storageKey: stored.storageKey,
-                        durationMs: Date.now() - log.createdAt,
-                        width: stored.width || 1280,
-                        height: stored.height || 720,
-                        bytes: stored.bytes,
-                        mimeType: stored.mimeType,
-                    };
-                    setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
-                    await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
-                    message.success(t("videoWorkbench.generated"));
-                    return;
-                }
-                if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
-                await delay(2500);
-            }
+            const stored = await storeGeneratedVideo(await waitForVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal }));
+            const nextVideo: GeneratedVideo = { id: nanoid(), url: stored.url, storageKey: stored.storageKey, durationMs: Date.now() - log.createdAt, width: stored.width || 1280, height: stored.height || 720, bytes: stored.bytes, mimeType: stored.mimeType };
+            setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
+            await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+            message.success(t("videoWorkbench.generated"));
         } catch (error) {
+            if (controller.signal.aborted) return;
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
+            if (!isVideoTaskFailed(error)) {
+                message.warning(`${errorMessage}；记录仍保留待查询状态，请重新读取任务状态`);
+                return;
+            }
             setResults([{ id: log.id, status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
             await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
+            watching.current.delete(log.id);
             if (!activeLogIdsRef.current.size) {
                 setRunning(false);
                 setStartedAt(0);
@@ -358,6 +369,7 @@ export default function VideoPage() {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
+        setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
         setReferences(log.references || []);
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
         if (log.config.size) updateConfig("size", log.config.size);
@@ -452,8 +464,9 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                             </div>
+                            <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
 
                         <div className="mt-auto pt-6">
@@ -497,7 +510,7 @@ export default function VideoPage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -509,7 +522,8 @@ export default function VideoPage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
+    const openModelSettings = useOpenModelSettings();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -517,7 +531,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
                 <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
@@ -530,7 +544,7 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     const { t } = useTranslation();
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <video src={video.url} controls className="aspect-video w-full bg-black object-contain" />
+            <video src={video.url} controls preload="none" className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
@@ -659,16 +673,8 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
 }
 
 async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const logs: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            logs.push(value);
-        });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
+    const records = await readWorkbenchRecords<GenerationLog>("video");
+    return (await Promise.all(records.map(normalizeLog))).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
@@ -681,6 +687,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     );
     const config = normalizeLogConfig(log);
     return {
+        recordVersion: log.recordVersion,
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || i18n.t("workbench.untitled"),
@@ -729,6 +736,7 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     return {
         model: log.config?.model || log.model || "",
+        modelParameters: log.config?.modelParameters,
         videoModel: log.config?.videoModel || log.model || "",
         size: log.config?.size || log.size || "",
         vquality: normalizeResolution(log.config?.vquality || log.resolution || ""),
@@ -742,6 +750,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
 function buildLog({ prompt, model, config, references, durationMs, status, task, video, error }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; video?: GeneratedVideo; error?: string }): GenerationLog {
     const logConfig = {
         model: config.model,
+        modelParameters: config.modelParameters,
         videoModel: config.videoModel,
         size: config.size,
         vquality: normalizeResolution(config.vquality),
@@ -797,6 +806,3 @@ function normalizeResolution(value: string) {
     return normalizeVideoResolutionValue(value);
 }
 
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}

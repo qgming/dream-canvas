@@ -47,6 +47,15 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
             controlItemBgActiveHover: color.itemSelectedHoverBg,
         },
         components: {
+            Layout: {
+                bodyBg: "var(--background)",
+                headerBg: "var(--background)",
+                headerColor: color.itemText,
+                headerHeight: 64,
+                headerPadding: "0 24px",
+                siderBg: "var(--sidebar)",
+                lightSiderBg: "var(--sidebar)",
+            },
             Button: {
                 primaryShadow: "none",
             },
@@ -74,6 +83,10 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
                 optionSelectedColor: color.itemText,
             },
             Table: {
+                colorBgContainer: "var(--card)",
+                headerBg: "var(--sidebar)",
+                headerColor: color.itemText,
+                borderColor: "var(--border)",
                 rowSelectedBg: color.tableSelectedBg,
                 rowSelectedHoverBg: color.tableSelectedHoverBg,
             },

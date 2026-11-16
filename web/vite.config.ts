@@ -44,6 +44,13 @@ function localPluginsManifest(): Plugin {
 
 export default defineConfig({
     base: process.env.VITE_BASE || "/",
+    server: {
+        // Preserve the browser-facing Host so the backend can verify same-origin requests.
+        proxy: {
+            "/api": { target: "http://127.0.0.1:8080", changeOrigin: false },
+            "/mcp": { target: "http://127.0.0.1:8080", changeOrigin: false },
+        },
+    },
     plugins: [react(), localPluginsManifest()],
     resolve: {
         alias: {

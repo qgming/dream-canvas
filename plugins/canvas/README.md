@@ -130,9 +130,12 @@ SDK 导出的 hooks(`useState/useEffect/useMemo/useRef/...`)运行时转发宿�
 | `ctx.getUpstream()` / `ctx.getDownstream()` | 取上/下游相连节点 |
 | `ctx.applyOps(ops)` | 用画布指令集增删节点/连线、选择、触发生成(见下) |
 | `ctx.emit(event, payload)` / `ctx.on(event, handler)` | 节点/插件间事件通信 |
-| `ctx.storage` | 插件私有持久化(按插件 id 命名空间) |
+| `ctx.ai` | 绑定当前项目和节点，经业务后端提交生成；模型与参数使用渠道目录，当前真实执行仍待接入 |
+| `ctx.storage` | 按账号与插件隔离的浏览器偏好缓存；项目内容写入节点 metadata，媒体引用服务端资产 |
 
 > `metadata` 的**内置字段**(content、status、model…)是强类型;插件写入的**自定义字段**读出为 `unknown`,按需 `as` 断言(参考 `sticky-note` 的 `pluginColor`)。
+
+`ctx.ai.generateImage` 的 `images` 返回当前账号可访问的稳定资产地址；无需转换成 Base64，可直接预览并保存到节点。生成前会保存目标节点并检查项目版本，保存失败或发生冲突时不提交供应商。完整后端化范围与当前限制见 [Unreleased](../../CHANGELOG.md#已确认的后端化规划待实施)。
 
 ### 画布指令集(ctx.applyOps)
 
@@ -161,5 +164,5 @@ ctx.applyOps([
 
 ## 注意
 
-- 插件代码会在画布页面内**直接执行**,可访问浏览器本地数据(含 AI API Key)。发布前请自审,用户也只应安装可信来源。
+- 插件代码会在画布页面内**直接执行**，可访问当前账号页面、草稿及同源 API；渠道密钥保存在业务后端。插件不是隔离环境，只应安装可信来源。
 - 交互控件记得 `onMouseDown={(e) => e.stopPropagation()}`(避免触发节点拖拽),滚动区域加 `onWheel={(e) => e.stopPropagation()}` 与容器 `data-canvas-no-zoom`(避免被画布缩放拦截)。

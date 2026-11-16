@@ -1,0 +1,64 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/gin-gonic/gin"
+)
+
+// Notifications only wake a reader; authoritative snapshots always come from SQLite.
+func (a *App) subscribe(userID string) (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	a.eventsMu.Lock()
+	if a.events[userID] == nil { a.events[userID] = map[chan struct{}]bool{} }
+	a.events[userID][ch] = true
+	a.eventsMu.Unlock()
+	return ch, func() {
+		a.eventsMu.Lock()
+		delete(a.events[userID], ch)
+		if len(a.events[userID]) == 0 { delete(a.events, userID) }
+		a.eventsMu.Unlock()
+	}
+}
+
+func (a *App) notify(userID string) {
+	a.eventsMu.Lock()
+	defer a.eventsMu.Unlock()
+	for ch := range a.events[userID] { select { case ch <- struct{}{}: default: } }
+}
+
+func (a *App) notifyCatalog() {
+	a.eventsMu.Lock()
+	defer a.eventsMu.Unlock()
+	for _, subscribers := range a.events { for ch := range subscribers { select { case ch <- struct{}{}: default: } } }
+}
+
+func writeEvent(c *gin.Context, name string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil { return err }
+	_, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", name, data)
+	c.Writer.Flush()
+	return err
+}
+
+func (a *App) sessionValid(c *gin.Context) bool {
+	var count int64
+	return a.db.Model(&Session{}).Where("hash = ? AND user_id IN (?)", c.GetString("session"), a.db.Model(&User{}).Select("id").Where("id = ? AND disabled = ?", currentUser(c).ID, false)).Count(&count).Error == nil && count == 1
+}
+
+func (a *App) userEvents(c *gin.Context) {
+	updates, stop := a.subscribe(currentUser(c).ID)
+	defer stop()
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("X-Accel-Buffering", "no")
+	if writeEvent(c, "changed", map[string]bool{"refresh": true}) != nil { return }
+	for {
+		select {
+		case <-c.Request.Context().Done(): return
+		case <-updates:
+			if !a.sessionValid(c) { return }
+			if writeEvent(c, "changed", map[string]bool{"refresh": true}) != nil { return }
+		}
+	}
+}

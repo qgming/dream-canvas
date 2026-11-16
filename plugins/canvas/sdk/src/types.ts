@@ -35,6 +35,7 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
+    modelParameters?: Record<string, Record<string, unknown>>;
     size?: string;
     quality?: string;
     count?: number;
@@ -136,27 +137,28 @@ export type CanvasResourceKind = "image" | "video" | "audio" | "text";
 export type CanvasNodeResource = { kind: CanvasResourceKind; text?: string; url?: string };
 
 // ---------------------------------------------------------------------------
-// AI 生成:插件直接复用宿主的模型/密钥配置发起生成(生图/生视频/生文本/生音频)
+// AI 生成:插件经宿主业务后端提交任务，使用管理员配置的渠道模型。
 //
 // 插件本身拿不到 API Key 与模型配置,这些能力由宿主注入。前置/系统提示词由
 // 插件自行拼进 prompt(宿主不感知),因此不同插件可各自定制自己的提示词策略。
 // 若宿主 AI 配置未就绪,会抛错(并由宿主提示用户去配置),插件用 try/catch 处理即可。
 // ---------------------------------------------------------------------------
 
-// 生成公共可选项;references 为图生图/图生视频的参考图(dataURL 或可访问 URL)
+// references 优先使用稳定资产地址；临时图片会先保存至当前账号的资产库。
 export type GenerateOptions = {
     signal?: AbortSignal;
     references?: string[];
     model?: string; // 指定模型(取自 ai.listModels 的 value);缺省用宿主当前配置
+    parameters?: Record<string, unknown>; // 渠道模型定义的参数值；资产值使用 asset:<id>
 };
 
 export type GenerateImageOptions = GenerateOptions & {
-    count?: number; // 期望生成张数(宿主会按模型上限裁剪)
+    count?: number; // 期望生成张数，不符合模型要求时明确报错
     size?: string; // 形如 "1024x1024" / "auto";缺省用宿主当前配置
 };
 
 export type GenerateImageResult = {
-    // 生成图的 dataURL(已可直接作为 <img src> 或 three 纹理使用)
+    // 当前账号可访问的稳定资产地址，可用于预览、纹理和节点保存。
     images: string[];
 };
 
@@ -176,6 +178,7 @@ export type GenerateVideoResult = {
 export type GenerateTextOptions = {
     signal?: AbortSignal;
     model?: string;
+    parameters?: Record<string, unknown>;
     system?: string; // 附加系统提示词(拼在宿主系统提示之后)
     onDelta?: (text: string) => void; // 流式增量回调
 };

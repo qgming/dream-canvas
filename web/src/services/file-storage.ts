@@ -1,88 +1,50 @@
-import localforage from "localforage";
-import { nanoid } from "nanoid";
-
-import { withLocalProxy } from "@/stores/use-config-store";
+import { assetBlob, assetId, assetUrl, getAsset, uploadAsset } from "@/services/api/assets";
+import { captureSession } from "@/services/api/client";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
-const objectUrls = new Map<string, string>();
-
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
-    const blob = typeof input === "string" ? await (await fetch(withLocalProxy(input))).blob() : input;
-    const storageKey = `${prefix}:${nanoid()}`;
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
-    return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
-}
-
-export async function resolveMediaUrl(storageKey?: string, fallback = "") {
-    if (!storageKey) return fallback;
-    const cached = objectUrls.get(storageKey);
-    if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
-}
-
-export async function getMediaBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
-}
-
-export async function setMediaBlob(storageKey: string, blob: Blob) {
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
-}
-
-export async function deleteStoredMedia(keys: Iterable<string>) {
-    await Promise.all(
-        Array.from(new Set(keys)).map(async (key) => {
-            const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
-            objectUrls.delete(key);
-            await store.removeItem(key);
-        }),
-    );
-}
-
-export async function cleanupUnusedMedia(usedData: unknown) {
-    const usedKeys = collectMediaStorageKeys(usedData);
-    const unused: string[] = [];
-    await store.iterate((_value, key) => {
-        if (!usedKeys.has(key)) unused.push(key);
+    const assertSession = captureSession();
+    const id = typeof input === "string" ? assetId(input) : undefined;
+    let asset = id ? await getAsset(id) : null;
+    if (!asset) {
+        const response = typeof input === "string" ? await fetch(input) : null;
+        if (response && !response.ok) throw new Error("媒体读取失败");
+        const blob = typeof input === "string" ? await response!.blob() : input;
+        assertSession();
+        asset = await uploadAsset(blob, input instanceof File ? input.name : "媒体素材");
+    }
+    if (asset.deleteState) throw new Error("资产已删除");
+    if (asset.saveState !== "saved") throw new Error("媒体尚未可靠保存");
+    if (asset.kind !== "video" && asset.kind !== "audio") throw new Error("请选择视频或音频素材");
+    if ((prefix === "video" || prefix === "audio") && asset.kind !== prefix) throw new Error("媒体类型不匹配");
+    assertSession();
+    const url = assetUrl(asset.id);
+    const element = document.createElement(asset.kind === "audio" ? "audio" : "video");
+    element.preload = "metadata";
+    const meta = await new Promise<{ width?: number; height?: number; durationMs?: number }>((resolve) => {
+        const finish = () => {
+            resolve({ ...(element instanceof HTMLVideoElement ? { width: element.videoWidth, height: element.videoHeight } : {}), durationMs: Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : undefined });
+            element.onloadedmetadata = null;
+            element.onerror = null;
+            element.removeAttribute("src");
+            element.load();
+        };
+        element.onloadedmetadata = finish;
+        element.onerror = finish;
+        element.src = url;
     });
-    await Promise.all(unused.map((key) => store.removeItem(key)));
+    assertSession();
+    window.dispatchEvent(new Event("assets-changed"));
+    return { url, storageKey: `asset:${asset.id}`, bytes: asset.bytes, mimeType: asset.mimeType, ...meta };
 }
-
+export async function resolveMediaUrl(key?: string, fallback = "") { const id = assetId(key); return id ? assetUrl(id) : fallback; }
+export async function getMediaBlob(key: string) { const id = assetId(key); return id ? assetBlob(id) : null; }
+export async function deleteStoredMedia(_keys: Iterable<string>) { /* References do not own the server asset. */ }
+export async function cleanupUnusedMedia(_usedData: unknown) { /* Global deletion requires an explicit approval. */ }
 export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
-    if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.includes(":")) keys.add(value.storageKey);
-    Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectMediaStorageKeys(child, keys)) : collectMediaStorageKeys(item, keys)));
+    if ("storageKey" in value && typeof value.storageKey === "string" && assetId(value.storageKey)) keys.add(value.storageKey);
+    Object.values(value).forEach((item) => { if (Array.isArray(item)) item.forEach((child) => collectMediaStorageKeys(child, keys)); else collectMediaStorageKeys(item, keys); });
     return keys;
-}
-
-function readVideoMeta(url: string) {
-    return new Promise<{ width: number; height: number; durationMs?: number }>((resolve) => {
-        const video = document.createElement("video");
-        const done = () => resolve({ width: video.videoWidth || 1280, height: video.videoHeight || 720, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined });
-        video.onloadedmetadata = done;
-        video.onerror = done;
-        video.src = url;
-    });
-}
-
-function readAudioMeta(url: string) {
-    return new Promise<{ durationMs?: number }>((resolve) => {
-        const audio = document.createElement("audio");
-        const done = () => resolve({ durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined });
-        audio.onloadedmetadata = done;
-        audio.onerror = done;
-        audio.src = url;
-    });
 }
