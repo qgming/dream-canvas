@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
-import { Button, Segmented } from "antd";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
 
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
@@ -94,7 +95,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 <InputChip label={t("canvas.configNode.references")} value={t("canvas.configNode.images", { count: inputSummary.imageCount })} style={chipStyle} />
                 <InputChip label={t("canvas.configNode.videoReferences")} value={t("canvas.configNode.items", { count: inputSummary.videoCount })} style={chipStyle} />
                 <InputChip label={t("canvas.configNode.audioReferences")} value={t("canvas.configNode.items", { count: inputSummary.audioCount })} style={chipStyle} />
-                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
+                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-xs" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
                     <Settings2 className="size-3.5" />
                     {t("canvas.configNode.compose")}
                 </button>
@@ -103,21 +104,19 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             <div className="mb-2 grid min-w-0 cursor-default grid-cols-[minmax(0,1fr)_148px] items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={openModelSettings} fullWidth />
                 {mode === "video" ? (
-                    <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                    <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : mode === "audio" ? (
-                    <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                    <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : (
-                    <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
+                    <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
                 )}
             </div>
 
             <div className="thin-scrollbar mb-2 max-h-60 overflow-y-auto"><ModelParameters config={config} model={config.model} value={node.metadata?.modelParameters?.[config.model]} disabled={isRunning} onChange={(value) => onConfigChange(node.id, { modelParameters: { ...node.metadata?.modelParameters, [config.model]: value } })} /></div>
-            <Button
-                type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
-                danger={isRunning}
+            <Button variant={isRunning ? "destructive" : "default"}
+                className="mt-auto !h-8 !w-full !cursor-pointer !rounded-lg" aria-busy={isRunning}
                 disabled={!isRunning && !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
@@ -143,7 +142,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {
     return (
-        <div className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px]" style={style}>
+        <div className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs" style={style}>
             <span>{label}</span>
             <span className="font-medium">{value}</span>
         </div>

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useSpring, useTransform } from "motion/react";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,7 @@ const SCROLL_BOTTOM_THRESHOLD = 48;
 const historyMessageStyle = { contentVisibility: "auto", containIntrinsicSize: "0 80px" } as const;
 
 export function AgentChatTimeline({
+    visible = true,
     theme,
     pendingTool,
     pendingApprovals,
@@ -22,6 +23,7 @@ export function AgentChatTimeline({
     onApproveTool,
     onApprovalDecision,
 }: {
+    visible?: boolean;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     pendingTool: AgentPendingToolCall | null;
     pendingApprovals: AgentPendingApproval[];
@@ -33,30 +35,41 @@ export function AgentChatTimeline({
 }) {
     const { t } = useTranslation();
     const messages = useAgentStore((state) => state.messages);
+    const activeThreadId = useAgentStore((state) => state.activeThreadId);
     const bootstrapStatus = useAgentStore((state) => state.bootstrapStatus);
     const mcpStartupStatuses = useAgentStore((state) => state.mcpStartupStatuses);
     const timeline = useMemo(() => groupTimelineMessages(messages), [messages]);
     const listRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const followMessagesRef = useRef(true);
+    const positions = useRef(new Map<string, { top: number; follow: boolean }>());
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const streaming = messages.some((message) => message.streamId);
     const showBootstrap = Boolean(bootstrapStatus && !messages.some((message) => message.role === "user" || message.role === "assistant"));
     const working = showBootstrap ? bootstrapStatus! : workingActivity(messages.at(-1));
     const updateScrollState = useCallback(() => {
         const list = listRef.current;
-        if (!list) return;
+        if (!list || !list.clientHeight) return;
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
         followMessagesRef.current = atBottom;
+        positions.current.set(activeThreadId, { top: list.scrollTop, follow: atBottom });
         setShowScrollToBottom(!atBottom);
-    }, []);
+    }, [activeThreadId]);
     const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
         const list = listRef.current;
-        if (!list) return;
+        if (!list || !list.clientHeight) return;
         followMessagesRef.current = true;
         list.scrollTo({ top: list.scrollHeight, behavior });
         setShowScrollToBottom(false);
     }, []);
+    useLayoutEffect(() => {
+        const list = listRef.current;
+        if (!visible || !list) return;
+        const saved = positions.current.get(activeThreadId);
+        followMessagesRef.current = saved?.follow ?? true;
+        list.scrollTop = saved && !saved.follow ? saved.top : list.scrollHeight;
+        setShowScrollToBottom(!followMessagesRef.current);
+    }, [activeThreadId, visible]);
     useEffect(() => {
         const frame = requestAnimationFrame(() => (followMessagesRef.current ? scrollToBottom("auto") : updateScrollState()));
         return () => cancelAnimationFrame(frame);
@@ -166,7 +179,7 @@ function isCommandMessage(item: AgentChatItem) {
 export function AgentUsageBar({ usage, theme }: { usage: AgentTokenUsage; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();
     return (
-        <div className="flex items-center justify-center gap-4 px-4 pt-1 text-[11px] tabular-nums" style={{ color: theme.node.muted }}>
+        <div className="flex items-center justify-center gap-4 px-4 pt-1 text-xs tabular-nums" style={{ color: theme.node.muted }}>
             <span className="opacity-70">{t("agent.chat.latestCall")}</span>
             <UsageNumber label={t("agent.chat.input")} value={usage.input} color={theme.node.text} />
             <UsageNumber label={t("agent.chat.cached")} value={usage.cached} color={theme.node.text} />

@@ -1,7 +1,13 @@
+import appI18n from "@/i18n";
 import { Check, Download, Pencil, Trash2, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button, Input } from "antd";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useTranslation } from "react-i18next";
+import { useRef, useState } from "react";
+import { useEditGuard } from "@/hooks/use-edit-guard";
+import { useDiscardChanges } from "@/hooks/use-discard-changes";
 
 import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
@@ -9,7 +15,7 @@ import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 
 export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const { i18n, t } = useTranslation();
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const renameProject = useCanvasStore((state) => state.renameProject);
@@ -22,28 +28,36 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const toggleSelected = useCanvasUiStore((state) => state.toggleSelectedProjectId);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const editing = editingId === project.id;
+    const [saving, setSaving] = useState(false);
+    const submitting = useRef(false);
+    const dirty = editing && editingTitle !== project.title;
+    useEditGuard(dirty, stopEditing);
+    const cancelRename = useDiscardChanges(dirty, stopEditing);
     const selected = selectedIds.includes(project.id);
     const open = () => {
         navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
     };
     const saveTitle = async () => {
+        if (submitting.current || !editingTitle.trim()) return;
+        submitting.current = true; setSaving(true);
         try { await renameProject(project.id, editingTitle); stopEditing(); }
-        catch (error) { message.error(error instanceof Error ? error.message : "重命名失败"); }
+        catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.renameFailed")); }
+        finally { submitting.current = false; setSaving(false); }
     };
 
     return (
-        <article className="group flex min-h-44 cursor-pointer flex-col justify-between rounded-2xl bg-[#f1eee8] p-5 transition hover:bg-[#ebe6dc] dark:bg-white/5 dark:hover:bg-white/10" onClick={() => !editing && open()}>
+        <article className="group flex min-h-44 cursor-pointer flex-col justify-between rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent" onClick={() => !editing && open()}>
             <div className="flex items-start gap-3">
                 <input
                     type="checkbox"
                     checked={selected}
                     onClick={(event) => event.stopPropagation()}
                     onChange={(event) => toggleSelected(project.id, event.target.checked)}
-                    className="mt-1 size-4 accent-stone-950 dark:accent-stone-100"
+                    className="mt-1 size-4 accent-primary"
                     aria-label={t("canvas.project.select", { name: project.title })}
                 />
                 {editing ? (
-                    <Input className="min-w-0" value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveTitle()} autoFocus />
+                    <Input aria-label={t("canvas.project.rename")} disabled={saving} className="min-w-0" value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTitle(); if (event.key === "Escape") cancelRename(); }} autoFocus />
                 ) : (
                     <button
                         type="button"
@@ -53,26 +67,26 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                             open();
                         }}
                     >
-                        <h2 className="truncate text-xl font-semibold">{project.title}</h2>
-                        <p className="mt-3 text-sm leading-6 text-stone-600 dark:text-stone-400">
+                        <h2 className="truncate text-base font-medium">{project.title}</h2>
+                        <p className="mt-3 text-sm leading-6 text-muted-foreground ">
                             {t("canvas.project.stats", { nodes: project.nodes.length, connections: project.connections.length })}
                         </p>
                     </button>
                 )}
             </div>
             <div className="mt-8 flex items-end justify-between gap-3">
-                <p className="text-xs text-stone-500">{t("canvas.project.updated", { date: new Date(project.updatedAt).toLocaleString(i18n.resolvedLanguage, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</p>
+                <p className="text-xs text-muted-foreground">{t("canvas.project.updated", { date: new Date(project.updatedAt).toLocaleString(i18n.resolvedLanguage, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</p>
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
                     {editing ? (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Check className="size-4" />} onClick={saveTitle} aria-label={t("canvas.project.saveName")} />
-                            <Button type="text" size="small" shape="circle" icon={<X className="size-4" />} onClick={stopEditing} aria-label={t("canvas.project.cancelRename")} />
+                            <Button variant="ghost" size="sm" loading={saving} disabled={!editingTitle.trim()} icon={<Check className="size-4" />} onClick={saveTitle} aria-label={t("canvas.project.saveName")} />
+                            <Button variant="ghost" size="sm" disabled={saving} icon={<X className="size-4" />} onClick={cancelRename} aria-label={t("canvas.project.cancelRename")} />
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || t("canvas.title")).catch((error: unknown) => { message.error(error instanceof Error ? error.message : "项目导出失败"); })} aria-label={t("canvas.project.export")} />
-                            <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label={t("canvas.project.rename")} />
-                            <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label={t("canvas.project.delete")} />
+                            <Button variant="ghost" size="sm"  icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || t("canvas.title")).catch((error: unknown) => { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.exportProjectFailed")); })} aria-label={t("canvas.project.export")} />
+                            <Button variant="ghost" size="sm" disabled={Boolean(editingId)} icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label={t("canvas.project.rename")} />
+                            <Button variant="ghost" size="sm"  icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label={t("canvas.project.delete")} />
                         </>
                     )}
                 </div>

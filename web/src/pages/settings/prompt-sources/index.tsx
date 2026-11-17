@@ -1,7 +1,18 @@
-import { Alert, App, Button, Select, Switch, Tag } from "antd";
+import appI18n from "@/i18n";
+import { PageHeader } from "@/components/layout/page-header";
+import { Notice as Alert } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/display";
+import { EditorForm, Field } from "@/components/ui/form";
+import { DataTable } from "@/components/ui/data-table";
+import { Choice } from "@/components/ui/choice";
+import { Switch } from "@/components/ui/controls";
+import { Badge as Tag } from "@/components/ui/display";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { useEditGuard } from "@/hooks/use-edit-guard";
 import { useTranslation } from "react-i18next";
 
 import { PromptSourceEditorDrawer } from "./components/prompt-source-editor-drawer";
@@ -14,7 +25,7 @@ import { captureSession } from "@/services/api/client";
 const STATUS_QUERY_KEY = ["prompt-source-statuses"];
 
 export default function PromptSourcesPage() {
-    const { message, modal } = App.useApp();
+    const { notify, confirm } = useFeedback();
     const { i18n, t } = useTranslation();
     const queryClient = useQueryClient();
     const sources = usePromptSourceStore((state) => state.sources);
@@ -28,6 +39,8 @@ export default function PromptSourcesPage() {
     const saving = usePromptSourceStore((state) => state.saving);
     const error = usePromptSourceStore((state) => state.error);
     const hydrated = usePromptSourceStore((state) => state.hydrated);
+    const discard = useCallback(() => { void usePromptSourceStore.getState().load(true); }, []);
+    useEditGuard(dirty, discard);
     const statusQuery = useQuery({ queryKey: STATUS_QUERY_KEY, queryFn: fetchPromptSourceStatuses });
 
     const [editingSource, setEditingSource] = useState<PromptSource | null>(null);
@@ -52,13 +65,13 @@ export default function PromptSourcesPage() {
 
     const handleDelete = (source: PromptSource) => {
         const assertSession = captureSession();
-        modal.confirm({
+        confirm({
             title: t("config.promptSources.deleteTitle", { name: source.name }),
             content: t("config.promptSources.deleteDescription"),
-            okText: t("common.delete"),
-            okButtonProps: { danger: true },
+            confirmText: t("common.delete"),
+            destructive: true,
             cancelText: t("common.cancel"),
-            onOk: async () => {
+            onConfirm: async () => {
                 assertSession();
                 removeSource(source.id);
                 await invalidatePrompts();
@@ -71,10 +84,10 @@ export default function PromptSourcesPage() {
         try {
             const result = await refreshSource(source.id);
             await invalidatePrompts();
-            message.success(t("config.promptSources.refreshed", { name: source.name, count: result.count }));
+            notify.success(t("config.promptSources.refreshed", { name: source.name, count: result.count }));
         } catch (error) {
             await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
-            message.error(error instanceof Error ? error.message : t("config.promptSources.refreshFailedCached"));
+            notify.error(error instanceof Error ? error.message : t("config.promptSources.refreshFailedCached"));
         } finally {
             setRefreshingId("");
         }
@@ -88,84 +101,72 @@ export default function PromptSourcesPage() {
             assertSession();
             updateSchedule("lastFetchedAt", new Date().toISOString());
             await invalidatePrompts();
-            if (result.failureCount) message.warning(t("config.promptSources.refreshPartial", { success: result.successCount, failed: result.failureCount }));
-            else message.success(t("config.promptSources.refreshAllSuccess", { sources: result.successCount, total: result.total }));
+            if (result.failureCount) notify.warning(t("config.promptSources.refreshPartial", { success: result.successCount, failed: result.failureCount }));
+            else notify.success(t("config.promptSources.refreshAllSuccess", { sources: result.successCount, total: result.total }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("config.promptSources.refreshFailed"));
+            notify.error(error instanceof Error ? error.message : t("config.promptSources.refreshFailed"));
         } finally {
             setRefreshingAll(false);
         }
     };
 
+    const reload = () => {
+        const assertSession = captureSession();
+        const read = async () => { assertSession(); await usePromptSourceStore.getState().load(true); };
+        if (dirty) confirm({ title: appI18n.t("workspace.discardSources"), content: appI18n.t("workspace.reloadSources"), confirmText: appI18n.t("workspace.discardAndReload"), cancelText: appI18n.t("workspace.preserveEdits"), onConfirm: read });
+        else void read().catch((error: unknown) => { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.readFailed")); });
+    };
+
     return (
-        <section>
-            <header className="mb-8">
-                <h2 className="text-2xl font-medium tracking-tight">{t("settings.promptSources")}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{t("settings.promptSourcesDescription")}</p>
-            </header>
-            {error ? <Alert className="mb-4" type="error" title={error} description="未保存配置会保留为此账号的浏览器草稿；版本冲突时请先复制需要保留的内容。" /> : null}
-            <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-                <Button disabled={saving} onClick={() => {
-                    const assertSession = captureSession();
-                    const read = async () => { assertSession(); await usePromptSourceStore.getState().load(true); };
-                    if (dirty) modal.confirm({ title: "放弃未保存的来源配置？", content: "重新读取会清除当前草稿，请先复制需要保留的内容。", okText: "放弃并读取", cancelText: "保留编辑", onOk: read });
-                    else void read().catch((error: unknown) => { message.error(error instanceof Error ? error.message : "读取失败"); });
-                }}>重新读取</Button>
-                <Button disabled={!dirty || !hydrated} loading={saving} onClick={() => void usePromptSourceStore.getState().save()}>保存来源配置</Button>
-                <Button type="primary" disabled={!hydrated} icon={<Plus className="size-4" />} onClick={() => setEditingSource(addSource())}>
-                    {t("config.promptSources.add")}
-                </Button>
-            </div>
+        <section className="space-y-6">
+            <PageHeader title={t("settings.promptSources")} description={t("settings.promptSourcesDescription")} actions={<>
+                <Button variant="ghost" disabled={!hydrated} icon={<RefreshCw className="size-4" />} loading={refreshingAll} onClick={() => void handleRefreshAll()}>{t("config.promptSources.refreshAll")}</Button>
+                <Button variant="default" disabled={!hydrated || saving} icon={<Plus className="size-4" />} onClick={() => setEditingSource(addSource())}>{t("config.promptSources.add")}</Button>
+            </>} />
+            {error ? <Alert type="error" title={error} description={appI18n.t("workspace.sourceDraftDescription")} action={<Button disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
+            {statusQuery.error ? <Alert type="error" title={statusQuery.error.message} action={<Button onClick={() => void statusQuery.refetch()}>{t("common.retry")}</Button>} /> : null}
 
-            <div className="space-y-2">
-                {sources.map((source) => {
+            <DataTable<PromptSource> rowId="id" rows={sources} loading={!hydrated && !error} failed={Boolean(error)} empty={<EmptyState description={t("settings.sourcesEmpty")} />} columns={[
+                { title: t("config.promptSources.editor.name"), render: (_, source) => <div className="min-w-40 max-w-72">
+                    <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium break-words">{source.name}</span>{source.builtIn ? <Tag className="shrink-0">{t("config.promptSources.builtIn")}</Tag> : null}</div>
+                    <a className="mt-1 block truncate text-xs text-muted-foreground hover:text-foreground hover:underline" href={source.homepage || source.url} title={source.homepage || source.url} target="_blank" rel="noreferrer">{source.homepage || source.url}</a>
+                </div> },
+                { title: t("workspace.status"), render: (_, source) => {
                     const status = statusQuery.data?.[source.id];
-                    return (
-                        <div key={source.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-4 py-3">
-                            <Switch size="small" disabled={!hydrated} checked={source.enabled} onChange={(checked) => { toggleSource(source.id, checked); void invalidatePrompts(); }} />
-                            <div className="min-w-[220px] flex-1">
-                                <div className="flex min-w-0 items-center gap-2">
-                                    <span className="truncate text-sm font-semibold">{source.name}</span>
-                                    {source.builtIn ? <Tag className="m-0 shrink-0 text-[10px]">{t("config.promptSources.builtIn")}</Tag> : null}
-                                </div>
-                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                    <a className="max-w-full truncate hover:text-foreground hover:underline" href={source.homepage || source.url} target="_blank" rel="noreferrer">
-                                        {source.homepage || source.url}
-                                    </a>
-                                    <span className="tabular-nums">{t("config.promptSources.itemCount", { count: status?.count ?? 0 })}</span>
-                                    {status?.lastError ? <Tag color="error" className="m-0 text-[10px]" title={status.lastError}>{t("config.promptSources.failed")}</Tag> : status?.lastSuccessAt ? <Tag color="success" className="m-0 text-[10px]">{t("config.promptSources.healthy")}</Tag> : <Tag className="m-0 text-[10px]">{t("config.promptSources.unsynced")}</Tag>}
-                                    <span>{status?.lastSuccessAt ? t("config.promptSources.lastSuccess", { time: formatTime(status.lastSuccessAt, i18n.resolvedLanguage) }) : t("config.promptSources.neverFetched")}</span>
-                                </div>
-                            </div>
-                            <div className="ml-auto flex flex-wrap justify-end gap-2">
-                                <Button size="small" icon={<Eye className="size-3.5" />} onClick={() => setViewingId(source.id)}>
-                                    {t("config.promptSources.view")}
-                                </Button>
-                                <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={refreshingId === source.id} onClick={() => void handleRefreshOne(source)}>
-                                    {t("config.promptSources.refresh")}
-                                </Button>
-                                {!source.builtIn ? <Button size="small" icon={<Pencil className="size-3.5" />} onClick={() => setEditingSource(source)}>{t("config.promptSources.edit")}</Button> : null}
-                                {!source.builtIn ? <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => handleDelete(source)}>{t("common.delete")}</Button> : null}
-                            </div>
+                    return <div className="min-w-32 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {status?.lastError ? <Tag color="error" title={status.lastError}>{t("config.promptSources.failed")}</Tag> : status?.lastSuccessAt ? <Tag color="success">{t("config.promptSources.healthy")}</Tag> : <Tag>{t("config.promptSources.unsynced")}</Tag>}
+                            {status ? <span className="text-xs text-muted-foreground tabular-nums">{t("config.promptSources.itemCount", { count: status.count })}</span> : null}
                         </div>
-                    );
-                })}
-            </div>
+                        <p className="text-xs leading-5 text-muted-foreground">{status?.lastSuccessAt ? t("config.promptSources.lastSuccess", { time: formatTime(status.lastSuccessAt, i18n.resolvedLanguage) }) : t("config.promptSources.neverFetched")}</p>
+                    </div>;
+                } },
+                { title: t("workspace.enabled"), width: 72, render: (_, source) => <Switch aria-label={`${source.name} · ${t("config.promptSources.editor.enabled")}`} disabled={!hydrated || saving} checked={source.enabled} onChange={(checked) => { toggleSource(source.id, checked); void invalidatePrompts(); }} /> },
+                { title: t("workspace.actions"), align: "right", render: (_, source) => <div className="flex flex-wrap justify-end gap-1">
+                    <Button variant="ghost" size="sm" icon={<Eye className="size-3.5" />} onClick={() => setViewingId(source.id)}>{t("config.promptSources.view")}</Button>
+                    <Button variant="ghost" size="sm" icon={<RefreshCw className="size-3.5" />} loading={refreshingId === source.id} onClick={() => void handleRefreshOne(source)}>{t("config.promptSources.refresh")}</Button>
+                    {!source.builtIn ? <Button variant="ghost" size="sm" disabled={saving} icon={<Pencil className="size-3.5" />} onClick={() => setEditingSource(source)}>{t("config.promptSources.edit")}</Button> : null}
+                    {!source.builtIn ? <Button variant="ghost" data-destructive size="sm" disabled={saving} icon={<Trash2 className="size-3.5" />} onClick={() => handleDelete(source)}>{t("common.delete")}</Button> : null}
+                </div> },
+            ]} />
 
-            <section className="mt-5 rounded-lg border border-border p-4">
-                <div className="mb-3 text-sm font-semibold">{t("config.promptSources.schedule")}</div>
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{t("config.promptSources.interval")}</span>
-                        <Select size="small" disabled={!hydrated} className="w-36" value={schedule.intervalMinutes} options={intervalOptions} onChange={(value) => updateSchedule("intervalMinutes", value)} />
-                    </div>
-                    <Button size="small" type="primary" icon={<RefreshCw className="size-3.5" />} loading={refreshingAll} onClick={() => void handleRefreshAll()}>
-                        {t("config.promptSources.refreshAll")}
-                    </Button>
-                    <span className="text-xs text-muted-foreground">{schedule.lastFetchedAt ? t("config.promptSources.lastFetched", { time: formatTime(schedule.lastFetchedAt, i18n.resolvedLanguage) }) : t("config.promptSources.neverScheduled")}</span>
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">{t("config.promptSources.scheduleDescription")}</div>
+            <section>
+                <h2 className="mb-2 text-base font-semibold">{t("config.promptSources.schedule")}</h2>
+                <EditorForm disabled={!hydrated || saving} className="space-y-0">
+                    <Field layout="horizontal" label={t("config.promptSources.interval")} description={t("config.promptSources.scheduleDescription")}>
+                        <Choice value={schedule.intervalMinutes} options={intervalOptions} onChange={(value) => updateSchedule("intervalMinutes", value)} />
+                    </Field>
+                </EditorForm>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{schedule.lastFetchedAt ? t("config.promptSources.lastFetched", { time: formatTime(schedule.lastFetchedAt, i18n.resolvedLanguage) }) : t("config.promptSources.neverScheduled")}</p>
             </section>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                <span role="status" className="text-xs text-muted-foreground">{saving ? t("settings.savingChanges") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
+                <div className="ml-auto flex items-center gap-2">
+                    <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
+                    <Button variant="default" disabled={!dirty || !hydrated} loading={saving} onClick={() => void usePromptSourceStore.getState().save()}>{appI18n.t("workspace.saveSources")}</Button>
+                </div>
+            </div>
 
             <PromptSourceEditorDrawer open={Boolean(editingSource)} source={editingSource} onSave={handleSave} onClose={() => setEditingSource(null)} />
             <PromptSourceContentModal source={viewingSource} onClose={() => setViewingId("")} />

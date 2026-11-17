@@ -5,6 +5,7 @@ import UserLayout from "@/layouts/user-layout";
 import SettingsLayout from "@/layouts/settings-layout";
 import RequireAuth, { RequireAdmin } from "@/layouts/require-auth";
 import LoginPage from "@/pages/login";
+import { Spinner } from "@/components/ui/display";
 const GeneralSettingsPage = lazy(() => import("@/pages/settings/general"));
 const AccountSettingsPage = lazy(() => import("@/pages/settings/account"));
 const PreferencesPage = lazy(() => import("@/pages/settings/preferences"));
@@ -20,13 +21,15 @@ import CanvasPage from "@/pages/canvas";
 import CanvasProjectPage from "@/pages/canvas/project";
 import ImagePage from "@/pages/image";
 import NotFound from "@/pages/not-found";
+import PageError from "@/pages/error";
 import PromptsPage from "@/pages/prompts";
 import VideoPage from "@/pages/video";
 
 export const router = createBrowserRouter([
-    { path: "/login", element: <LoginPage /> },
+    { path: "/login", element: <LoginPage />, errorElement: <PageError /> },
     {
         element: <RequireAuth />,
+        errorElement: <PageError />,
         children: [
             {
                 element: <UserLayout><Outlet /></UserLayout>,
@@ -51,7 +54,7 @@ export const router = createBrowserRouter([
                             { path: "channels", element: <ChannelsPage /> },
                         ] },
                     ] },
-                    { path: "/tasks", element: <Suspense fallback={null}><TasksPage /></Suspense> },
+                    { path: "/tasks", element: <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner /></div>}><TasksPage /></Suspense> },
                 ],
             },
         ],

@@ -1,6 +1,21 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
+import appI18n from "@/i18n";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, LoaderCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEditGuard } from "@/hooks/use-edit-guard";
+import { useDiscardChanges } from "@/hooks/use-discard-changes";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { Notice } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/controls";
+import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
+
+import { EmptyState as Empty } from "@/components/ui/display";
+import { MediaPreview } from "@/components/ui/media-preview";
+import { Textarea } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Badge as Tag } from "@/components/ui/display";
+import { Tooltip } from "@/components/ui/popover";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
@@ -14,6 +29,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
@@ -67,10 +83,10 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
 
-const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
+const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_svg]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 
 export default function ImagePage() {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,8 +102,17 @@ export default function ImagePage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [logsError, setLogsError] = useState("");
+    const [logsLoading, setLogsLoading] = useState(true);
+    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {} }));
+    const runRef = useRef(false);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
+    const historyPanelOpen = useAppUiStore((state) => state.workbenchHistoryOpen);
+    const toggleHistoryPanel = useAppUiStore((state) => state.toggleWorkbenchHistory);
+    const desktop = useMediaQuery("(min-width: 1024px)");
+    const historyVisible = desktop ? historyPanelOpen : logsOpen;
+    const toggleHistory = () => desktop ? toggleHistoryPanel() : setLogsOpen((open) => !open);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -104,6 +129,9 @@ export default function ImagePage() {
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
     const assertSession = useRef(captureSession()).current;
+    const draftDirty = JSON.stringify({ prompt, references, parameters }) !== savedDraft;
+    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {} })); }, []);
+    useEditGuard(draftDirty || running, discardDraft);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -137,7 +165,7 @@ export default function ImagePage() {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
             if (!blobs.length) {
-                message.error(t("imageWorkbench.clipboardEmpty"));
+                notify.error(t("imageWorkbench.clipboardEmpty"));
                 return;
             }
             const nextReferences = await Promise.all(
@@ -148,23 +176,24 @@ export default function ImagePage() {
                 }),
             );
             setReferences((value) => [...value, ...nextReferences]);
-            message.success(t("imageWorkbench.clipboardAdded", { count: nextReferences.length }));
+            notify.success(t("imageWorkbench.clipboardAdded", { count: nextReferences.length }));
         } catch {
-            message.error(t("imageWorkbench.clipboardEmpty"));
+            notify.error(t("imageWorkbench.clipboardEmpty"));
         }
     };
 
     const generate = async () => {
+        if (runRef.current) return;
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const text = prompt.trim();
         if (!text) {
-            message.error(t("imageWorkbench.promptRequired"));
+            notify.error(t("imageWorkbench.promptRequired"));
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.promptRequired") });
             return;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning(t("workbench.configFirst"));
+            notify.warning(t("workbench.configFirst"));
             openModelSettings();
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.configIncomplete") });
             return;
@@ -176,6 +205,7 @@ export default function ImagePage() {
             return;
         }
 
+        runRef.current = true;
         setElapsedMs(0);
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
@@ -209,8 +239,9 @@ export default function ImagePage() {
                     images: successImages,
                 }),
             );
-            successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            successCount ? notify.success(t("imageWorkbench.generated")) : notify.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
         } finally {
+            runRef.current = false;
             setRunning(false);
         }
     };
@@ -244,7 +275,7 @@ export default function ImagePage() {
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
         setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
-        message.success(t("imageWorkbench.addedReference"));
+        notify.success(t("imageWorkbench.addedReference"));
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
@@ -258,7 +289,7 @@ export default function ImagePage() {
             data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
             metadata: { source: "image-page", prompt },
         });
-        message.success(t("common.addedToAssets"));
+        notify.success(t("common.addedToAssets"));
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -268,24 +299,24 @@ export default function ImagePage() {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         } else {
-            message.warning(t("imageWorkbench.unsupportedAsset"));
+            notify.warning(t("imageWorkbench.unsupportedAsset"));
         }
         setAssetPickerOpen(false);
     };
 
-    const createSession = () => {
-        setPrompt("");
-        setReferences([]);
+    const createSession = useDiscardChanges(draftDirty, () => {
+        discardDraft();
         setResults([]);
         setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
-    };
+    });
 
-    const deleteSelectedLogs = () => {
+    const deleteSelectedLogs = async () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("image", id))]).then(refreshLogs).catch((error: unknown) => message.error(error instanceof Error ? error.message : "记录删除失败"));
+        await Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("image", id))]);
+        await refreshLogs();
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -296,32 +327,33 @@ export default function ImagePage() {
 
     const saveLog = (log: GenerationLog) => {
         assertSession();
-        void saveWorkbenchRecord("image", serializeLog(log)).then(refreshLogs).catch((error: unknown) => message.error(error instanceof Error ? error.message : "记录保存失败"));
+        void saveWorkbenchRecord("image", serializeLog(log)).then(refreshLogs).catch((error: unknown) => { const message = error instanceof Error ? error.message : appI18n.t("workspace.saveRecordFailed"); setLogsError(message); notify.error(message); });
     };
 
-    const refreshLogs = async () => { try { setLogs(await readStoredLogs()); } catch (error) { message.error(error instanceof Error ? error.message : "读取记录失败"); } };
+    const refreshLogs = async () => { setLogsLoading(true); try { const records = await readStoredLogs(); assertSession(); setLogs(records); setLogsError(""); } catch (error) { setLogsError(error instanceof Error ? error.message : appI18n.t("workspace.readRecordsFailed")); } finally { setLogsLoading(false); } };
 
-    const previewGenerationLog = async (log: GenerationLog) => {
+    const previewGenerationLog = useDiscardChanges(draftDirty, (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
         setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
+        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
-    };
+    });
 
     const buildRequestSnapshot = () => {
         const text = prompt.trim();
         if (!text) {
-            message.error(t("imageWorkbench.promptRequired"));
+            notify.error(t("imageWorkbench.promptRequired"));
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning(t("workbench.configFirst"));
+            notify.warning(t("workbench.configFirst"));
             openModelSettings();
             return null;
         }
@@ -366,17 +398,18 @@ export default function ImagePage() {
                     images: [image],
                 }),
             );
-            message.success(t("workbench.retrySuccess"));
+            notify.success(t("workbench.retrySuccess"));
         } catch {
             // runGenerationSlot has already marked the result as failed.
         }
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
+        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+            <main className="flex min-h-0 flex-1 overflow-hidden">
+                <AnimatedSidePanel id="image-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border px-3 pb-4 pt-5">
                     <LogPanel
+                        unavailable={logsLoading || Boolean(logsError)}
                         logs={logs}
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
@@ -385,56 +418,52 @@ export default function ImagePage() {
                         onDeleteSelected={() => setDeleteConfirmOpen(true)}
                         onPreviewLog={(log) => void previewGenerationLog(log)}
                     />
-                </aside>
+                </AnimatedSidePanel>
 
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
-                        <div>
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{t("imageWorkbench.title")}</h1>
-                                </div>
-                                <div className="flex shrink-0 gap-2 lg:hidden">
-                                    <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
-                                        {t("workbench.logs")}
+                <section className="grid min-h-0 min-w-0 flex-1 grid-cols-1 content-start overflow-y-auto xl:content-stretch xl:grid-cols-[360px_minmax(0,1fr)] xl:overflow-hidden 2xl:grid-cols-[420px_minmax(0,1fr)]">
+                    <div className="thin-scrollbar flex min-w-0 flex-col px-4 pb-4 xl:min-h-0 xl:overflow-y-auto">
+                        <header className="sticky top-0 z-10 -mx-4 flex h-16 shrink-0 items-center justify-between gap-2 bg-background pl-1 pr-4">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <Tooltip title={t(historyVisible ? "workbench.collapseHistory" : "workbench.expandHistory")}>
+                                    <Button variant="ghost" size="icon" className="size-7" onClick={toggleHistory} aria-label={t(historyVisible ? "workbench.collapseHistory" : "workbench.expandHistory")} aria-expanded={historyVisible} aria-controls={desktop ? "image-history-panel" : undefined}>
+                                        {historyVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
                                     </Button>
-                                    <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                        {t("workbench.settings")}
-                                    </Button>
-                                </div>
+                                </Tooltip>
+                                <h1 className="truncate text-lg font-semibold">{t("imageWorkbench.title")}</h1>
                             </div>
-                        </div>
-
-                        <div className="mt-6 space-y-5">
+                            <Button variant="ghost" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
+                        </header>
+                        {logsError ? <Notice type="error" className="mb-4 shrink-0" title={logsError} action={<Button onClick={() => void refreshLogs()}>{t("workspace.retryRead")}</Button>} /> : logsLoading ? <p role="status" className="mb-4 shrink-0 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
+                        <div className="space-y-5">
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("workbench.prompt")}</span>
                                     <div className="flex gap-2">
-                                        <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
+                                        <Button size="sm" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                        <Button size="sm" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                             {t("workbench.viewAssets")}
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
                             </div>
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("imageWorkbench.references")}</span>
                                     <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
+                                        <Button size="sm" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
                                         </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                        <Button size="sm" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
                                             {t("workbench.upload")}
                                         </Button>
                                     </div>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint relative flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${isReferenceDragActive ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint relative flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${isReferenceDragActive ? "border-border bg-muted  " : "border-border "}`}
                                     onDragEnter={(event) => {
                                         event.preventDefault();
                                         dragDepthRef.current += 1;
@@ -462,9 +491,9 @@ export default function ImagePage() {
                                     }}
                                 >
                                     {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
+                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border ">
                                             <img src={previewUrlFor(item.storageKey) || item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{imageReferenceLabel(index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -476,15 +505,15 @@ export default function ImagePage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{isReferenceDragActive ? t("imageWorkbench.dropReferences") : t("imageWorkbench.noReferences")}</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-muted-foreground">{isReferenceDragActive ? t("imageWorkbench.dropReferences") : t("imageWorkbench.noReferences")}</div> : null}
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
+                            <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
+                                <span className="truncate text-muted-foreground ">
                                     {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
                                 </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
                                 </Button>
                             </div>
@@ -496,16 +525,16 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
+                            <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
-                        <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="thin-scrollbar min-w-0 border-t border-border px-4 pb-4 xl:min-h-0 xl:overflow-y-auto xl:border-l xl:border-t-0">
+                        <div className="sticky top-0 z-10 -mx-4 flex h-16 items-center justify-between gap-3 bg-background px-4">
                             <div>
-                                <h2 className="text-xl font-semibold">{t("workbench.results")}</h2>
+                                <h2 className="text-base font-semibold">{t("workbench.results")}</h2>
                             </div>
                             {running ? <Tag className="m-0 px-2 py-1">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</Tag> : null}
                         </div>
@@ -522,9 +551,9 @@ export default function ImagePage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
-                                <ImagePlus className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("imageWorkbench.empty")} />
+                            <div className="flex min-h-[320px] flex-col items-center justify-center text-center lg:min-h-[480px]">
+                                
+                                <Empty description={t("imageWorkbench.empty")} />
                             </div>
                         )}
                     </div>
@@ -541,8 +570,9 @@ export default function ImagePage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title={t("workbench.logs")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
+            <Dialog title={t("workbench.logs")} side="bottom" open={logsOpen} onClose={() => setLogsOpen(false)}>
                 <LogPanel
+                        unavailable={logsLoading || Boolean(logsError)}
                     logs={logs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
@@ -551,17 +581,17 @@ export default function ImagePage() {
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
-            </Drawer>
-            <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            </Dialog>
+            <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                 </div>
-            </Drawer>
+            </Dialog>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
-            <Modal title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
+            <Dialog title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} onConfirm={deleteSelectedLogs} confirmText={t("common.delete")} destructive cancelText={t("common.cancel")}>
                 {t("workbench.deleteLogsConfirm", { count: selectedLogIds.length })}
-            </Modal>
+            </Dialog>
         </div>
     );
 }
@@ -574,7 +604,7 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
+                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
@@ -600,10 +630,10 @@ function ResultImageCard({
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
-            <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+        <div className="overflow-hidden rounded-lg border border-border bg-background ">
+            <MediaPreview src={previewUrlFor(image.storageKey) || image.dataUrl} previewSrc={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
+            <div className="space-y-2 border-t border-border px-3 py-2.5 ">
+                <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-muted-foreground ">
                     <span>
                         {image.width}x{image.height}
                     </span>
@@ -612,17 +642,17 @@ function ResultImageCard({
                 </div>
                 <div className="grid min-w-0 grid-cols-3 gap-2">
                     <Tooltip title={t("common.addToAssets")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="sm" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
                             {t("common.addToAssets")}
                         </Button>
                     </Tooltip>
                     <Tooltip title={t("imageWorkbench.addReference")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="sm" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
                             {t("imageWorkbench.addReference")}
                         </Button>
                     </Tooltip>
                     <Tooltip title={t("common.download")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="sm" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
                             {t("common.download")}
                         </Button>
                     </Tooltip>
@@ -635,7 +665,7 @@ function ResultImageCard({
 function PendingImageCard() {
     const { t } = useTranslation();
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-border bg-muted  ">
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
@@ -643,7 +673,7 @@ function PendingImageCard() {
                     backgroundSize: "16px 16px",
                 }}
             />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>{t("workbench.generating")}</span>
             </div>
@@ -654,15 +684,15 @@ function PendingImageCard() {
 function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
     const { t } = useTranslation();
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+        <div className="overflow-hidden rounded-lg border border-destructive/25 bg-destructive/5">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
-                <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
+                <div className="text-sm font-medium text-destructive">{t("workbench.failed")}</div>
+                <p className="!mb-0 !text-xs !text-destructive">
                     {error}
-                </Typography.Paragraph>
+                </p>
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
-                <Button size="small" danger onClick={onRetry}>
+            <div className="flex justify-end border-t border-destructive/25 p-3">
+                <Button variant="destructive" size="sm" onClick={onRetry}>
                     {t("workbench.retry")}
                 </Button>
             </div>
@@ -676,6 +706,7 @@ function updateResultAt(results: GenerationResult[], index: number, next: Partia
 
 function LogPanel({
     logs,
+    unavailable,
     selectedLogIds,
     activeLogId,
     onSelectedLogIdsChange,
@@ -684,6 +715,7 @@ function LogPanel({
     onPreviewLog,
 }: {
     logs: GenerationLog[];
+    unavailable?: boolean;
     selectedLogIds: string[];
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
@@ -704,13 +736,13 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+                <Button size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
                     {t("workbench.new")}
                 </Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
+                <Button size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? t("common.cancel") : t("workbench.selectAll")}
                 </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                <Button variant="destructive" size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                     {t("common.delete")}
                 </Button>
             </div>
@@ -725,7 +757,7 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">{t("workbench.noLogs")}</div> : null}
+                {!logs.length && !unavailable ? <div className="flex min-h-40 items-center justify-center text-center text-sm text-muted-foreground ">{t("workbench.noLogs")}</div> : null}
             </div>
         </>
     );
@@ -739,10 +771,10 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     return (
         <button
             type="button"
-            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
+            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-border bg-accent  " : "border-border bg-background hover:bg-accent  "}`}
             onClick={onClick}
         >
-            <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
+            <div className="grid gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                     <div className="min-w-0">
@@ -850,11 +882,12 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
 }
 
 function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {
+    useTranslation();
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Button size="sm" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-popover/95 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
+            <Button size="sm" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-popover/95 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
         </div>
     );
 }

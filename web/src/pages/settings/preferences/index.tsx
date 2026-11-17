@@ -1,4 +1,14 @@
-import { Alert, App, Button, Form, Input, Radio, Select, Switch } from "antd";
+import appI18n from "@/i18n";
+import { PageHeader } from "@/components/layout/page-header";
+import { useCallback } from "react";
+import { useEditGuard } from "@/hooks/use-edit-guard";
+import { Notice as Alert } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { EditorForm, Field } from "@/components/ui/form";
+import { Input, Textarea } from "@/components/ui/input";
+import { Choice } from "@/components/ui/choice";
+import { Switch } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -17,7 +27,7 @@ const modelGroups = [
 ] as const;
 
 export default function PreferencesPage() {
-    const { message, modal } = App.useApp();
+    const { notify, confirm } = useFeedback();
     const { t } = useTranslation();
     const openModelSettings = useOpenModelSettings();
     const config = useConfigStore((state) => state.config);
@@ -26,93 +36,106 @@ export default function PreferencesPage() {
     const saving = useConfigStore((state) => state.saving);
     const dirty = useConfigStore((state) => state.dirty);
     const conflict = useConfigStore((state) => state.conflict);
+    const discard = useCallback(() => { void useConfigStore.getState().load(true); }, []);
+    useEditGuard(dirty, discard);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const imageResolutionOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value.toUpperCase() }));
     const reload = () => {
         const assertSession = captureSession();
-        const read = async () => { try { assertSession(); await useConfigStore.getState().load(true); } catch (error) { message.error(error instanceof Error ? error.message : "读取失败"); } };
-        if (dirty) modal.confirm({ title: "放弃未保存的创作偏好？", content: "重新读取将清除当前偏好草稿，请先复制需要保留的内容。", okText: "放弃并读取", cancelText: "保留编辑", onOk: read });
+        const read = async () => { try { assertSession(); await useConfigStore.getState().load(true); } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.readFailed")); } };
+        if (dirty) confirm({ title: appI18n.t("workspace.discardPreferences"), content: appI18n.t("workspace.reloadPreferences"), confirmText: appI18n.t("workspace.discardAndReload"), cancelText: appI18n.t("workspace.preserveEdits"), onConfirm: read });
         else void read();
     };
     return (
-        <section>
-            <header className="mb-8">
-                <h2 className="text-2xl font-medium tracking-tight">{t("settings.preferences")}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{t("settings.preferencesDescription")}</p>
-            </header>
-            {error ? <Alert type="error" className="mb-4" title={error} action={<Button onClick={reload}>重新读取</Button>} /> : null}
-            <Form layout="vertical" requiredMark={false} disabled={!hydrated}>
-                <div className="mb-2 text-sm font-semibold">{t("config.preferences.defaultModels")}</div>
-                <div className="mb-4 grid gap-4 xl:grid-cols-2">
-                    {modelGroups.map((group) => (
-                        <Form.Item key={group.modelKey} label={t(group.labelKey)} className="mb-0">
-                            <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} onMissingConfig={openModelSettings} fullWidth />
-                        </Form.Item>
-                    ))}
-                </div>
-                <div className="mb-2 text-sm font-semibold">{t("config.preferences.generation")}</div>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    <Form.Item label={t("config.preferences.canvasImageCount")} extra={t("config.preferences.canvasImageCountDescription")} className="mb-4">
-                        <Input
-                            type="number"
-                            min={1}
-                            max={15}
-                            value={config.canvasImageCount}
-                            onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
-                            onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
-                        />
-                    </Form.Item>
-                    <Form.Item label={t("config.preferences.imageResolution")} className="mb-4">
-                        <Select value={inferMediaScale(config.size)} options={imageResolutionOptions} onChange={(scale) => updateConfig("size", computeMediaSize(scale, inferMediaRatio(config.size)))} />
-                    </Form.Item>
-                    <Form.Item label={t("config.preferences.videoResolution")} className="mb-4">
-                        <Select value={parseVideoResolution(config.vquality)} options={videoResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
-                    </Form.Item>
-                    <Form.Item label={t("config.preferences.audioVoice")} className="mb-4">
-                        <Select value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
-                    </Form.Item>
-                    <Form.Item label={t("config.preferences.audioFormat")} className="mb-4">
-                        <Select value={config.audioFormat} options={audioFormatOptions} onChange={(value) => updateConfig("audioFormat", value)} />
-                    </Form.Item>
-                    <Form.Item label={t("config.preferences.audioSpeed")} className="mb-4">
-                        <Input
-                            type="number"
-                            min={0.25}
-                            max={4}
-                            step={0.05}
-                            value={config.audioSpeed}
-                            onChange={(event) => updateConfig("audioSpeed", event.target.value)}
-                            onBlur={(event) => updateConfig("audioSpeed", normalizeAudioSpeedValue(event.target.value))}
-                        />
-                    </Form.Item>
-                </div>
-                <Form.Item label={t("config.preferences.regenerateBehavior")} className="mb-4">
-                    <Radio.Group value={config.nodeRegenerateBehavior} onChange={(event) => updateConfig("nodeRegenerateBehavior", event.target.value)} className="flex flex-col gap-2">
-                        <Radio value="overwrite">
-                            <span className="block text-sm font-medium">{t("config.preferences.regenerateBehaviorOverwrite")}</span>
-                            <span className="mt-0.5 block text-xs opacity-60">{t("config.preferences.regenerateBehaviorOverwriteDescription")}</span>
-                        </Radio>
-                        <Radio value="new-node">
-                            <span className="block text-sm font-medium">{t("config.preferences.regenerateBehaviorNewNode")}</span>
-                            <span className="mt-0.5 block text-xs opacity-60">{t("config.preferences.regenerateBehaviorNewNodeDescription")}</span>
-                        </Radio>
-                    </Radio.Group>
-                </Form.Item>
-                <Form.Item className="mb-4">
-                    <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm">{t("config.preferences.autoFocusOnSelect")}</span>
-                        <Switch checked={config.autoFocusOnSelect} onChange={(checked) => updateConfig("autoFocusOnSelect", checked)} />
+        <section className="space-y-6">
+            <PageHeader title={t("settings.preferences")} description={t("settings.preferencesDescription")} />
+            {error ? <Alert type="error" title={error} action={<Button onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
+            <EditorForm disabled={!hydrated || saving} className="space-y-8">
+                <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.defaultModels")}</h2>
+                    <div>
+                        {modelGroups.map((group) => (
+                            <Field key={group.modelKey} layout="horizontal" label={t(group.labelKey)}>
+                                <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} onMissingConfig={openModelSettings} fullWidth />
+                            </Field>
+                        ))}
                     </div>
-                </Form.Item>
-                <Form.Item label={t("config.preferences.audioInstructions")} className="mb-4">
-                    <Input.TextArea rows={2} value={config.audioInstructions} placeholder={t("config.preferences.audioInstructionsPlaceholder")} onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
-                </Form.Item>
-                <Form.Item label={t("config.preferences.systemPrompt")} className="mb-0">
-                    <Input.TextArea rows={4} value={config.systemPrompt} placeholder={t("config.preferences.systemPromptPlaceholder")} onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
-                </Form.Item>
-            </Form>
-            {saving ? <p className="mt-4 text-xs text-muted-foreground">正在保存偏好</p> : null}
-            {dirty && !saving && !conflict ? <Button onClick={() => void useConfigStore.getState().save()}>重试保存偏好</Button> : null}
+                </section>
+                <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.generation")}</h2>
+                    <div>
+                        <Field layout="horizontal" label={t("config.preferences.canvasImageCount")} description={t("config.preferences.canvasImageCountDescription")}>
+                            <Input
+                                className="w-24 text-right tabular-nums"
+                                type="number"
+                                min={1}
+                                max={15}
+                                value={config.canvasImageCount}
+                                onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
+                                onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
+                            />
+                        </Field>
+                        <Field layout="horizontal" label={t("config.preferences.imageResolution")}>
+                            <Choice value={inferMediaScale(config.size)} options={imageResolutionOptions} onChange={(scale) => updateConfig("size", computeMediaSize(scale, inferMediaRatio(config.size)))} />
+                        </Field>
+                        <Field layout="horizontal" label={t("config.preferences.videoResolution")}>
+                            <Choice value={parseVideoResolution(config.vquality)} options={videoResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
+                        </Field>
+                    </div>
+                </section>
+                <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("settings.audioDefaults")}</h2>
+                    <div>
+                        <Field layout="horizontal" label={t("config.preferences.audioVoice")}>
+                            <Choice value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
+                        </Field>
+                        <Field layout="horizontal" label={t("config.preferences.audioFormat")}>
+                            <Choice value={config.audioFormat} options={audioFormatOptions} onChange={(value) => updateConfig("audioFormat", value)} />
+                        </Field>
+                        <Field layout="horizontal" label={t("config.preferences.audioSpeed")}>
+                            <Input
+                                className="w-24 text-right tabular-nums"
+                                type="number"
+                                min={0.25}
+                                max={4}
+                                step={0.05}
+                                value={config.audioSpeed}
+                                onChange={(event) => updateConfig("audioSpeed", event.target.value)}
+                                onBlur={(event) => updateConfig("audioSpeed", normalizeAudioSpeedValue(event.target.value))}
+                            />
+                        </Field>
+                        <Field layout="horizontal" className="@md/settings:items-start" label={t("config.preferences.audioInstructions")}>
+                            <Textarea rows={3} value={config.audioInstructions} placeholder={t("config.preferences.audioInstructionsPlaceholder")} onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
+                        </Field>
+                    </div>
+                </section>
+                <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("settings.canvasInteraction")}</h2>
+                    <div>
+                        <Field layout="horizontal" label={t("config.preferences.regenerateBehavior")} description={t(config.nodeRegenerateBehavior === "overwrite" ? "config.preferences.regenerateBehaviorOverwriteDescription" : "config.preferences.regenerateBehaviorNewNodeDescription")}>
+                            <Choice value={config.nodeRegenerateBehavior} onChange={(value) => updateConfig("nodeRegenerateBehavior", value)} options={[{ value: "overwrite", label: t("settings.regenerateInPlace") }, { value: "new-node", label: t("settings.regenerateNewNode") }]} />
+                        </Field>
+                        <Field layout="horizontal" label={t("config.preferences.autoFocusOnSelect")}>
+                            <Switch checked={config.autoFocusOnSelect} onChange={(checked) => updateConfig("autoFocusOnSelect", checked)} />
+                        </Field>
+                    </div>
+                </section>
+                <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("settings.promptDefaults")}</h2>
+                    <div className="pt-3">
+                        <Field label={t("config.preferences.systemPrompt")}>
+                            <Textarea rows={5} value={config.systemPrompt} placeholder={t("config.preferences.systemPromptPlaceholder")} onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
+                        </Field>
+                    </div>
+                </section>
+            </EditorForm>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                <span role="status" className="text-xs text-muted-foreground">{saving ? appI18n.t("workspace.savePreferences") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
+                <div className="ml-auto flex items-center gap-2">
+                    <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
+                    <Button variant="default" disabled={!hydrated || !dirty || conflict} loading={saving} onClick={() => void useConfigStore.getState().save()}>{t("common.save")}</Button>
+                </div>
+            </div>
         </section>
     );
 }

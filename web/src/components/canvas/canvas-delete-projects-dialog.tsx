@@ -1,4 +1,4 @@
-import { App, Button, Modal } from "antd";
+import { Dialog } from "@/components/ui/dialog";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -8,7 +8,6 @@ import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
 export function CanvasDeleteProjectsDialog() {
     const { t } = useTranslation();
-    const { message } = App.useApp();
     const [busy, setBusy] = useState(false);
     const ids = useCanvasUiStore((state) => state.deleteProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
@@ -22,26 +21,20 @@ export function CanvasDeleteProjectsDialog() {
             cleanupImages();
             removeSelectedIds(ids);
             setDeleteIds([]);
-        } catch (error) { message.error(error instanceof Error ? error.message : "删除失败"); }
-        finally { setBusy(false); }
+        } finally { setBusy(false); }
     };
 
     return (
-        <Modal
+        <Dialog
             title={t("canvas.project.deleteTitle")}
             open={ids.length > 0}
-            centered
-            onCancel={() => setDeleteIds([])}
-            footer={
-                <>
-                    <Button onClick={() => setDeleteIds([])}>{t("common.cancel")}</Button>
-                    <Button danger type="primary" loading={busy} onClick={() => void confirm()}>
-                        {t("common.delete")}
-                    </Button>
-                </>
-            }
+            busy={busy}
+            onClose={() => setDeleteIds([])}
+            onConfirm={confirm}
+            destructive
+            confirmText={t("common.delete")}
         >
-            <p className="text-sm text-stone-500">{t("canvas.project.deleteDescription", { count: ids.length })}</p>
-        </Modal>
+            <p className="text-sm text-muted-foreground">{t("canvas.project.deleteDescription", { count: ids.length })}</p>
+        </Dialog>
     );
 }

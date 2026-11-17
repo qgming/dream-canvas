@@ -1,7 +1,6 @@
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -18,18 +17,18 @@ type AudioSettingsPanelProps = {
     className?: string;
 };
 
-export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: AudioSettingsPanelProps) {
+export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-xl px-1 py-0.5" }: AudioSettingsPanelProps) {
     const { t } = useTranslation();
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = normalizeAudioSpeedValue(config.audioSpeed);
 
     return (
-        <ImageSettingsTheme theme={theme}>
+        <>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.audio.title")}</div> : null}
                 <SettingGroup title={t("settingsPanels.audio.voice")} color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-3 gap-2">
                         {audioVoiceOptions.map((item) => (
                             <OptionPill key={item.value} selected={voice === item.value} theme={theme} onClick={() => onConfigChange("audioVoice", item.value)}>
                                 {item.label}
@@ -38,7 +37,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.audio.format")} color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-3 gap-2">
                         {audioFormatOptions.map((item) => (
                             <OptionPill key={item.value} selected={format === item.value} theme={theme} onClick={() => onConfigChange("audioFormat", item.value)}>
                                 {item.label}
@@ -47,7 +46,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.audio.speed")} color={theme.node.muted}>
-                    <div className="grid grid-cols-4 gap-2.5">
+                    <div className="grid grid-cols-4 gap-2">
                         {speedOptions.map((value) => (
                             <OptionPill key={value} selected={speed === value} theme={theme} onClick={() => onConfigChange("audioSpeed", value)}>
                                 {audioSpeedLabel(value)}
@@ -59,7 +58,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         min={0.25}
                         max={4}
                         step={0.05}
-                        className="h-9 w-full rounded-full border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        className="h-8 w-full rounded-md border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }}
                         value={config.audioSpeed || "1"}
                         onChange={(event) => onConfigChange("audioSpeed", event.target.value)}
@@ -71,20 +70,20 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <textarea
                         value={config.audioInstructions || ""}
                         placeholder={t("settingsPanels.audio.instructionsPlaceholder")}
-                        className="thin-scrollbar h-20 w-full resize-none rounded-xl border bg-transparent px-3 py-2 text-sm leading-5 outline-none"
+                        className="thin-scrollbar h-20 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm leading-5 outline-none"
                         style={{ borderColor: theme.node.stroke, color: theme.node.text }}
                         onChange={(event) => onConfigChange("audioInstructions", event.target.value)}
                         onMouseDown={(event) => event.stopPropagation()}
                     />
                 </SettingGroup>
             </div>
-        </ImageSettingsTheme>
+        </>
     );
 }
 
 function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
-        <button type="button" className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80" style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
+        <button type="button" className="h-8 cursor-pointer rounded-md border px-2 text-sm transition hover:opacity-80" aria-pressed={selected} style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
             {children}
         </button>
     );
@@ -92,8 +91,8 @@ function OptionPill({ selected, theme, onClick, children }: { selected: boolean;
 
 function SettingGroup({ title, color, children }: { title: string; color: string; children: ReactNode }) {
     return (
-        <div className="space-y-2.5">
-            <div className="text-xs font-medium" style={{ color }}>
+        <div className="space-y-2">
+            <div className="text-sm font-medium" style={{ color }}>
                 {title}
             </div>
             {children}

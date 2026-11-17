@@ -1,6 +1,20 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
+import appI18n from "@/i18n";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { useEditGuard } from "@/hooks/use-edit-guard";
+import { useDiscardChanges } from "@/hooks/use-discard-changes";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { Notice } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/controls";
+import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
+
+import { EmptyState as Empty } from "@/components/ui/display";
+import { Textarea } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Badge as Tag } from "@/components/ui/display";
+import { Tooltip } from "@/components/ui/popover";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
@@ -22,6 +36,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useAppUiStore } from "@/stores/use-app-ui-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
 import { readWorkbenchRecords, saveWorkbenchRecord, deleteWorkbenchRecord } from "@/services/api/workbench-records";
@@ -70,7 +85,7 @@ type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"]
 
 
 export default function VideoPage() {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +102,17 @@ export default function VideoPage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [logsError, setLogsError] = useState("");
+    const [logsLoading, setLogsLoading] = useState(true);
+    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {} }));
+    const submittingRef = useRef(false);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
+    const historyPanelOpen = useAppUiStore((state) => state.workbenchHistoryOpen);
+    const toggleHistoryPanel = useAppUiStore((state) => state.toggleWorkbenchHistory);
+    const desktop = useMediaQuery("(min-width: 1024px)");
+    const historyVisible = desktop ? historyPanelOpen : logsOpen;
+    const toggleHistory = () => desktop ? toggleHistoryPanel() : setLogsOpen((open) => !open);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -119,14 +143,14 @@ export default function VideoPage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs().catch((error: unknown) => message.error(error instanceof Error ? error.message : "读取记录失败"));
+        void refreshLogs().catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.readRecordsFailed")));
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
         assertSession();
         const selectedFiles = Array.from(files || []);
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/"));
-        if (unsupported.length) message.warning(t("videoWorkbench.unsupportedFiles"));
+        if (unsupported.length) notify.warning(t("videoWorkbench.unsupportedFiles"));
         const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/")).slice(0, 7 - references.length);
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
@@ -162,7 +186,7 @@ export default function VideoPage() {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
             if (!blobs.length) {
-                message.error(t("videoWorkbench.clipboardEmpty"));
+                notify.error(t("videoWorkbench.clipboardEmpty"));
                 return;
             }
             const nextReferences = await Promise.all(
@@ -173,12 +197,13 @@ export default function VideoPage() {
                 }),
             );
             setReferences((value) => [...value, ...nextReferences].slice(0, 7));
-            message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
+            notify.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
         } catch {
-            message.error(t("videoWorkbench.clipboardEmpty"));
+            notify.error(t("videoWorkbench.clipboardEmpty"));
         }
     };
     const generate = async () => {
+        if (submittingRef.current || running) return;
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const snapshot = buildRequestSnapshot();
@@ -186,6 +211,7 @@ export default function VideoPage() {
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("videoWorkbench.invalidParams") });
             return;
         }
+        submittingRef.current = true;
         setElapsedMs(0);
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
@@ -203,17 +229,18 @@ export default function VideoPage() {
             void pollGenerationLog(saved, snapshot.config, agentTaskId);
         } catch (error) {
             if (submitted) {
-                message.error("任务已提交，工作台记录保存失败，请通过任务列表核对；本次没有重复提交");
+                notify.error(appI18n.t("workspace.taskSubmittedRecordFailed"));
                 setRunning(false);
                 return;
             }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
-            await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: performance.now() - batchStartedAt, status: "failed", error: errorMessage }));
-            message.error(errorMessage);
+            try { await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: performance.now() - batchStartedAt, status: "failed", error: errorMessage })); }
+            catch (saveError) { setLogsError(saveError instanceof Error ? saveError.message : appI18n.t("workspace.saveRecordFailed")); }
+            notify.error(errorMessage);
             setRunning(false);
-        }
+        } finally { submittingRef.current = false; }
     };
 
     // Handle video-generation commands from the Agent panel by setting the prompt and optionally starting generation.
@@ -241,11 +268,11 @@ export default function VideoPage() {
     const buildRequestSnapshot = () => {
         const text = prompt.trim();
         if (!text) {
-            message.error(t("videoWorkbench.promptRequired"));
+            notify.error(t("videoWorkbench.promptRequired"));
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning(t("workbench.configFirst"));
+            notify.warning(t("workbench.configFirst"));
             openModelSettings();
             return null;
         }
@@ -270,7 +297,7 @@ export default function VideoPage() {
             data: { url: video.url, storageKey: video.storageKey, width: video.width, height: video.height, bytes: video.bytes, mimeType: video.mimeType },
             metadata: { source: "video-page", prompt },
         });
-        message.success(t("common.addedToAssets"));
+        notify.success(t("common.addedToAssets"));
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -283,22 +310,25 @@ export default function VideoPage() {
         setAssetPickerOpen(false);
     };
 
-    const createSession = () => {
-        setPrompt("");
-        setReferences([]);
+    const draftDirty = JSON.stringify({ prompt, references, parameters }) !== savedDraft;
+    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {} })); }, []);
+    useEditGuard(draftDirty || running, discardDraft);
+    const createSession = useDiscardChanges(draftDirty, () => {
+        discardDraft();
         setResults([]);
         setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
-    };
+    });
 
-    const deleteSelectedLogs = () => {
+    const deleteSelectedLogs = async () => {
         const mediaKeys = logs
             .filter((log) => selectedLogIds.includes(log.id))
             .map((log) => log.video?.storageKey)
             .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("video", id))]).then(() => refreshLogs()).catch((error: unknown) => message.error(error instanceof Error ? error.message : "删除记录失败"));
+        await Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => deleteWorkbenchRecord("video", id))]);
+        await refreshLogs();
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -315,11 +345,16 @@ export default function VideoPage() {
     };
 
     const refreshLogs = async (resumePending = true) => {
+        setLogsLoading(true);
+        try {
         const nextLogs = await readStoredLogs();
         assertSession();
         setLogs(nextLogs);
+        setLogsError("");
         if (resumePending) resumePendingLogs(nextLogs);
         return nextLogs;
+        } catch (error) { setLogsError(error instanceof Error ? error.message : appI18n.t("workspace.readRecordsFailed")); return []; }
+        finally { setLogsLoading(false); }
     };
 
     const resumePendingLogs = (items: GenerationLog[]) => {
@@ -343,18 +378,18 @@ export default function VideoPage() {
             setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
             await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
-            message.success(t("videoWorkbench.generated"));
+            notify.success(t("videoWorkbench.generated"));
         } catch (error) {
             if (controller.signal.aborted) return;
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             if (!isVideoTaskFailed(error)) {
-                message.warning(`${errorMessage}；记录仍保留待查询状态，请重新读取任务状态`);
+                notify.warning(t("workspace.taskStillPending", { error: errorMessage }));
                 return;
             }
             setResults([{ id: log.id, status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
             await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
-            message.error(errorMessage);
+            notify.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
             watching.current.delete(log.id);
@@ -365,12 +400,13 @@ export default function VideoPage() {
         }
     };
 
-    const previewGenerationLog = (log: GenerationLog) => {
+    const previewGenerationLog = useDiscardChanges(draftDirty, (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
         setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
         setReferences(log.references || []);
+        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.vquality) updateConfig("vquality", log.config.vquality);
@@ -379,59 +415,59 @@ export default function VideoPage() {
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
-    };
+    });
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
-                    <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
-                </aside>
+        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+            <main className="flex min-h-0 flex-1 overflow-hidden">
+                <AnimatedSidePanel id="video-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border px-3 pb-4 pt-5">
+                    <LogPanel unavailable={logsLoading || Boolean(logsError)} logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+                </AnimatedSidePanel>
 
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
-                        <div className="flex items-start justify-between gap-3">
-                            <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{t("videoWorkbench.title")}</h1>
-                            <div className="flex shrink-0 gap-2 lg:hidden">
-                                <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
-                                    {t("workbench.logs")}
-                                </Button>
-                                <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    {t("workbench.settings")}
-                                </Button>
+                <section className="grid min-h-0 min-w-0 flex-1 grid-cols-1 content-start overflow-y-auto xl:content-stretch xl:grid-cols-[360px_minmax(0,1fr)] xl:overflow-hidden 2xl:grid-cols-[420px_minmax(0,1fr)]">
+                    <div className="thin-scrollbar flex min-w-0 flex-col px-4 pb-4 xl:min-h-0 xl:overflow-y-auto">
+                        <header className="sticky top-0 z-10 -mx-4 flex h-16 shrink-0 items-center justify-between gap-2 bg-background pl-1 pr-4">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <Tooltip title={t(historyVisible ? "workbench.collapseHistory" : "workbench.expandHistory")}>
+                                    <Button variant="ghost" size="icon" className="size-7" onClick={toggleHistory} aria-label={t(historyVisible ? "workbench.collapseHistory" : "workbench.expandHistory")} aria-expanded={historyVisible} aria-controls={desktop ? "video-history-panel" : undefined}>
+                                        {historyVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+                                    </Button>
+                                </Tooltip>
+                                <h1 className="truncate text-lg font-semibold">{t("videoWorkbench.title")}</h1>
                             </div>
-                        </div>
-
-                        <div className="mt-6 space-y-5">
+                            <Button variant="ghost" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
+                        </header>
+                        {logsError ? <Notice type="error" className="mb-4 shrink-0" title={logsError} action={<Button onClick={() => void refreshLogs()}>{t("workspace.retryRead")}</Button>} /> : logsLoading ? <p role="status" className="mb-4 shrink-0 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
+                        <div className="space-y-5">
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("workbench.prompt")}</span>
                                     <div className="flex gap-2">
-                                        <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
+                                        <Button size="sm" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                        <Button size="sm" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                             {t("workbench.viewAssets")}
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("videoWorkbench.promptPlaceholder")} />
+                                <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("videoWorkbench.promptPlaceholder")} />
                             </div>
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("videoWorkbench.references")}</span>
                                     <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
+                                        <Button size="sm" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
                                         </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                        <Button size="sm" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
                                             {t("workbench.upload")}
                                         </Button>
                                     </div>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referenceDragTarget ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referenceDragTarget ? "border-border bg-muted  " : "border-border "}`}
                                     onDragEnter={handleReferenceDragEnter}
                                     onDragOver={(event) => {
                                         event.preventDefault();
@@ -441,24 +477,24 @@ export default function VideoPage() {
                                     onDrop={handleReferenceDrop}
                                 >
                                     {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
+                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border ">
                                             <img src={previewUrlFor(item.storageKey) || item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{index + 1}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label={t("videoWorkbench.removeImage")}>
                                                 <Trash2 className="size-3.5" />
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-muted-foreground">{referenceDragTarget ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
+                            <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
+                                <span className="truncate text-muted-foreground ">
                                     {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(effectiveConfig.vquality)}p · {videoSizeLabel(effectiveConfig.size)} · {normalizeVideoSeconds(effectiveConfig.videoSeconds)}s · {videoModeLabel(effectiveConfig.videoMode)}
                                 </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
                                 </Button>
                             </div>
@@ -470,15 +506,15 @@ export default function VideoPage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
+                            <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
-                        <div className="mb-4 flex items-center justify-between gap-3">
-                            <h2 className="text-xl font-semibold">{t("workbench.results")}</h2>
+                    <div className="thin-scrollbar min-w-0 border-t border-border px-4 pb-4 xl:min-h-0 xl:overflow-y-auto xl:border-l xl:border-t-0">
+                        <div className="sticky top-0 z-10 -mx-4 flex h-16 items-center justify-between gap-3 bg-background px-4">
+                            <h2 className="text-base font-semibold">{t("workbench.results")}</h2>
                             {running ? <Tag className="m-0 px-2 py-1">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</Tag> : null}
                         </div>
                         {results.length ? (
@@ -486,9 +522,9 @@ export default function VideoPage() {
                                 {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
-                                <VideoIcon className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("videoWorkbench.empty")} />
+                            <div className="flex min-h-[320px] flex-col items-center justify-center text-center lg:min-h-[480px]">
+                                
+                                <Empty description={t("videoWorkbench.empty")} />
                             </div>
                         )}
                     </div>
@@ -505,19 +541,19 @@ export default function VideoPage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title={t("workbench.logs")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
-            </Drawer>
-            <Drawer title={t("workbench.settings")} placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            <Dialog title={t("workbench.logs")} side="bottom" open={logsOpen} onClose={() => setLogsOpen(false)}>
+                <LogPanel unavailable={logsLoading || Boolean(logsError)} logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+            </Dialog>
+            <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                 </div>
-            </Drawer>
+            </Dialog>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
-            <Modal title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
+            <Dialog title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} onConfirm={deleteSelectedLogs} confirmText={t("common.delete")} destructive cancelText={t("common.cancel")}>
                 {t("workbench.deleteLogsConfirm", { count: selectedLogIds.length })}
-            </Modal>
+            </Dialog>
         </div>
     );
 }
@@ -530,7 +566,7 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
+                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
@@ -543,10 +579,10 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
 function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     const { t } = useTranslation();
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+        <div className="overflow-hidden rounded-lg border border-border bg-background ">
             <video src={video.url} controls preload="none" className="aspect-video w-full bg-black object-contain" />
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2.5 ">
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground ">
                     <span>
                         {video.width}x{video.height}
                     </span>
@@ -554,10 +590,10 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
                     <span>{formatDuration(video.durationMs)}</span>
                 </div>
                 <div className="flex shrink-0 gap-1">
-                    <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)}>
+                    <Button size="sm" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)}>
                         {t("common.addToAssets")}
                     </Button>
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(video)}>
+                    <Button size="sm" icon={<Download className="size-3.5" />} onClick={() => onDownload(video)}>
                         {t("common.download")}
                     </Button>
                 </div>
@@ -569,8 +605,8 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
 function PendingVideoCard() {
     const { t } = useTranslation();
     return (
-        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-border bg-muted  ">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>{t("workbench.generating")}</span>
             </div>
@@ -581,15 +617,15 @@ function PendingVideoCard() {
 function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
     const { t } = useTranslation();
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+        <div className="overflow-hidden rounded-lg border border-destructive/25 bg-destructive/5">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
-                <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
+                <div className="text-sm font-medium text-destructive">{t("workbench.failed")}</div>
+                <p className="!mb-0 !text-xs !text-destructive">
                     {error}
-                </Typography.Paragraph>
+                </p>
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
-                <Button size="small" danger onClick={onRetry}>
+            <div className="flex justify-end border-t border-destructive/25 p-3">
+                <Button variant="destructive" size="sm" onClick={onRetry}>
                     {t("workbench.retry")}
                 </Button>
             </div>
@@ -599,6 +635,7 @@ function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => voi
 
 function LogPanel({
     logs,
+    unavailable,
     selectedLogIds,
     activeLogId,
     onSelectedLogIdsChange,
@@ -607,6 +644,7 @@ function LogPanel({
     onPreviewLog,
 }: {
     logs: GenerationLog[];
+    unavailable?: boolean;
     selectedLogIds: string[];
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
@@ -625,13 +663,13 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+                <Button size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
                     {t("workbench.new")}
                 </Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
+                <Button size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? t("common.cancel") : t("workbench.selectAll")}
                 </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                <Button variant="destructive" size="sm" className="gap-1 px-1.5 [&_svg]:size-3.5" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                     {t("common.delete")}
                 </Button>
             </div>
@@ -639,7 +677,7 @@ function LogPanel({
                 {logs.map((log) => (
                     <LogCard key={log.id} log={log} selected={selectedLogIds.includes(log.id)} active={activeLogId === log.id} onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))} onClick={() => onPreviewLog(log)} />
                 ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">{t("workbench.noLogs")}</div> : null}
+                {!logs.length && !unavailable ? <div className="flex min-h-40 items-center justify-center text-center text-sm text-muted-foreground ">{t("workbench.noLogs")}</div> : null}
             </div>
         </>
     );
@@ -648,8 +686,8 @@ function LogPanel({
 function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
     const { t } = useTranslation();
     return (
-        <button type="button" className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`} onClick={onClick}>
-            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">
+        <button type="button" className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-border bg-accent  " : "border-border bg-background hover:bg-accent  "}`} onClick={onClick}>
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                 <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                 <div className="min-w-0">
                     <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
@@ -659,7 +697,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
                     </div>
                 </div>
-                <div className="grid justify-items-end gap-2">
+                <div className="col-span-2 flex flex-wrap items-center justify-end gap-2">
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "success" ? "blue" : log.status === "pending" ? "processing" : "red"}>
                         {t(`workbench.${log.status === "success" ? "success" : log.status === "pending" ? "generating" : "failed"}`)}
                     </Tag>
@@ -724,11 +762,12 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
 }
 
 function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {
+    useTranslation();
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Button size="sm" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-popover/95 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
+            <Button size="sm" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-popover/95 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
         </div>
     );
 }

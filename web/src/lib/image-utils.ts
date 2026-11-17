@@ -12,7 +12,8 @@ export function formatBytes(bytes: number) {
         value /= 1024;
         unitIndex += 1;
     }
-    return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+    const fraction = value >= 10 || unitIndex === 0 ? 0 : 1;
+    return `${value.toLocaleString(i18n.resolvedLanguage, { minimumFractionDigits: fraction, maximumFractionDigits: fraction })} ${units[unitIndex]}`;
 }
 
 export function formatDuration(ms: number) {

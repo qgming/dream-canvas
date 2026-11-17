@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 let csrf = "";
 let sessionRevision = 0;
 
@@ -12,7 +13,7 @@ export function setCsrfToken(value: string) { if (csrf !== value) { csrf = value
 
 export function captureSession() {
     const revision = sessionRevision;
-    return () => { if (revision !== sessionRevision) throw new ApiError(409, "session_changed", "登录状态已改变，请重新操作"); };
+    return () => { if (revision !== sessionRevision) throw new ApiError(409, "session_changed", i18n.t("errors.sessionChanged")); };
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -27,7 +28,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
         const error = await response.json().catch(() => ({})) as { code?: string; message?: string };
         assertSession();
         if (response.status === 401 && path !== "/auth/login" && revision === sessionRevision) window.dispatchEvent(new Event("session-expired"));
-        throw new ApiError(response.status, error.code || "request_failed", error.message || `请求失败（${response.status}）`);
+        throw new ApiError(response.status, error.code || "request_failed", error.message || i18n.t("errors.requestFailed", { status: response.status }));
     }
     const result = response.status === 204 ? undefined as T : await response.json() as T;
     assertSession();

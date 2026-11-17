@@ -26,9 +26,12 @@ export function ConnectionCreateMenu({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const menuRef = useRef<HTMLDivElement>(null);
+    useMenuFocus(menuRef, onClose);
     return (
         <div
-            className="absolute z-[120] w-[240px] rounded-2xl border p-2 shadow-2xl backdrop-blur"
+            ref={menuRef} role="menu" aria-label={t("canvas.createMenu.fromNode")} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore onKeyDown={menuKeyDown}
+            className="absolute z-[120] w-[240px] rounded-xl border p-2 shadow-lg"
             data-connection-create-menu
             style={{ left: pending.position.x, top: pending.position.y, transform: `scale(${1 / scale})`, transformOrigin: "top left", background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
@@ -38,7 +41,7 @@ export function ConnectionCreateMenu({
                 <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
                     {t("canvas.createMenu.fromNode")}
                 </span>
-                <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}>
+                <button type="button" className="grid size-7 place-items-center rounded-md text-base opacity-55 transition hover:bg-accent hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}>
                     ×
                 </button>
             </div>
@@ -57,13 +60,14 @@ export function ConnectionCreateOption({ theme, icon, title, description, onClic
     return (
         <button
             type="button"
-            className="flex h-12 w-full cursor-pointer items-center gap-2.5 rounded-xl px-2 text-left transition"
+            role="menuitem"
+            className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left outline-none transition focus-visible:bg-accent"
             style={{ color: theme.node.text }}
             onClick={onClick}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg" style={{ background: theme.node.fill, color: theme.node.muted }}>
+            <span className="grid size-7 shrink-0 place-items-center" style={{ color: theme.node.muted }}>
                 {icon}
             </span>
             <span className="min-w-0 flex-1">
@@ -83,6 +87,7 @@ export function NodeCreateMenu({ position, scale = 1, onCreate, onClose }: { pos
     const { t } = useTranslation();
     useNodeRegistryVersion();
     const menuRef = useRef<HTMLDivElement>(null);
+    useMenuFocus(menuRef, onClose);
     const definitions = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false);
     // Close automatically when clicking outside the menu.
     useEffect(() => {
@@ -95,7 +100,8 @@ export function NodeCreateMenu({ position, scale = 1, onCreate, onClose }: { pos
     return (
         <div
             ref={menuRef}
-            className="absolute z-[120] max-h-[70vh] w-[240px] overflow-y-auto rounded-2xl border p-2 shadow-2xl backdrop-blur thin-scrollbar"
+            role="menu" aria-label={t("canvas.createMenu.select")} data-ui-overlay data-canvas-shortcuts-ignore onKeyDown={menuKeyDown}
+            className="absolute z-[120] max-h-[70vh] w-[240px] overflow-y-auto rounded-xl border p-2 shadow-lg thin-scrollbar"
             data-canvas-no-zoom
             style={{ left: position.x, top: position.y, transform: `scale(${1 / scale})`, transformOrigin: "top left", background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
@@ -115,4 +121,25 @@ export function NodeCreateMenu({ position, scale = 1, onCreate, onClose }: { pos
             </div>
         </div>
     );
+}
+
+function useMenuFocus(ref: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
+    const close = useRef(onClose);
+    close.current = onClose;
+    useEffect(() => {
+        const previous = document.activeElement as HTMLElement | null;
+        ref.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+        const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); } };
+        const element = ref.current;
+        element?.addEventListener("keydown", escape);
+        return () => { element?.removeEventListener("keydown", escape); previous?.focus(); };
+    }, [ref]);
+}
+
+function menuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    event.preventDefault(); event.stopPropagation(); items[next]?.focus();
 }

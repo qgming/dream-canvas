@@ -56,11 +56,11 @@ sessionStorage.setItem("dream-canvas-editor", tabId);
 let editorReady: Promise<void> | undefined;
 const draftKey = (owner: string, id: string) => `${owner}/${id}/${tabId}`;
 let loadSequence = 0;
-const errorText = (error: unknown) => error instanceof Error ? error.message : "保存失败，未保存内容已保留";
+const errorText = (error: unknown) => error instanceof Error ? error.message : i18n.t("errors.projectSavePreserved");
 
 function claimEditor() {
     return editorReady ||= new Promise<void>((resolve, reject) => {
-        if (!navigator.locks) { reject(new Error("浏览器无法隔离画布草稿，请使用支持 Web Locks 的浏览器，并通过 localhost 或 HTTPS 打开")); return; }
+        if (!navigator.locks) { reject(new Error(i18n.t("errors.webLocksRequired"))); return; }
         const claim = () => {
             void navigator.locks.request(`dream-canvas-editor:${tabId}`, { ifAvailable: true }, async (lock) => {
                 if (!lock) { tabId = nanoid(); sessionStorage.setItem("dream-canvas-editor", tabId); claim(); return; }
@@ -86,7 +86,7 @@ function persistDraft(owner: string, project: CanvasProject) {
     const key = draftKey(owner, project.id);
     const write = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => { await drafts.setItem(key, project); });
     writes.set(key, write);
-    void write.catch((error) => { if (useAuthStore.getState().user?.id === owner) saveState(project.id, { status: "error", message: `未保存内容暂存失败：${errorText(error)}` }); });
+    void write.catch((error) => { if (useAuthStore.getState().user?.id === owner) saveState(project.id, { status: "error", message: i18n.t("errors.projectDraftFailed", { error: errorText(error) }) }); });
 }
 
 function flushProject(id: string): Promise<void> {
@@ -174,17 +174,17 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             await drafts.iterate<unknown, void>((value, key) => {
                 if (!key.startsWith(`${owner}/`) || !key.endsWith(`/${tabId}`)) return;
                 const result = canvasProjectSchema.safeParse(value);
-                if (!result.success || key !== draftKey(owner, result.data.id)) throw new Error("恢复草稿的结构或项目编号不正确，原始草稿仍保留，未覆盖服务端项目；请保留浏览器数据后处理该草稿");
+                if (!result.success || key !== draftKey(owner, result.data.id)) throw new Error(i18n.t("errors.projectDraftInvalid"));
                 local.set(result.data.id, result.data);
             });
             const restored = projects.map((project) => {
                 const draft = local.get(project.id);
                 if (!draft) return project;
                 local.delete(project.id);
-                saves[project.id] = { status: draft.version === project.version ? "error" : "conflict", message: "已恢复上次未保存内容，请确认后重试保存或另存副本" };
+                saves[project.id] = { status: draft.version === project.version ? "error" : "conflict", message: i18n.t("errors.projectDraftRestored") };
                 return draft;
             });
-            for (const draft of local.values()) { restored.push(draft); saves[draft.id] = { status: "conflict", message: "服务端项目已删除，未保存内容已保留，可另存副本" }; }
+            for (const draft of local.values()) { restored.push(draft); saves[draft.id] = { status: "conflict", message: i18n.t("errors.projectDeletedDraft") }; }
             if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ projects: restored, saves, hydrated: true, error: "" });
         } catch (error) { if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ hydrated: false, error: errorText(error) }); }
     },
@@ -202,7 +202,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             if (incoming.has(project.id)) return true;
             const status = saves[project.id]?.status;
             if (project.id !== editing && (!status || status === "saved")) return false;
-            saves[project.id] = { status: "conflict", message: "服务端项目已删除，当前内容已保留，可另存副本" };
+            saves[project.id] = { status: "conflict", message: i18n.t("errors.projectDeletedCurrent") };
             if (remoteChanges[project.id] !== -1) persistDraft(owner, project);
             remoteChanges[project.id] = -1;
             return true;
@@ -221,19 +221,19 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     createProject: async (title = i18n.t("canvas.project.untitled")) => {
         const owner = useAuthStore.getState().user?.id;
         const project = await api.createProject(emptyProject(title));
-        if (owner !== useAuthStore.getState().user?.id) throw new Error("账号已切换，请重新读取项目");
+        if (owner !== useAuthStore.getState().user?.id) throw new Error(i18n.t("errors.accountProjectChanged"));
         set((state) => ({ projects: [project, ...state.projects] }));
         return project.id;
     },
     importProject: async (source) => {
         const owner = useAuthStore.getState().user?.id;
         const project = await api.createProject({ ...emptyProject(source.title || i18n.t("canvas.project.imported")), ...source, id: "", version: 0 });
-        if (owner !== useAuthStore.getState().user?.id) throw new Error("账号已切换，请重新读取项目");
+        if (owner !== useAuthStore.getState().user?.id) throw new Error(i18n.t("errors.accountProjectChanged"));
         set((state) => ({ projects: [project, ...state.projects] }));
         return project.id;
     },
     openProject: (id) => get().projects.find((item) => item.id === id) || null,
-    renameProject: async (id, title) => { stage(id, { title: title.trim() }); await flushProject(id); const state = get().saves[id]; if (state?.status === "error" || state?.status === "conflict") throw new Error(state.message || "名称尚未保存"); },
+    renameProject: async (id, title) => { stage(id, { title: title.trim() }); await flushProject(id); const state = get().saves[id]; if (state?.status === "error" || state?.status === "conflict") throw new Error(state.message || i18n.t("errors.projectNameUnsaved")); },
     deleteProjects: async (ids) => {
         const owner = useAuthStore.getState().user?.id;
         const assertSession = captureSession();
@@ -259,18 +259,18 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         }
     },
     updateProject: stage,
-    retrySave: async (id) => { if (get().saves[id]?.status === "conflict") throw new Error("项目存在版本冲突，请另存副本或重新读取"); saveState(id, { status: "saving" }); await flushProject(id); },
+    retrySave: async (id) => { if (get().saves[id]?.status === "conflict") throw new Error(i18n.t("errors.projectVersionConflict")); saveState(id, { status: "saving" }); await flushProject(id); },
     ensureSaved: async (id) => {
         const assertSession = captureSession();
         const pending = get().saves[id];
-        if (pending?.status === "conflict" || pending?.status === "error") throw new Error(pending.message || "请先处理项目保存问题");
-        if (get().remoteChanges[id]) throw new Error("服务端项目已更新，请先处理项目版本变化");
+        if (pending?.status === "conflict" || pending?.status === "error") throw new Error(pending.message || i18n.t("errors.projectSaveRequired"));
+        if (get().remoteChanges[id]) throw new Error(i18n.t("errors.projectVersionChanged"));
         if (pending?.status !== "saved") await flushProject(id);
         assertSession();
         const state = get();
         const project = state.openProject(id);
-        if (!project || state.saves[id]?.status !== "saved") throw new Error(state.saves[id]?.message || "项目尚未保存，请保存后再生成");
-        if (state.remoteChanges[id]) throw new Error("服务端项目已更新，请先处理项目版本变化");
+        if (!project || state.saves[id]?.status !== "saved") throw new Error(state.saves[id]?.message || i18n.t("errors.projectBeforeGenerate"));
+        if (state.remoteChanges[id]) throw new Error(i18n.t("errors.projectVersionChanged"));
         return project;
     },
     reloadProject: async (id) => {
@@ -285,10 +285,10 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const project = await api.getProject(id);
         const cleanup = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => {
             assertSession();
-            if (get().openProject(id) !== before) throw new Error("读取期间又产生了编辑，当前内容已保留，请重新操作");
+            if (get().openProject(id) !== before) throw new Error(i18n.t("errors.projectReadEdited"));
             await drafts.removeItem(key);
             assertSession();
-            if (get().openProject(id) !== before) throw new Error("读取期间又产生了编辑，当前内容已保留，请重新操作");
+            if (get().openProject(id) !== before) throw new Error(i18n.t("errors.projectReadEdited"));
             set((state) => ({ projects: state.projects.map((item) => item.id === id ? project : item), saves: { ...state.saves, [id]: { status: "saved" } }, remoteChanges: Object.fromEntries(Object.entries(state.remoteChanges).filter(([key]) => key !== id)) }));
         });
         writes.set(key, cleanup);
@@ -296,7 +296,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     },
     saveCopy: async (id) => {
         const project = get().openProject(id);
-        if (!project) throw new Error("项目不存在");
-        return get().importProject({ ...project, title: `${project.title}（副本）` });
+        if (!project) throw new Error(i18n.t("errors.projectMissing"));
+        return get().importProject({ ...project, title: i18n.t("errors.projectCopy", { title: project.title }) });
     },
 }));

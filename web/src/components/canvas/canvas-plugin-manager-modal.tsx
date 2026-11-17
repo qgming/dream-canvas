@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { App, Button, Input, Modal, Popconfirm, Switch, Tabs } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/controls";
+import { Tabs } from "@/components/ui/tabs";
+import { Notice } from "@/components/ui/display";
 import { AlertTriangle, Download, Puzzle, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -12,11 +18,15 @@ import { usePluginStore, type InstalledPlugin } from "@/stores/canvas/use-plugin
 export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const { message } = App.useApp();
+    const { notify, confirm } = useFeedback();
     const plugins = usePluginStore((state) => state.plugins);
     const [url, setUrl] = useState("");
     const [installing, setInstalling] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [actionError, setActionError] = useState("");
+    const actionLock = useRef(false);
+    const registryLock = useRef(false);
+    const busy = installing || Boolean(busyId);
 
     const [official, setOfficial] = useState<OfficialPluginEntry[]>([]);
     const [loadingOfficial, setLoadingOfficial] = useState(false);
@@ -27,6 +37,8 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     const thirdPartyPlugins = useMemo(() => plugins.filter((item) => !item.local && !item.official), [plugins]);
 
     const loadOfficial = useCallback(async () => {
+        if (registryLock.current) return;
+        registryLock.current = true;
         setLoadingOfficial(true);
         setOfficialError(null);
         try {
@@ -34,50 +46,68 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
         } catch (error) {
             setOfficialError(error instanceof Error ? error.message : String(error));
         } finally {
+            registryLock.current = false;
             setLoadingOfficial(false);
         }
     }, []);
 
     // Read the registry once each time the panel opens, including when the list is empty.
     useEffect(() => {
-        if (open) void loadOfficial();
+        if (open) { setActionError(""); void loadOfficial(); }
     }, [open, loadOfficial]);
 
     const handleInstallUrl = async () => {
         const target = url.trim();
-        if (!target) return;
+        if (!target || actionLock.current) return;
+        actionLock.current = true;
+        setActionError("");
         setInstalling(true);
         try {
             const plugin = await installPluginFromUrl(target);
-            message.success(t("canvas.plugins.installedPlugin", { name: plugin.name }));
+            notify.success(t("canvas.plugins.installedPlugin", { name: plugin.name }));
             setUrl("");
         } catch (error) {
-            message.error(t("canvas.plugins.installFailed", { error: error instanceof Error ? error.message : String(error) }));
+            const message = t("canvas.plugins.installFailed", { error: error instanceof Error ? error.message : String(error) });
+            setActionError(message);
+            notify.error(message);
         } finally {
+            actionLock.current = false;
             setInstalling(false);
         }
     };
 
     const handleInstallOfficial = async (entry: OfficialPluginEntry) => {
+        if (actionLock.current) return;
+        actionLock.current = true;
+        setActionError("");
         setBusyId(entry.id);
         try {
             const plugin = await installPluginFromUrl(entry.url, { official: true });
-            message.success(t("canvas.plugins.installed", { name: plugin.name }));
+            notify.success(t("canvas.plugins.installed", { name: plugin.name }));
         } catch (error) {
-            message.error(t("canvas.plugins.installFailed", { error: error instanceof Error ? error.message : String(error) }));
+            const message = t("canvas.plugins.installFailed", { error: error instanceof Error ? error.message : String(error) });
+            setActionError(message);
+            notify.error(message);
         } finally {
+            actionLock.current = false;
             setBusyId(null);
         }
     };
 
     const runOnPlugin = async (record: InstalledPlugin, action: () => Promise<void>, successText: string) => {
+        if (actionLock.current) return;
+        actionLock.current = true;
+        setActionError("");
         setBusyId(record.id);
         try {
             await action();
-            message.success(successText);
+            notify.success(successText);
         } catch (error) {
-            message.error(`${error instanceof Error ? error.message : String(error)}`);
+            const message = error instanceof Error ? error.message : String(error);
+            setActionError(message);
+            notify.error(message);
         } finally {
+            actionLock.current = false;
             setBusyId(null);
         }
     };
@@ -86,20 +116,20 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     // Highlight the update action when a newer remote version is available.
     const installedControls = (record: InstalledPlugin, upgradable = false) => (
         <>
-            <Switch size="small" checked={record.enabled} loading={busyId === record.id} onChange={(checked) => runOnPlugin(record, () => setPluginEnabled(record, checked), t(checked ? "canvas.plugins.enabled" : "canvas.plugins.disabled"))} />
+            <Switch size="small" checked={record.enabled} disabled={busy} loading={busyId === record.id} aria-label={`${record.name} · ${t(record.enabled ? "canvas.plugins.enabled" : "canvas.plugins.disabled")}`} onChange={(checked) => runOnPlugin(record, () => setPluginEnabled(record, checked), t(checked ? "canvas.plugins.enabled" : "canvas.plugins.disabled"))} />
             {!record.local && (
                 <>
                     <Button
-                        type={upgradable ? "primary" : "text"}
-                        size="small"
+                        variant={upgradable ? "default" : "ghost"}
+                        size="sm"
                         icon={<RefreshCw className="size-4" />}
                         loading={busyId === record.id}
+                        disabled={busy}
                         title={t(upgradable ? "canvas.plugins.upgradeAvailable" : "canvas.plugins.updateFromSource")}
+                        aria-label={`${t(upgradable ? "canvas.plugins.upgradeAvailable" : "canvas.plugins.updateFromSource")} · ${record.name}`}
                         onClick={() => runOnPlugin(record, async () => void (await updatePlugin(record)), t("canvas.plugins.updated"))}
                     />
-                    <Popconfirm title={t("canvas.plugins.uninstallTitle")} okText={t("canvas.plugins.uninstall")} cancelText={t("canvas.editors.cancel")} onConfirm={() => uninstallPlugin(record.id)}>
-                        <Button type="text" size="small" danger icon={<Trash2 className="size-4" />} title={t("canvas.plugins.uninstall")} />
-                    </Popconfirm>
+                    <Button variant="ghost" data-destructive size="sm" icon={<Trash2 className="size-4" />} aria-label={`${t("canvas.plugins.uninstall")} · ${record.name}`} disabled={busy} onClick={() => confirm({ title: t("canvas.plugins.uninstallTitle"), confirmText: t("canvas.plugins.uninstall"), destructive: true, onConfirm: () => uninstallPlugin(record.id) })} />
                 </>
             )}
         </>
@@ -110,12 +140,12 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     const withUpgradeDot = (icon: ReactNode) => (
         <span className="relative inline-flex">
             {icon}
-            <span className="absolute -right-1 -top-1 size-2 rounded-full" style={{ background: "#22c55e", boxShadow: `0 0 0 2px ${theme.node.fill}` }} title={t("canvas.plugins.newVersion")} />
+            <span className="absolute -right-1 -top-1 size-2 rounded-full" style={{ background: "var(--success)", boxShadow: `0 0 0 2px ${theme.node.fill}` }} title={t("canvas.plugins.newVersion")} />
         </span>
     );
 
     const versionTag = (version: string) => (
-        <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: theme.toolbar.activeBg, color: theme.node.muted }}>
+        <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs" style={{ background: theme.toolbar.activeBg, color: theme.node.muted }}>
             v{version}
         </span>
     );
@@ -153,7 +183,7 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
                 <div className="text-xs" style={{ color: theme.node.muted }}>
                     {t("canvas.plugins.officialDescription")}
                 </div>
-                <Button type="text" size="small" icon={<RefreshCw className={`size-4 ${loadingOfficial ? "animate-spin" : ""}`} />} onClick={loadOfficial} disabled={loadingOfficial}>
+                <Button variant="ghost" size="sm" icon={<RefreshCw className={`size-4 ${loadingOfficial ? "animate-spin" : ""}`} />} onClick={loadOfficial} disabled={loadingOfficial}>
                     {t("canvas.plugins.refresh")}
                 </Button>
             </div>
@@ -182,7 +212,7 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
                             record ? (
                                 installedControls(record, upgradable)
                             ) : (
-                                <Button type="primary" size="small" icon={<Download className="size-4" />} loading={busyId === entry.id} onClick={() => handleInstallOfficial(entry)}>
+                                <Button variant="default" size="sm" icon={<Download className="size-4" />} disabled={busy} loading={busyId === entry.id} onClick={() => handleInstallOfficial(entry)}>
                                     {t("canvas.plugins.install")}
                                 </Button>
                             ),
@@ -198,8 +228,8 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     const thirdPartyTab = (
         <div className="space-y-3">
             <div className="flex gap-2">
-                <Input placeholder={t("canvas.plugins.urlPlaceholder")} value={url} onChange={(event) => setUrl(event.target.value)} onPressEnter={handleInstallUrl} allowClear />
-                <Button type="primary" loading={installing} onClick={handleInstallUrl} icon={<Puzzle className="size-4" />}>
+                <Input aria-label={t("canvas.plugins.urlPlaceholder")} placeholder={t("canvas.plugins.urlPlaceholder")} value={url} onChange={(event) => setUrl(event.target.value)} onPressEnter={handleInstallUrl} />
+                <Button variant="default" disabled={busy || !url.trim()} loading={installing} onClick={handleInstallUrl} icon={<Puzzle className="size-4" />}>
                     {t("canvas.plugins.install")}
                 </Button>
             </div>
@@ -214,14 +244,15 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     ];
 
     return (
-        <Modal title={t("canvas.plugins.title")} open={open} onCancel={onClose} footer={null} centered width={640}>
+        <Dialog title={t("canvas.plugins.title")} open={open} busy={busy} dirty={Boolean(url.trim())} onClose={() => { setUrl(""); setActionError(""); onClose(); }} footer={null} width={640}>
             <div className="space-y-3">
-                <div className="flex items-start gap-2 rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: "#f59e0b55", background: "#f59e0b14", color: theme.node.text }}>
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+                <div className="flex items-start gap-2 rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: "color-mix(in srgb, var(--warning) 30%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
                     <span>{t("canvas.plugins.warning")}</span>
                 </div>
-                <Tabs defaultActiveKey="official" items={tabs} />
+                <Tabs items={tabs} />
+                {actionError ? <Notice type="error" title={actionError} /> : null}
             </div>
-        </Modal>
+        </Dialog>
     );
 }

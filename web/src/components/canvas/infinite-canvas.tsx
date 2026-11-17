@@ -49,10 +49,12 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            const ignored = event.target instanceof Element && event.target.closest("input,textarea,select,[contenteditable='true'],[data-canvas-shortcuts-ignore],[data-ui-overlay]");
+            if (ignored) return;
             if (event.key === "Control") setIsControlPressed(true);
             if (event.code !== "Space") return;
             const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']")) return;
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-shortcuts-ignore],[data-ui-overlay]")) return;
             event.preventDefault();
             setIsSpacePressed(true);
         };
@@ -60,7 +62,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
         const handleKeyUp = (event: KeyboardEvent) => {
             if (event.code === "Space") {
                 const target = event.target instanceof Element ? event.target : null;
-                if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']"))) event.preventDefault();
+                if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-shortcuts-ignore],[data-ui-overlay]"))) event.preventDefault();
                 setIsSpacePressed(false);
             }
             if (event.key === "Control") setIsControlPressed(false);
@@ -86,7 +88,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
 
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+        if (target?.closest("[data-canvas-no-zoom],[data-ui-overlay]")) return;
 
         const delta = -event.deltaY;
         const factor = Math.pow(1.1, delta / 100);
@@ -196,7 +198,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
         // Prevent canvas scrolling from moving the page while preserving native scrolling inside overlays and dialogs.
         const preventWheelScroll = (event: WheelEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+            if (target?.closest("[data-canvas-no-zoom],[data-ui-overlay]")) return;
             event.preventDefault();
         };
         container.addEventListener("wheel", preventWheelScroll, { passive: false });

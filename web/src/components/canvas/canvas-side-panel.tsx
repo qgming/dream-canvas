@@ -1,7 +1,14 @@
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
-import { App, Empty, Input, Popconfirm, Select, Spin, Tag } from "antd";
+import appI18n from "@/i18n";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useFeedback } from "@/hooks/use-feedback";
+import { EmptyState as Empty } from "@/components/ui/display";
+import { Input } from "@/components/ui/input";
+import { Choice } from "@/components/ui/choice";
+import { Spinner as Spin } from "@/components/ui/display";
+import { FilterChip } from "@/components/ui/display";
+import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, LayoutGrid, ListChecks, Music2, Plus, Rows3, Search, Settings2, Square, Trash2, Type, Video } from "lucide-react";
+import { BookOpen, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, LayoutGrid, ListChecks, Music2, Plus, Rows3, Search, Settings2, Square, Trash2, Type, Video, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 
@@ -15,14 +22,12 @@ import { uploadMediaFile } from "@/services/file-storage";
 import { previewUrlFor, subscribeImagePreviews, getImagePreviewRevision, uploadImage } from "@/services/image-storage";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
-import { CANVAS_SIDE_PANEL_MAX_WIDTH, CANVAS_SIDE_PANEL_MIN_WIDTH, CANVAS_SIDE_PANEL_MOTION_MS, useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
+import { useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { useCanvasPanelDisplay } from "@/hooks/use-canvas-panel-display";
 
 import type { InsertAssetPayload } from "./asset-picker-modal";
-
-const PANEL_MOTION_SECONDS = CANVAS_SIDE_PANEL_MOTION_MS / 1000;
-const PANEL_EASE = [0.22, 1, 0.36, 1] as const;
 
 type PanelTab = "canvas" | "assets" | "prompts";
 
@@ -45,9 +50,9 @@ const NODE_TYPE_ICON: Record<string, typeof Square> = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-    success: "#22c55e",
-    loading: "#f59e0b",
-    error: "#ef4444",
+    success: "var(--success)",
+    loading: "var(--warning)",
+    error: "var(--destructive)",
     idle: "transparent",
 };
 
@@ -55,55 +60,26 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreview
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [tab, setTab] = useState<PanelTab>("canvas");
-    const width = useCanvasSidePanelStore((state) => state.width);
-    const panelOpen = useCanvasSidePanelStore((state) => state.panelOpen);
-    const panelMounted = useCanvasSidePanelStore((state) => state.panelMounted);
-    const panelClosing = useCanvasSidePanelStore((state) => state.panelClosing);
-    const setWidth = useCanvasSidePanelStore((state) => state.setWidth);
-    const [resizing, setResizing] = useState(false);
-
-    const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
-        event.preventDefault();
-        const startX = event.clientX;
-        const startWidth = width;
-        let nextWidth = startWidth;
-        const onMove = (moveEvent: PointerEvent) => {
-            nextWidth = Math.min(CANVAS_SIDE_PANEL_MAX_WIDTH, Math.max(CANVAS_SIDE_PANEL_MIN_WIDTH, startWidth + moveEvent.clientX - startX));
-            setWidth(nextWidth);
-        };
-        const onUp = () => {
-            localStorage.setItem("canvas-side-panel-width", String(nextWidth));
-            window.removeEventListener("pointermove", onMove);
-            window.removeEventListener("pointerup", onUp);
-            setResizing(false);
-        };
-        setResizing(true);
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onUp);
-    };
+    const { compact, open: panelOpen, mounted: panelMounted, toggle } = useCanvasPanelDisplay();
 
     if (!panelMounted) return null;
 
     return (
-        <motion.div
-            className="relative z-[60] flex h-full shrink-0"
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: panelOpen ? width + 1 : 0, opacity: panelOpen ? 1 : 0 }}
-            transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: PANEL_EASE }}
-            style={{ overflow: "clip", pointerEvents: panelClosing ? "none" : undefined }}
+        <AnimatedSidePanel
+            open={panelOpen}
+            width={compact ? "min(var(--secondary-sidebar-width), calc(100vw - 80px))" : "var(--secondary-sidebar-width)"}
+            animateOnMount
+            className={cn("z-[60]", compact && "absolute inset-y-0 left-0 shadow-lg")}
+            panelClassName="flex flex-col overflow-hidden border-r"
+            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            data-canvas-no-zoom
+            data-canvas-shortcuts-ignore
         >
-            <motion.aside
-                className="relative flex h-full shrink-0 flex-col overflow-hidden border-r"
-                initial={{ x: -48 }}
-                animate={{ x: panelClosing ? -28 : 0 }}
-                transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: PANEL_EASE }}
-                style={{ width, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                data-canvas-no-zoom
-            >
-                <div className="flex items-center gap-5 px-4 pt-3.5">
+                <div className="flex items-center gap-3 px-3 pt-3.5">
                     <TabButton label={t("canvas.sidePanel.canvas")} active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
                     <TabButton label={t("canvas.sidePanel.assets")} active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
                     <TabButton label={t("canvas.sidePanel.prompts")} active={tab === "prompts"} theme={theme} onClick={() => setTab("prompts")} />
+                    {compact ? <button type="button" className="ml-auto shrink-0 rounded-md p-1 hover:bg-accent" onClick={toggle} aria-label={t("canvas.collapsePanel")}><X className="size-4" /></button> : null}
                 </div>
                 <div className="mt-2 min-h-0 flex-1 overflow-hidden">
                     {tab === "canvas" ? (
@@ -114,15 +90,14 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreview
                         <CanvasPromptsTab onInsert={onInsertAsset} theme={theme} />
                     )}
                 </div>
-                <button type="button" className="absolute inset-y-0 right-0 z-40 w-4 translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("canvas.sidePanel.resize")} />
-            </motion.aside>
-        </motion.div>
+        </AnimatedSidePanel>
     );
 }
 
 function TabButton({ label, active, theme, onClick }: { label: string; active: boolean; theme: CanvasTheme; onClick: () => void }) {
+    useTranslation();
     return (
-        <button type="button" onClick={onClick} className="relative pb-1.5 text-sm font-semibold transition-opacity" style={{ color: theme.node.text, opacity: active ? 1 : 0.45 }}>
+        <button type="button" onClick={onClick} title={label} className="relative min-w-0 truncate pb-1.5 text-sm font-semibold transition-opacity" style={{ color: theme.node.text, opacity: active ? 1 : 0.45 }}>
             {label}
             {active ? <motion.span layoutId="sidePanelTabIndicator" className="absolute inset-x-0 -bottom-px h-0.5 rounded-full" style={{ background: theme.toolbar.activeText }} transition={{ type: "spring", stiffness: 500, damping: 34 }} /> : null}
         </button>
@@ -141,7 +116,7 @@ function nodePreviewText(node: CanvasNodeData) {
 }
 
 function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, onHoverNode, theme }: { nodes: CanvasNodeData[]; selectedNodeIds: Set<string>; onFocusNode: (nodeId: string) => void; onPreviewNode: (nodeId: string) => void; onHoverNode: (nodeId: string | null) => void; theme: CanvasTheme }) {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const [keyword, setKeyword] = useState("");
@@ -210,14 +185,14 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
         const targets = nodes.filter((node) => checked.has(node.id));
         if (!targets.length) return;
         setExporting(true);
-        const hide = message.loading(t("canvas.sidePanel.exporting"), 0);
+        const hide = notify.loading(t("canvas.sidePanel.exporting"));
         try {
             await exportCanvasNodes(targets, t("canvas.sidePanel.exportName", { count: targets.length }));
-            message.success(t("canvas.sidePanel.exported", { count: targets.length }));
+            notify.success(t("canvas.sidePanel.exported", { count: targets.length }));
             exitSelect();
         } catch (error) {
             console.error(error);
-            message.error(t("canvas.sidePanel.exportFailed"));
+            notify.error(t("canvas.sidePanel.exportFailed"));
         } finally {
             hide();
             setExporting(false);
@@ -227,22 +202,20 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
     return (
         <div className="flex h-full flex-col" onMouseLeave={() => onHoverNode(null)}>
             <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
-                <span className="min-w-0 truncate text-xs font-medium opacity-60">{t("canvas.sidePanel.elements")}</span>
-                {filtered.length ? <span className="shrink-0 text-xs opacity-35">{filtered.length}</span> : null}
                 <button
                     type="button"
                     onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
-                    className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+                    className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
                     style={selectMode ? { color: theme.toolbar.activeText, opacity: 1 } : undefined}
                 >
                     <ListChecks className="size-3.5" />
                     {selectMode ? t("common.cancel") : t("canvas.sidePanel.select")}
                 </button>
-                {selectMode ? null : <Select size="small" variant="borderless" className="w-20" value={typeFilter} onChange={setTypeFilter} options={NODE_FILTER_VALUES.map((value) => ({ value, label: value === "all" ? t("common.all") : t(`canvas.sidePanel.filter.${value}`) }))} />}
+                {selectMode ? null : <Choice compact borderless className="min-w-0 flex-1" value={typeFilter} onChange={setTypeFilter} options={NODE_FILTER_VALUES.map((value) => ({ value, label: value === "all" ? t("common.all") : t(`canvas.sidePanel.filter.${value}`) }))} />}
                 <button
                     type="button"
                     onClick={() => setNodeViewMode(nodeViewMode === "grid" ? "list" : "grid")}
-                    className="flex shrink-0 items-center rounded-md px-1.5 py-1 opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+                    className="ml-auto flex shrink-0 items-center rounded-md px-1.5 py-1 opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
                     title={nodeViewMode === "grid" ? t("canvas.sidePanel.viewList") : t("canvas.sidePanel.viewGrid")}
                     aria-label={nodeViewMode === "grid" ? t("canvas.sidePanel.viewList") : t("canvas.sidePanel.viewGrid")}
                 >
@@ -250,7 +223,7 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                 </button>
             </div>
             <div className="px-3 pb-2.5">
-                <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder={t("canvas.sidePanel.searchNodes")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+                <Input size="small" prefix={<Search className="size-3.5 text-muted-foreground" />} placeholder={t("canvas.sidePanel.searchNodes")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {nodeViewMode === "grid" ? (
@@ -304,7 +277,7 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                                 <div
                                     key={node.id}
                                     data-node-item
-                                    className={cn("group relative flex items-center rounded-lg transition", depth && "ml-5", active ? "" : "hover:bg-black/5 dark:hover:bg-white/5")}
+                                    className={cn("group relative flex items-center rounded-lg transition", depth && "ml-3", active ? "" : "hover:bg-black/5 dark:hover:bg-white/5")}
                                     style={active ? { background: theme.toolbar.activeBg } : undefined}
                                     onMouseEnter={() => onHoverNode(node.id)}
                                     onMouseLeave={(event) => {
@@ -318,9 +291,9 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                                             <ChevronRight className={cn("size-3.5 transition-transform", !collapsedGroups.has(node.id) && "rotate-90")} />
                                         </button>
                                     ) : null}
-                                    <button type="button" onClick={() => (selectMode ? toggleChecked(node.id) : activateNode(node))} className={cn("flex min-w-0 flex-1 items-center gap-3 py-2 pr-2 text-left", node.type === CanvasNodeType.Group && hasChildren ? "pl-0" : "pl-2")} title={selectMode ? undefined : t("canvas.sidePanel.focusNode")}>
+                                    <button type="button" onClick={() => (selectMode ? toggleChecked(node.id) : activateNode(node))} className={cn("flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left", node.type === CanvasNodeType.Group && hasChildren ? "pl-0" : "pl-2")} title={selectMode ? undefined : t("canvas.sidePanel.focusNode")}>
                                         {selectMode ? <CheckMark checked={isChecked} theme={theme} /> : null}
-                                        <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md">
+                                        <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md">
                                             {isImage ? <img src={previewUrlFor(node.metadata?.storageKey) || node.metadata?.content} alt={node.title} className="size-full object-cover" /> : <Icon className="size-5 opacity-60" />}
                                         </span>
                                         <span className="min-w-0 flex-1 space-y-0.5">
@@ -331,7 +304,7 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                                     </button>
                                     {selectMode || !isImage ? null : (
                                         <div className="flex shrink-0 flex-col items-center gap-0.5 pr-1.5">
-                                            <button type="button" onClick={() => onPreviewNode(node.id)} className="grid size-7 place-items-center rounded-md opacity-55 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.preview")} title={t("canvas.sidePanel.preview")}>
+                                            <button type="button" onClick={() => onPreviewNode(node.id)} className="grid size-7 place-items-center rounded-md opacity-55 transition hover:bg-muted hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.preview")} title={t("canvas.sidePanel.preview")}>
                                                 <Eye className="size-3.5" />
                                             </button>
                                         </div>
@@ -345,16 +318,15 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                 )}
             </div>
             {selectMode ? (
-                <div className="flex items-center gap-2 border-t px-3 py-2.5" style={{ borderColor: theme.toolbar.border }}>
-                    <button type="button" onClick={toggleAll} className="rounded-md px-2 py-1 text-xs font-medium opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10">
+                <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2.5" style={{ borderColor: theme.toolbar.border }}>
+                    <button type="button" onClick={toggleAll} className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10">
                         {allChecked ? t("canvas.sidePanel.clearAll") : t("workbench.selectAll")}
                     </button>
-                    <span className="text-xs opacity-45">{t("canvas.sidePanel.selected", { count: checked.size })}</span>
                     <button
                         type="button"
                         onClick={() => void handleExport()}
                         disabled={!checked.size || exporting}
-                        className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10"
+                        className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-xs font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10"
                         style={{ color: theme.node.text }}
                     >
                         <Download className="size-3.5" />
@@ -367,9 +339,10 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
 }
 
 function CheckMark({ checked, theme }: { checked: boolean; theme: CanvasTheme }) {
+    useTranslation();
     return (
         <span className="grid size-4 shrink-0 place-items-center rounded border transition" style={{ borderColor: checked ? theme.toolbar.activeText : theme.node.stroke, background: checked ? theme.toolbar.activeText : "transparent" }}>
-            {checked ? <Check className="size-3 text-white" /> : null}
+            {checked ? <Check className="size-3 text-primary-foreground" /> : null}
         </span>
     );
 }
@@ -392,7 +365,7 @@ function buildInsertPayload(asset: Asset): InsertAssetPayload {
 }
 
 const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onInsert: (payload: InsertAssetPayload) => void; theme: CanvasTheme }) {
-    const { message, modal } = App.useApp();
+    const { notify, confirm } = useFeedback();
     const { t } = useTranslation();
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -416,7 +389,7 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
         const files = Array.from(fileList || []);
         if (!files.length) return;
         setUploading(true);
-        const hide = message.loading(t("canvas.sidePanel.addingAssets"), 0);
+        const hide = notify.loading(t("canvas.sidePanel.addingAssets"));
         let added = 0;
         try {
             for (const file of files) {
@@ -426,15 +399,15 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
                     added += 1;
                 } else if (file.type.startsWith("video/") || file.type.startsWith("audio/")) {
                     const media = await uploadMediaFile(file, "video");
-                    await addAsset({ kind: file.type.startsWith("audio/") ? "audio" : "video", title: file.name || "媒体素材", coverUrl: "", tags: [], data: { url: media.url, storageKey: media.storageKey, width: media.width || 0, height: media.height || 0, bytes: media.bytes, mimeType: media.mimeType } });
+                    await addAsset({ kind: file.type.startsWith("audio/") ? "audio" : "video", title: file.name || appI18n.t("workspace.mediaAsset"), coverUrl: "", tags: [], data: { url: media.url, storageKey: media.storageKey, width: media.width || 0, height: media.height || 0, bytes: media.bytes, mimeType: media.mimeType } });
                     added += 1;
                 }
             }
-            if (added) message.success(t("canvas.sidePanel.addedAssets", { count: added }));
-            else message.warning(t("canvas.sidePanel.mediaOnly"));
+            if (added) notify.success(t("canvas.sidePanel.addedAssets", { count: added }));
+            else notify.warning(t("canvas.sidePanel.mediaOnly"));
         } catch (error) {
             console.error(error);
-            message.error(t("canvas.sidePanel.addFailed"));
+            notify.error(t("canvas.sidePanel.addFailed"));
         } finally {
             hide();
             setUploading(false);
@@ -445,7 +418,7 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
     return (
         <div className="flex h-full flex-col">
             <div className="flex items-center gap-2 px-3 pb-2 pt-1">
-                <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder={t("canvas.sidePanel.searchAssets")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+                <Input size="small" prefix={<Search className="size-3.5 text-muted-foreground" />} placeholder={t("canvas.sidePanel.searchAssets")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
                 <button
                     type="button"
                     disabled={uploading}
@@ -460,13 +433,13 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
             </div>
             {allTags.length ? (
                 <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-                    <Tag.CheckableTag checked={tagFilter === "all"} className={cn("prompt-filter-tag", tagFilter === "all" && "is-active")} onChange={() => setTagFilter("all")}>
+                    <FilterChip checked={tagFilter === "all"} className={cn("prompt-filter-tag", tagFilter === "all" && "is-active")} onChange={() => setTagFilter("all")}>
                         {t("common.all")}
-                    </Tag.CheckableTag>
+                    </FilterChip>
                     {allTags.map((tag) => (
-                        <Tag.CheckableTag key={tag} checked={tagFilter === tag} className={cn("prompt-filter-tag", tagFilter === tag && "is-active")} onChange={() => setTagFilter((prev) => (prev === tag ? "all" : tag))}>
+                        <FilterChip key={tag} checked={tagFilter === tag} className={cn("prompt-filter-tag", tagFilter === tag && "is-active")} onChange={() => setTagFilter((prev) => (prev === tag ? "all" : tag))}>
                             {tag}
-                        </Tag.CheckableTag>
+                        </FilterChip>
                     ))}
                 </div>
             ) : null}
@@ -485,12 +458,11 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
                                         <ChevronRight className={cn("size-3.5 transition-transform", !isCollapsed && "rotate-90")} />
                                         <group.icon className="size-3.5" />
                                         <span>{t(`assets.kinds.${group.kind}`)}</span>
-                                        <span className="opacity-50">{group.items.length}</span>
                                     </button>
                                     {isCollapsed ? null : (
                                         <div className="grid grid-cols-2 gap-2 px-1 pb-2 pt-1">
                                             {group.items.map((asset) => (
-                                                <AssetCard key={asset.id} asset={asset} theme={theme} onInsert={() => onInsert(buildInsertPayload(asset))} onRemove={() => modal.confirm({ title: "全局删除此资产？", content: "所有项目中的媒体将显示为资产已删除，节点、提示词和参数仍会保留。", okText: "全局删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: async () => { try { await removeAsset(asset.id); message.success("资产已删除"); } catch (error) { message.error(error instanceof Error ? error.message : "删除失败"); throw error; } } })} />
+                                                <AssetCard key={asset.id} asset={asset} theme={theme} onInsert={() => onInsert(buildInsertPayload(asset))} onRemove={() => confirm({ title: appI18n.t("workspace.globalDeleteTitle"), content: appI18n.t("workspace.globalDeleteDescription"), confirmText: appI18n.t("workspace.globalDelete"), cancelText: appI18n.t("workspace.cancel"), destructive: true, onConfirm: async () => { try { await removeAsset(asset.id); notify.success(appI18n.t("workspace.assetDeleted")); } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.deleteFailed")); throw error; } } })} />
                                             ))}
                                         </div>
                                     )}
@@ -499,7 +471,7 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
                         })}
                     </div>
                 ) : (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("canvas.sidePanel.noAssets")} className="pt-16" />
+                    <Empty description={t("canvas.sidePanel.noAssets")} className="pt-16" />
                 )}
             </div>
         </div>
@@ -511,32 +483,32 @@ function AssetCard({ asset, theme, onInsert, onRemove }: { asset: Asset; theme: 
     return (
         <div className="group relative aspect-square overflow-hidden rounded-xl border transition duration-200 hover:-translate-y-0.5 hover:shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
             <AssetCover asset={asset} />
-            <div className="absolute inset-0 flex items-center justify-center gap-2.5 opacity-0 transition duration-200 group-hover:opacity-100">
+            <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
                 <button
                     type="button"
                     onClick={onInsert}
-                    className="grid size-8 place-items-center rounded-full bg-white/90 text-stone-700 shadow-sm backdrop-blur transition hover:bg-white hover:text-stone-900 dark:bg-black/60 dark:text-stone-100 dark:hover:bg-black/80"
+                    className="grid size-8 place-items-center rounded-md border border-border bg-popover text-popover-foreground shadow-sm transition hover:bg-accent"
                     aria-label={t("canvas.sidePanel.inserted")}
                 >
                     <Plus className="size-4" />
                 </button>
-                <Popconfirm title={t("canvas.sidePanel.removeAssetTitle")} okText={t("canvas.sidePanel.remove")} cancelText={t("common.cancel")} okButtonProps={{ danger: true }} onConfirm={onRemove}>
                     <button
                         type="button"
-                        className="grid size-8 place-items-center rounded-full bg-white/90 text-stone-700 shadow-sm backdrop-blur transition hover:bg-white hover:text-red-500 dark:bg-black/60 dark:text-stone-100 dark:hover:bg-black/80 dark:hover:text-red-400"
-                        aria-label={t("canvas.sidePanel.removeAsset")}
+                        className="grid size-8 place-items-center rounded-md border border-border bg-popover text-popover-foreground shadow-sm transition hover:bg-accent hover:text-destructive"
+                        onClick={onRemove} aria-label={t("canvas.sidePanel.removeAsset")}
                     >
                         <Trash2 className="size-4" />
                     </button>
-                </Popconfirm>
+                
             </div>
         </div>
     );
 }
 
 function AssetCover({ asset }: { asset: Asset }) {
+    useTranslation();
     if (asset.kind === "audio") return <div className="grid size-full place-items-center"><Music2 className="size-8 opacity-50" /></div>;
-    if (asset.kind === "text") return <div className="size-full overflow-hidden whitespace-pre-wrap break-words p-2.5 text-[11px] leading-snug opacity-80">{asset.data.content}</div>;
+    if (asset.kind === "text") return <div className="size-full overflow-hidden whitespace-pre-wrap break-words p-2.5 text-xs leading-snug opacity-80">{asset.data.content}</div>;
     if (asset.kind === "video") {
         if (asset.coverUrl) return <img src={asset.coverUrl} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" />;
         return <video src={`${asset.data.url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" />;
@@ -549,7 +521,7 @@ function AssetCover({ asset }: { asset: Asset }) {
 // ---------------------------------------------------------------------------
 
 const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { onInsert: (payload: InsertAssetPayload) => void; theme: CanvasTheme }) {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     const sources = usePromptSourceStore((state) => state.sources);
     const enabledSources = useMemo(() => sources.filter((source) => source.enabled), [sources]);
@@ -560,16 +532,16 @@ const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { o
     const copyPrompt = async (prompt: string) => {
         try {
             await navigator.clipboard.writeText(prompt);
-            message.success(t("canvas.sidePanel.promptCopied"));
+            notify.success(t("canvas.sidePanel.promptCopied"));
         } catch {
-            message.error(t("canvas.sidePanel.copyFailed"));
+            notify.error(t("canvas.sidePanel.copyFailed"));
         }
     };
 
     return (
         <div className="flex h-full flex-col">
             <div className="px-3 pb-2.5 pt-1">
-                <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder={t("canvas.sidePanel.searchPrompts")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+                <Input size="small" prefix={<Search className="size-3.5 text-muted-foreground" />} placeholder={t("canvas.sidePanel.searchPrompts")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 <div className="space-y-1">
@@ -585,7 +557,7 @@ const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { o
                             onInsert={onInsert}
                             onView={setDetail}
                         />
-                    )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("canvas.sidePanel.noPrompts")} className="pt-12" />}
+                    )) : <Empty description={t("canvas.sidePanel.noPrompts")} className="pt-12" />}
                 </div>
             </div>
             <PromptDetailDialog prompt={detail} onClose={() => setDetail(null)} onCopy={(prompt) => void copyPrompt(prompt)} />
@@ -613,7 +585,7 @@ function PromptSourceGroup({
     onView: (prompt: Prompt) => void;
 }) {
     const { t } = useTranslation();
-    // Cache a source after its first expansion to avoid repeated requests; search results also need the data for counts.
+    // Load expanded sources or search results, and cache them to avoid repeated requests.
     const showResults = open || !!keyword.trim();
     const query = useQuery({ queryKey: ["side-panel-prompts", sourceId], queryFn: () => fetchSourcePrompts(sourceId), enabled: showResults, staleTime: 1000 * 60 * 60 });
 
@@ -632,7 +604,6 @@ function PromptSourceGroup({
                 <ChevronRight className={cn("size-3.5 transition-transform", showResults && "rotate-90")} />
                 <BookOpen className="size-3.5" />
                 <span className="min-w-0 flex-1 truncate">{sourceName}</span>
-                {showResults && query.isSuccess ? <span className="opacity-50">{filtered.length}</span> : null}
             </button>
             {showResults ? (
                 <div className="px-1 pb-2 pt-1">
@@ -641,7 +612,7 @@ function PromptSourceGroup({
                             <Spin size="small" />
                         </div>
                     ) : query.isError ? (
-                        <button type="button" onClick={() => void query.refetch()} className="block w-full py-4 text-center text-xs text-red-500 opacity-80 transition hover:opacity-100">
+                        <button type="button" onClick={() => void query.refetch()} className="block w-full py-4 text-center text-xs text-destructive opacity-80 transition hover:opacity-100">
                             {t("canvas.sidePanel.loadFailedRetry")}
                         </button>
                     ) : filtered.length ? (
@@ -675,13 +646,13 @@ function PromptRow({ item, theme, onInsert, onView }: { item: Prompt; theme: Can
                 <div className="mt-0.5 truncate text-xs leading-snug opacity-50">{item.prompt}</div>
             </button>
             <div className="flex shrink-0 flex-col items-center gap-0.5">
-                <button type="button" onClick={onView} className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.viewDetails")} title={t("canvas.sidePanel.viewDetails")}>
+                <button type="button" onClick={onView} className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-muted hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.viewDetails")} title={t("canvas.sidePanel.viewDetails")}>
                     <Eye className="size-3.5" />
                 </button>
                 <button
                     type="button"
                     onClick={onInsert}
-                    className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+                    className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-muted hover:opacity-100 dark:hover:bg-white/10"
                     style={{ color: theme.toolbar.activeText }}
                     aria-label={t("canvas.sidePanel.inserted")}
                     title={t("canvas.sidePanel.inserted")}

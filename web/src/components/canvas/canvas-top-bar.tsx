@@ -1,17 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, Download, Images, Keyboard, Menu, PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Redo2, Trash2, Undo2, Upload } from "lucide-react";
-import { Button, Dropdown, Modal, Tooltip } from "antd";
+import { useState } from "react";
+import { Check, Download, Images, Keyboard, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Redo2, Trash2, Undo2, Upload, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Menu } from "@/components/ui/popover";
+import { Dialog } from "@/components/ui/dialog";
+import { Tooltip } from "@/components/ui/popover";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { useAgentStore } from "@/stores/use-agent-store";
-import { useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
+import { useCanvasPanelDisplay } from "@/hooks/use-canvas-panel-display";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 export function CanvasTopBar({
     title,
     titleDraft,
     isTitleEditing,
+    titleSaving,
+    titleError,
     onTitleDraftChange,
     onStartTitleEditing,
     onFinishTitleEditing,
@@ -26,15 +30,15 @@ export function CanvasTopBar({
     onOpenPlugins,
     onUndo,
     onRedo,
-    agentOpen,
-    onToggleAgent,
 }: {
     title: string;
     titleDraft: string;
     isTitleEditing: boolean;
+    titleSaving: boolean;
+    titleError: string;
     onTitleDraftChange: (value: string) => void;
     onStartTitleEditing: () => void;
-    onFinishTitleEditing: () => void;
+    onFinishTitleEditing: () => void | Promise<void>;
     onCancelTitleEditing: () => void;
     canUndo: boolean;
     canRedo: boolean;
@@ -46,45 +50,30 @@ export function CanvasTopBar({
     onOpenPlugins: () => void;
     onUndo: () => void;
     onRedo: () => void;
-    agentOpen: boolean;
-    onToggleAgent: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const { t } = useTranslation();
     const theme = canvasThemes[colorTheme];
-    const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
-    const sidePanelOpen = useCanvasSidePanelStore((state) => state.panelOpen);
-    const toggleSidePanel = useCanvasSidePanelStore((state) => state.togglePanel);
-
-    useEffect(() => {
-        if (!isTitleEditing) return;
-        const close = (event: PointerEvent) => {
-            if (!titleRef.current?.contains(event.target as Node)) onFinishTitleEditing();
-        };
-        document.addEventListener("pointerdown", close, true);
-        return () => document.removeEventListener("pointerdown", close, true);
-    }, [isTitleEditing, onFinishTitleEditing]);
+    const { open: sidePanelOpen, toggle: toggleSidePanel } = useCanvasPanelDisplay();
 
     return (
         <>
-            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between pl-1 pr-4">
+            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between gap-2 pl-1 pr-4">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-2">
                     <Tooltip title={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}>
                         <button
                             type="button"
                             onClick={toggleSidePanel}
                             aria-label={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}
-                            className="grid size-7 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10"
+                            className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-accent"
                             style={{ color: theme.node.text }}
                         >
                             {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
                         </button>
                     </Tooltip>
-                    <Dropdown
-                        trigger={["click"]}
-                        menu={{
-                            items: [
+                    <Menu
+                        items={ [
                                 { key: "projects", icon: <Images className="size-4" />, label: t("canvas.projects"), onClick: onProjects },
                                 { type: "divider" },
                                 { key: "new", icon: <Plus className="size-4" />, label: t("canvas.create"), onClick: onCreateProject },
@@ -95,58 +84,51 @@ export function CanvasTopBar({
                                 { type: "divider" },
                                 { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text={t("canvas.undo")} shortcut="⌘ Z" />, onClick: onUndo },
                                 { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text={t("canvas.redo")} shortcut="⌘ ⇧ Z / ⌘ Y" />, onClick: onRedo },
-                            ],
-                        }}
-                    >
-                        <button type="button" className="grid size-7 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={t("canvas.openMenu")}>
-                            <Menu className="size-4" />
+                            ]
+                        }>
+                        <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} aria-label={t("canvas.openMenu")}>
+                            <MenuIcon className="size-4" />
                         </button>
-                    </Dropdown>
+                    </Menu>
 
-                    <div ref={titleRef} className="flex min-w-0 items-center gap-2">
+                    <div className="relative flex min-w-0 items-center gap-2" data-canvas-shortcuts-ignore>
                         {isTitleEditing ? (
-                            <input
+                            <><input
                                 autoFocus
+                                disabled={titleSaving}
+                                aria-label={t("canvas.project.rename")}
+                                aria-invalid={Boolean(titleError)}
+                                aria-describedby={titleError ? "canvas-title-error" : undefined}
                                 value={titleDraft}
                                 onChange={(event) => onTitleDraftChange(event.target.value)}
-                                onBlur={onFinishTitleEditing}
                                 onKeyDown={(event) => {
-                                    if (event.key === "Enter") onFinishTitleEditing();
-                                    if (event.key === "Escape") onCancelTitleEditing();
+                                    if (event.key === "Enter") { event.preventDefault(); void onFinishTitleEditing(); }
+                                    if (event.key === "Escape") { event.stopPropagation(); onCancelTitleEditing(); }
                                 }}
-                                className="max-w-[280px] bg-transparent p-0 text-left text-lg font-semibold tracking-normal outline-none"
+                                className="h-8 w-44 min-w-0 max-w-[280px] flex-1 rounded-md border border-input bg-transparent px-2 text-left text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 style={{ color: theme.node.text }}
-                            />
+                            /><Button variant="ghost" size="sm" loading={titleSaving} icon={<Check className="size-4" />} onClick={() => void onFinishTitleEditing()} aria-label={t("canvas.project.saveName")} /><Button variant="ghost" size="sm" disabled={titleSaving} icon={<X className="size-4" />} onClick={onCancelTitleEditing} aria-label={t("canvas.project.cancelRename")} />{titleError ? <p id="canvas-title-error" role="alert" className="absolute left-0 top-full mt-1 max-w-sm rounded-md border border-border bg-popover px-2 py-1 text-xs text-destructive">{titleError}</p> : null}</>
                         ) : (
                             <button
                                 type="button"
-                                className="max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
+                                className="min-w-0 max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
                                 onDoubleClick={onStartTitleEditing}
+                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onStartTitleEditing(); } }}
                                 title={t("canvas.renameHint")}
                             >
                                 {title}
                             </button>
                         )}
                     </div>
-                    <CompactAgentStatus onClick={onToggleAgent} />
+                    
                 </div>
 
-                <div className="pointer-events-auto flex items-center gap-1.5">
-                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></button>
-                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></button>
-                    <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
-                    <Button
-                        type="text"
-                        className="!h-10 !rounded-xl !px-3 !font-medium"
-                        style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
-                        icon={<Bot className="size-4" />}
-                        onClick={onToggleAgent}
-                    >
-                        Agent
-                    </Button>
+                <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></button>
+                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></button>
                 </div>
             </div>
-            <Modal title={t("canvas.shortcuts")} open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
+            <Dialog title={t("canvas.shortcuts")} open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} footer={null}>
                 <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
                     <Shortcut keys={["Ctrl / Space", t("canvas.shortcut.drag")]} value={t("canvas.shortcut.toggleTool")} />
                     <Shortcut keys={[t("canvas.shortcut.wheel")]} value={t("canvas.shortcut.zoom")} />
@@ -164,7 +146,7 @@ export function CanvasTopBar({
                     <Shortcut keys={["Esc"]} value={t("canvas.shortcut.escape")} />
                     <Shortcut keys={[t("canvas.shortcut.dropMedia")]} value={t("canvas.shortcut.upload")} />
                 </div>
-            </Modal>
+            </Dialog>
         </>
     );
 }
@@ -178,23 +160,6 @@ function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
     );
 }
 
-function CompactAgentStatus({ onClick }: { onClick: () => void }) {
-    const connected = useAgentStore((state) => state.connected);
-    const enabled = useAgentStore((state) => state.enabled);
-    const activity = useAgentStore((state) => state.activity);
-    const colorTheme = useThemeStore((state) => state.theme);
-    const theme = canvasThemes[colorTheme];
-    const { t } = useTranslation();
-    const label = connected ? t("canvas.agentConnected") : enabled ? t("canvas.agentConnecting", { activity: activity || t("canvas.connecting") }) : t("canvas.agentDisconnected");
-    const dotColor = connected ? "#22c55e" : enabled ? "#f59e0b" : theme.node.muted;
-    return (
-        <button type="button" className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75" style={{ color: connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted }} onClick={onClick} title={t("canvas.openAgent")}>
-            <span className="size-2 rounded-full" style={{ background: dotColor }} />
-            <span className="max-w-[140px] truncate">{label}</span>
-        </button>
-    );
-}
-
 function Shortcut({ keys, value }: { keys: string[]; value: string }) {
     return (
         <div className="grid grid-cols-[minmax(0,1fr)_120px] items-center gap-6 rounded-lg px-1 py-1.5">
@@ -204,7 +169,7 @@ function Shortcut({ keys, value }: { keys: string[]; value: string }) {
                         {index ? <span className="text-xs opacity-35">+</span> : null}
                         <kbd
                             className="min-w-9 rounded-md border px-2.5 py-1.5 text-center text-xs font-medium leading-none shadow-[inset_0_-1px_0_rgba(0,0,0,.08),0_1px_2px_rgba(0,0,0,.06)]"
-                            style={{ borderColor: "rgba(120,113,108,.28)", background: "linear-gradient(#fff, rgba(245,245,244,.92))", color: "rgb(68,64,60)" }}
+                            style={{ borderColor: "var(--border)", background: "var(--muted)", color: "var(--foreground)" }}
                         >
                             {key}
                         </kbd>

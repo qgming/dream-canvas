@@ -1,95 +1,32 @@
-import type { ThemeConfig } from "antd";
-import { theme as antdTheme } from "antd";
+import { canvasThemes, type CanvasColorTheme } from "./canvas-theme";
 
-const neutral = {
-    light: {
-        primary: "#171717",
-        primaryHover: "#000000",
-        primaryText: "#ffffff",
-        elevatedBg: "#ffffff",
-        itemHoverBg: "rgba(23, 23, 23, 0.06)",
-        itemSelectedBg: "rgba(23, 23, 23, 0.1)",
-        itemSelectedHoverBg: "rgba(23, 23, 23, 0.14)",
-        itemText: "#171717",
-        tableSelectedBg: "rgba(17, 17, 17, 0.05)",
-        tableSelectedHoverBg: "rgba(17, 17, 17, 0.08)",
-    },
-    dark: {
-        primary: "#fafafa",
-        primaryHover: "#ffffff",
-        primaryText: "#171717",
-        elevatedBg: "#1c1917",
-        itemHoverBg: "rgba(250, 250, 249, 0.08)",
-        itemSelectedBg: "rgba(250, 250, 249, 0.12)",
-        itemSelectedHoverBg: "rgba(250, 250, 249, 0.16)",
-        itemText: "#fafafa",
-        tableSelectedBg: "rgba(255, 255, 255, 0.08)",
-        tableSelectedHoverBg: "rgba(255, 255, 255, 0.12)",
-    },
-};
+export const appFont = '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
-export function getAntThemeConfig(dark: boolean): ThemeConfig {
-    const color = dark ? neutral.dark : neutral.light;
-
+export function themeVariables(mode: CanvasColorTheme): Record<string, string> {
+    const theme = canvasThemes[mode];
+    const dark = mode === "dark";
     return {
-        algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        cssVar: { key: dark ? "infinite-canvas-dark" : "infinite-canvas-light" },
-        token: {
-            colorPrimary: color.primary,
-            colorInfo: color.primary,
-            colorLink: color.primary,
-            colorLinkHover: color.primaryHover,
-            colorLinkActive: color.primary,
-            colorTextLightSolid: color.primaryText,
-            colorBgElevated: color.elevatedBg,
-            controlItemBgHover: color.itemHoverBg,
-            controlItemBgActive: color.itemSelectedBg,
-            controlItemBgActiveHover: color.itemSelectedHoverBg,
-        },
-        components: {
-            Layout: {
-                bodyBg: "var(--background)",
-                headerBg: "var(--background)",
-                headerColor: color.itemText,
-                headerHeight: 64,
-                headerPadding: "0 24px",
-                siderBg: "var(--sidebar)",
-                lightSiderBg: "var(--sidebar)",
-            },
-            Button: {
-                primaryShadow: "none",
-            },
-            Dropdown: {
-                colorBgElevated: color.elevatedBg,
-                colorText: color.itemText,
-                controlItemBgHover: color.itemHoverBg,
-                controlItemBgActive: color.itemSelectedBg,
-                controlItemBgActiveHover: color.itemSelectedHoverBg,
-            },
-            Menu: {
-                popupBg: color.elevatedBg,
-                itemActiveBg: color.itemSelectedBg,
-                itemHoverBg: color.itemHoverBg,
-                itemSelectedBg: color.itemSelectedBg,
-                itemSelectedColor: color.itemText,
-                darkPopupBg: neutral.dark.elevatedBg,
-                darkItemHoverBg: neutral.dark.itemHoverBg,
-                darkItemSelectedBg: neutral.dark.itemSelectedBg,
-                darkItemSelectedColor: neutral.dark.itemText,
-            },
-            Select: {
-                optionActiveBg: color.itemHoverBg,
-                optionSelectedBg: color.itemSelectedBg,
-                optionSelectedColor: color.itemText,
-            },
-            Table: {
-                colorBgContainer: "var(--card)",
-                headerBg: "var(--sidebar)",
-                headerColor: color.itemText,
-                borderColor: "var(--border)",
-                rowSelectedBg: color.tableSelectedBg,
-                rowSelectedHoverBg: color.tableSelectedHoverBg,
-            },
-        },
+        "--background": theme.canvas.background, "--foreground": theme.node.text,
+        "--card": theme.node.panel, "--card-foreground": theme.node.text,
+        "--popover": theme.node.panel, "--popover-foreground": theme.node.text,
+        "--primary": theme.node.activeStroke, "--primary-foreground": theme.node.panel,
+        "--secondary": theme.node.fill, "--secondary-foreground": theme.node.text,
+        "--muted": theme.node.fill, "--muted-foreground": theme.node.label,
+        "--accent": dark ? "rgba(245,245,244,.08)" : "rgba(28,25,23,.05)", "--accent-foreground": theme.node.text,
+        "--border": theme.node.stroke, "--input": theme.node.stroke, "--ring": theme.node.activeStroke,
+        "--destructive": dark ? "#fca5a5" : "#b91c1c", "--destructive-foreground": dark ? "#450a0a" : "#fff7f7",
+        "--success": dark ? "#86efac" : "#166534", "--warning": dark ? "#fcd34d" : "#854d0e", "--info": dark ? "#93c5fd" : "#1d4ed8",
+        "--sidebar": theme.node.panel, "--sidebar-foreground": theme.node.text,
+        "--sidebar-primary": theme.node.activeStroke, "--sidebar-primary-foreground": theme.node.panel,
+        "--sidebar-accent": theme.toolbar.activeBg, "--sidebar-accent-foreground": theme.node.text,
+        "--sidebar-border": theme.node.stroke, "--sidebar-ring": theme.node.activeStroke,
+        "--font-app": appFont,
     };
+}
+
+export function applyAppTheme(mode: CanvasColorTheme) {
+    const root = document.documentElement;
+    root.classList.toggle("dark", mode === "dark");
+    root.style.colorScheme = mode;
+    Object.entries(themeVariables(mode)).forEach(([name, value]) => root.style.setProperty(name, value));
 }

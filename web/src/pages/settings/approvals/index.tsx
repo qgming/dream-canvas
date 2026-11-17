@@ -1,5 +1,12 @@
+import { useTranslation } from "react-i18next";
+import appI18n from "@/i18n";
+import { PageHeader } from "@/components/layout/page-header";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Space, Table, Tag } from "antd";
+import { Notice as Alert } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
+import { Badge as Tag } from "@/components/ui/display";
 
 import { apiRequest, captureSession } from "@/services/api/client";
 import { decideApproval, type Approval } from "@/services/api/projects";
@@ -7,7 +14,8 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 
 export default function ApprovalsPage() {
-    const { message, modal } = App.useApp();
+    useTranslation();
+    const { notify, confirm } = useFeedback();
     const queryClient = useQueryClient();
     const query = useQuery({ queryKey: ["approvals"], queryFn: () => apiRequest<Approval[]>("/approvals") });
     const decide = async (approval: Approval, accept: boolean, assertSession = captureSession()) => {
@@ -17,23 +25,22 @@ export default function ApprovalsPage() {
             assertSession();
             await Promise.all([queryClient.invalidateQueries({ queryKey: ["approvals"] }), useAssetStore.getState().loadAssets(), useCanvasStore.getState().refreshProjects()]);
             assertSession();
-            message.success("deleteState" in result ? result.message : accept ? "操作已确认" : "操作已拒绝");
-        } catch (error) { message.error(error instanceof Error ? error.message : "确认失败"); throw error; }
+            notify.success("deleteState" in result ? result.message : accept ? appI18n.t("workspace.operationAccepted") : appI18n.t("workspace.operationRejected"));
+        } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.confirmFailed")); throw error; }
     };
-    const confirm = (record: Approval) => {
+    const confirmApproval = (record: Approval) => {
         const assertSession = captureSession();
-        modal.confirm({ title: record.action === "delete_project" ? "确认删除项目？" : "确认全局删除资产？", content: record.action === "delete_project" ? "删除项目将解除媒体引用，资产库中的原件保留。" : "所有项目中的此媒体将不可读取，节点、提示词和参数保留。", okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => decide(record, true, assertSession) });
+        confirm({ title: record.action === "delete_project" ? appI18n.t("workspace.confirmProjectDelete") : appI18n.t("workspace.confirmAssetDelete"), content: record.action === "delete_project" ? appI18n.t("workspace.projectDeleteDescription") : appI18n.t("workspace.assetDeleteDescription"), confirmText: appI18n.t("workspace.confirmDelete"), cancelText: appI18n.t("workspace.cancel"), destructive: true, onConfirm: () => decide(record, true, assertSession) });
     };
     return (
-        <section>
-            <header className="mb-5 flex items-center justify-between"><h2 className="text-2xl font-medium tracking-tight">操作确认</h2><Button type="text" onClick={() => void query.refetch()}>刷新</Button></header>
-            <p className="mb-6 text-sm leading-6 text-muted-foreground">查看并确认助手或远程工具申请的项目删除、全局资产删除操作。</p>
-            {query.error ? <Alert type="error" title={query.error.message} /> : null}
-            <Table<Approval> rowKey="id" dataSource={query.data} loading={query.isLoading} pagination={false} scroll={{ x: true }} columns={[
-                { title: "操作", render: (_, record) => record.action === "delete_project" ? "删除项目" : "全局删除资产" },
-                { title: "目标", render: (_, record) => record.action === "delete_project" ? useCanvasStore.getState().projects.find((project) => project.id === record.targetId)?.title || record.targetId : useAssetStore.getState().assets.find((asset) => asset.id === record.targetId)?.title || record.targetId },
-                { title: "状态", render: (_, record) => <Tag>{record.status === "pending" ? "等待确认" : record.status === "accepted" ? "已确认" : "已拒绝"}</Tag> },
-                { title: "操作", render: (_, record) => record.status === "pending" ? <Space><Button type="text" onClick={() => { void decide(record, false).catch(() => undefined); }}>拒绝</Button><Button type="text" danger onClick={() => confirm(record)}>确认</Button></Space> : null },
+        <section className="space-y-6">
+            <PageHeader title={appI18n.t("workspace.approvals")} description={appI18n.t("workspace.approvalsDescription")} actions={<Button variant="ghost" loading={query.isFetching} onClick={() => void query.refetch()}>{appI18n.t("workspace.refresh")}</Button>} />
+            {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{appI18n.t("workspace.retry")}</Button>} /> : null}
+            <DataTable<Approval> rowId="id" rows={query.data} loading={query.isLoading} failed={query.isError} columns={[
+                { title: appI18n.t("workspace.type"), render: (_, record) => <span className="font-medium">{record.action === "delete_project" ? appI18n.t("workspace.deleteProject") : appI18n.t("workspace.globalDeleteAsset")}</span> },
+                { title: appI18n.t("workspace.target"), render: (_, record) => <span className="break-all text-muted-foreground">{record.action === "delete_project" ? useCanvasStore.getState().projects.find((project) => project.id === record.targetId)?.title || record.targetId : useAssetStore.getState().assets.find((asset) => asset.id === record.targetId)?.title || record.targetId}</span> },
+                { title: appI18n.t("workspace.status"), render: (_, record) => <Tag color={record.status === "pending" ? "warning" : record.status === "accepted" ? "success" : undefined}>{record.status === "pending" ? appI18n.t("workspace.waitingApproval") : record.status === "accepted" ? appI18n.t("workspace.accepted") : appI18n.t("workspace.rejected")}</Tag> },
+                { title: appI18n.t("workspace.actions"), align: "right", render: (_, record) => record.status === "pending" ? <div className="flex flex-wrap items-center justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => { void decide(record, false).catch(() => undefined); }}>{appI18n.t("workspace.reject")}</Button><Button size="sm" variant="ghost" data-destructive onClick={() => confirmApproval(record)}>{appI18n.t("workspace.confirm")}</Button></div> : null },
             ]} />
         </section>
     );

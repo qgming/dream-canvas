@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { assetUrl, getAsset } from "./assets";
 import { createGeneration, GenerationStateError, getGeneration, waitForGeneration, type GenerationOptions } from "./tasks";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -23,14 +24,14 @@ export async function waitForVideoGenerationTask(_config: AiConfig, task: VideoG
     const record = await getGeneration(task.id, options?.signal);
     assertSession();
     const result = await waitForGeneration(record, options);
-    if (!result.assetIds[0]) throw new Error("任务尚无可靠保存的视频原件");
+    if (!result.assetIds[0]) throw new Error(i18n.t("errors.videoNotSaved"));
     return { assetId: result.assetIds[0] };
 }
 export async function pollVideoGenerationTask(_config: AiConfig, task: VideoGenerationTask, options?: GenerationOptions): Promise<VideoGenerationTaskState> {
     const record = await getGeneration(task.id, options?.signal);
     if (record.status === "succeeded" && record.assetIds[0]) return { status: "completed", result: { assetId: record.assetIds[0] } };
-    if (["failed", "cancelled", "interrupted"].includes(record.status)) return { status: "failed", error: record.error || "任务未完成" };
-    if (record.status === "confirmation_required") return { status: "pending", error: record.error || "任务结果待确认" };
+    if (["failed", "cancelled", "interrupted"].includes(record.status)) return { status: "failed", error: record.error || i18n.t("errors.taskIncomplete") };
+    if (record.status === "confirmation_required") return { status: "pending", error: record.error || i18n.t("errors.taskUnconfirmed") };
     return { status: "pending" };
 }
 export function isVideoTaskFailed(error: unknown) { return error instanceof GenerationStateError && ["failed", "cancelled", "interrupted"].includes(error.status); }
@@ -38,6 +39,6 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     const assertSession = captureSession();
     const asset = await getAsset(result.assetId);
     assertSession();
-    if (asset.saveState !== "saved" || asset.deleteState) throw new Error(asset.deleteState ? "资产已删除" : "视频尚未可靠保存");
+    if (asset.saveState !== "saved" || asset.deleteState) throw new Error(asset.deleteState ? i18n.t("errors.assetDeleted") : i18n.t("errors.videoUnreliable"));
     return uploadMediaFile(assetUrl(asset.id), "video");
 }

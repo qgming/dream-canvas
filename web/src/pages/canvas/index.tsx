@@ -1,6 +1,13 @@
-import { useEffect, useRef } from "react";
+import appI18n from "@/i18n";
+import { PageHeader } from "@/components/layout/page-header";
+import { useEffect, useRef, useState } from "react";
+import { SearchInput } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/controls";
+import { EmptyState } from "@/components/ui/display";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, App, Button } from "antd";
+import { Notice as Alert } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
 import { Download, FileUp, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -16,12 +23,15 @@ import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 
 export default function CanvasPage() {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const inputRef = useRef<HTMLInputElement>(null);
     const autoOpenRef = useRef(false);
+    const creatingRef = useRef(false);
+    const [creating, setCreating] = useState(false);
+    const [keyword, setKeyword] = useState("");
     const hydrated = useCanvasStore((state) => state.hydrated);
     const projects = useCanvasStore((state) => state.projects);
     const loadError = useCanvasStore((state) => state.error);
@@ -29,6 +39,8 @@ export default function CanvasPage() {
     const importProject = useCanvasStore((state) => state.importProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
+    const filtered = projects.filter((project) => project.title.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()));
+    const allSelected = filtered.length > 0 && filtered.every((project) => selectedIds.includes(project.id));
 
     const mode = searchParams.get("mode");
     const agentMode = mode === "new" || mode === "recent" || mode === "choose";
@@ -37,8 +49,11 @@ export default function CanvasPage() {
         navigate(`/canvas/${id}${agentQuery}`);
     };
     const createAndEnter = async () => {
+        if (creatingRef.current) return;
+        creatingRef.current = true; setCreating(true);
         try { enterProject(await createProject(t("canvas.defaultTitle", { count: projects.length + 1 }))); }
-        catch (error) { navigate("/canvas", { replace: true }); message.error(error instanceof Error ? error.message : "创建失败"); }
+        catch (error) { navigate("/canvas", { replace: true }); notify.error(error instanceof Error ? error.message : appI18n.t("workspace.createFailed")); }
+        finally { creatingRef.current = false; setCreating(false); }
     };
     const importCanvas = async (file?: File) => {
         if (!file) return;
@@ -48,22 +63,22 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const result = canvasExportSchema.safeParse(JSON.parse(await projectFile.text()));
-            if (!result.success) throw new Error("项目包版本、画布内容或媒体清单不正确，未上传或导入任何内容");
+            if (!result.success) throw new Error(appI18n.t("workspace.invalidProjectPackage"));
             const data = result.data;
             const files = new Map<string, ServerAsset>();
             for (const project of data.projects) for (const item of project.files) {
                 assertSession();
-                if (!item.storageKey.startsWith("asset:")) throw new Error("仅支持当前服务端格式的项目包，不迁移旧本地数据");
+                if (!item.storageKey.startsWith("asset:")) throw new Error(appI18n.t("workspace.serverPackageOnly"));
                 if (files.has(item.storageKey)) continue;
                 const blob = zip.get(item.path);
-                if (!blob) throw new Error("项目包缺少媒体原件");
+                if (!blob) throw new Error(appI18n.t("workspace.missingOriginals"));
                 files.set(item.storageKey, await uploadAsset(blob.type ? blob : blob.slice(0, blob.size, item.mimeType), project.project.title));
             }
             for (const item of data.projects) { assertSession(); await importProject(replacePackageAssets(item.project, files)); }
             window.dispatchEvent(new Event("assets-changed"));
-            message.success(t("canvas.imported", { count: data.projects.length }));
+            notify.success(t("canvas.imported", { count: data.projects.length }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("canvas.importFailed"));
+            notify.error(error instanceof Error ? error.message : t("canvas.importFailed"));
         } finally {
             if (inputRef.current) inputRef.current.value = "";
         }
@@ -76,59 +91,53 @@ export default function CanvasPage() {
         else void createAndEnter();
     }, [createProject, hydrated, loadError, mode, projects, t]);
 
-    if (hydrated && !loadError && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">{t("canvas.opening")}</main>;
+    if (hydrated && !loadError && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">{t("canvas.opening")}</main>;
 
     return (
-        <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-                {loadError ? <Alert type="error" title={loadError} action={<Button onClick={() => void useCanvasStore.getState().loadProjects()}>重试读取</Button>} /> : null}
-                <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
-                    <div>
-                        <p className="text-xs text-stone-500">{t("canvas.library")}</p>
-                        <h1 className="mt-3 text-3xl font-semibold">{t("canvas.title")}</h1>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {selectedIds.length ? (
-                            <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `${t("canvas.title")}-${selectedIds.length}`).catch((error: unknown) => { message.error(error instanceof Error ? error.message : "项目导出失败"); })}>
-                                    {t("canvas.exportSelected")}
-                                </Button>
-                                <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
-                                    {t("canvas.deleteSelected")}
-                                </Button>
-                            </>
-                        ) : null}
+        <main className="h-full overflow-auto bg-background px-6 py-8 text-foreground">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+                {loadError ? <Alert type="error" title={loadError} action={<Button onClick={() => void useCanvasStore.getState().loadProjects()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
+                <PageHeader title={t("canvas.title")} description={t("canvas.library")} actions={<>
                         {projects.length ? (
-                            <Button disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
+                            <Button variant="ghost" data-destructive disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
                                 {t("canvas.deleteAll")}
                             </Button>
                         ) : null}
-                        <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
+                        <Button variant="ghost" disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
                             {t("canvas.import")}
                         </Button>
-                        <Button disabled={!hydrated} type="primary" icon={<Plus className="size-4" />} onClick={createAndEnter}>
+                        <Button disabled={!hydrated} loading={creating} variant="default" icon={<Plus className="size-4" />} onClick={createAndEnter}>
                             {t("canvas.create")}
                         </Button>
-                    </div>
-                </header>
+                </>}><div className="flex flex-wrap items-center gap-4"><SearchInput value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={t("ui.searchProjects")} className="w-full sm:max-w-sm" /></div></PageHeader>
 
+                <div className="flex flex-col gap-5">
+                {filtered.length || selectedIds.length ? <div className="flex flex-wrap items-center gap-3 text-sm">
+                    {filtered.length ? <Checkbox checked={allSelected} indeterminate={!allSelected && filtered.some((project) => selectedIds.includes(project.id))} onChange={({ target }) => useCanvasUiStore.setState((state) => ({ selectedProjectIds: target.checked ? [...new Set([...state.selectedProjectIds, ...filtered.map((project) => project.id)])] : state.selectedProjectIds.filter((id) => !filtered.some((project) => project.id === id)) }))}>{t("ui.selectFiltered")}</Checkbox> : null}
+                    {selectedIds.length ? <>
+                        <span className="text-muted-foreground">{t("ui.selectedCount", { count: selectedIds.length })}</span>
+                        <Button size="sm" disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `${t("canvas.title")}-${selectedIds.length}`).catch((error: unknown) => { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.exportProjectFailed")); })}>{t("canvas.exportSelected")}</Button>
+                        <Button variant="ghost" size="sm" data-destructive disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>{t("canvas.deleteSelected")}</Button>
+                    </> : null}
+                </div> : null}
                 {!hydrated ? (
-                    <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">{t("canvas.loading")}</section>
-                ) : projects.length ? (
+                    <section className="flex min-h-[360px] items-center justify-center border-y border-border text-sm text-muted-foreground ">{t("canvas.loading")}</section>
+                ) : filtered.length ? (
                     <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                        {projects.map((project) => (
+                        {filtered.map((project) => (
                             <CanvasProjectCard key={project.id} project={project} />
                         ))}
                     </div>
-                ) : (
-                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 text-center dark:border-stone-800">
+                ) : loadError ? null : projects.length ? <EmptyState description={t("ui.noMatches")} /> : (
+                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-border text-center ">
                         <h2 className="text-xl font-medium">{t("canvas.empty")}</h2>
-                        <p className="mt-3 text-sm text-stone-500">{t("canvas.emptyDescription")}</p>
-                        <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
+                        <p className="mt-3 text-sm text-muted-foreground">{t("canvas.emptyDescription")}</p>
+                        <Button variant="default" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
                             {t("canvas.create")}
                         </Button>
                     </section>
                 )}
+                </div>
             </div>
 
             <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />

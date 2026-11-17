@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { App, ConfigProvider } from "antd";
-import enUS from "antd/es/locale/en_US";
-import zhCN from "antd/es/locale/zh_CN";
+import { Tooltip } from "radix-ui";
+import { Toaster } from "sonner";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import { useTranslation } from "react-i18next";
 
 import { ClientRootInit } from "@/components/layout/client-root-init";
 import type { AppLocale } from "@/i18n";
-import { getAntThemeConfig } from "@/lib/app-theme";
+import { applyAppTheme } from "@/lib/app-theme";
+import { FeedbackProvider } from "@/hooks/use-feedback";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 const queryClient = new QueryClient({
@@ -29,10 +29,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     const dark = theme === "dark";
     const locale = i18n.resolvedLanguage as AppLocale;
 
-    useEffect(() => {
-        document.documentElement.classList.toggle("dark", dark);
-        document.documentElement.style.colorScheme = theme;
-    }, [dark, theme]);
+    useLayoutEffect(() => applyAppTheme(theme), [theme]);
 
     useEffect(() => {
         document.documentElement.lang = locale;
@@ -42,12 +39,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
     }, [locale, t]);
 
     return (
-        <ConfigProvider locale={locale === "zh-CN" ? zhCN : enUS} theme={getAntThemeConfig(dark)}>
-            <App>
+        <Tooltip.Provider>
+            <FeedbackProvider>
                 <QueryClientProvider client={queryClient}>
                     <ClientRootInit>{children}</ClientRootInit>
                 </QueryClientProvider>
-            </App>
-        </ConfigProvider>
+                <Toaster theme={dark ? "dark" : "light"} position="top-right" closeButton toastOptions={{ style: { background: "var(--popover)", color: "var(--foreground)", borderColor: "var(--border)", fontFamily: "var(--font-app)", fontSize: 14 } }} />
+            </FeedbackProvider>
+        </Tooltip.Provider>
     );
 }

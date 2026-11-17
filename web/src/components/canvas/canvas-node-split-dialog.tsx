@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, InputNumber, Modal, Tooltip } from "antd";
-import { Grid2x2, ListRestart, PanelTop, Redo2, Rows3, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { NumberInput as InputNumber } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Tooltip } from "@/components/ui/popover";
+import { ListRestart, PanelTop, Redo2, Rows3, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { readImageMeta } from "@/lib/image-utils";
@@ -13,9 +16,10 @@ const defaultParams: CanvasImageSplitParams = { rows: 2, columns: 2, horizontalL
 const maxGridSize = 12;
 type ActiveLine = { axis: "horizontal" | "vertical"; index: number } | null;
 
-export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void }) {
+export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void | Promise<unknown> }) {
     const { t } = useTranslation();
     const [params, setParams] = useState(defaultParams);
+    const [readError, setReadError] = useState("");
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [active, setActive] = useState<ActiveLine>(null);
     const historyRef = useRef<CanvasImageSplitParams[]>([]);
@@ -45,7 +49,10 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
 
     useEffect(() => {
         if (!open) return;
-        void readImageMeta(dataUrl).then(setImage);
+        let active = true;
+        setReadError("");
+        void readImageMeta(dataUrl).then((value) => { if (active) setImage(value); }).catch((error) => { if (active) setReadError(error instanceof Error ? error.message : t("errors.imageReadFailed")); });
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -148,10 +155,11 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
     const confirmParams = { ...params, horizontalLines, verticalLines, rows, columns };
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden transitionName="" maskTransitionName="">
+        <Dialog title={t("canvas.editors.splitTitle")} open={open && Boolean(dataUrl)} onClose={onClose} dirty={JSON.stringify(params) !== JSON.stringify(defaultParams)} onConfirm={() => onConfirm(confirmParams)} confirmDisabled={!image} confirmText={t("canvas.editors.generateChildren")} width={780}>
+            {readError ? <p role="alert" className="mb-4 text-sm text-destructive">{readError}</p> : null}
             <div className="space-y-5" data-canvas-no-zoom>
                 <div>
-                    <h2 className="text-xl font-semibold">{t("canvas.editors.splitTitle")}</h2>
+                    
                     <p className="mt-1 text-sm opacity-60">{t("canvas.editors.splitDescription", { count: total })}</p>
                     <p className="mt-2 text-xs leading-5 opacity-55">{t("canvas.editors.splitHint")}</p>
                 </div>
@@ -174,19 +182,19 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                         <div className="mt-3 flex items-center justify-between text-sm">
                             <div className="flex items-center gap-1">
                                 <Tooltip title={t("canvas.editors.undoSplitTitle")}>
-                                    <Button type="text" icon={<Undo2 className="size-4" />} disabled={!historySize} aria-label={t("canvas.editors.undoSplit")} onClick={undoSplit} />
+                                    <Button variant="ghost" icon={<Undo2 className="size-4" />} disabled={!historySize} aria-label={t("canvas.editors.undoSplit")} onClick={undoSplit} />
                                 </Tooltip>
                                 <Tooltip title={t("canvas.editors.redoSplitTitle")}>
-                                    <Button type="text" icon={<Redo2 className="size-4" />} disabled={!redoSize} aria-label={t("canvas.editors.redoSplit")} onClick={redoSplit} />
+                                    <Button variant="ghost" icon={<Redo2 className="size-4" />} disabled={!redoSize} aria-label={t("canvas.editors.redoSplit")} onClick={redoSplit} />
                                 </Tooltip>
                                 <Tooltip title={t("canvas.editors.zoomOut")}>
-                                    <Button type="text" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
+                                    <Button variant="ghost" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
                                 </Tooltip>
                                 <button type="button" className="min-w-14 text-center text-xs font-semibold tabular-nums opacity-70" onClick={viewport.resetZoom}>
                                     {Math.round(viewport.zoom * 100)}%
                                 </button>
                                 <Tooltip title={t("canvas.editors.zoomIn")}>
-                                    <Button type="text" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
+                                    <Button variant="ghost" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
                                 </Tooltip>
                             </div>
                             <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : t("canvas.editors.loading")}</span>
@@ -219,13 +227,10 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                                 <span className="font-semibold">{pieceSize ? `${pieceSize.width} x ${pieceSize.height}` : t("canvas.editors.unknown")}</span>
                             </div>
                         </div>
-                        <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} onClick={() => onConfirm(confirmParams)}>
-                            {t("canvas.editors.generateChildren")}
-                        </Button>
                     </div>
                 </div>
             </div>
-        </Modal>
+        </Dialog>
     );
 }
 

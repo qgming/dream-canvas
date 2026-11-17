@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { assetBlob, assetId, assetUrl, getAsset, uploadAsset } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 
@@ -9,15 +10,15 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     let asset = id ? await getAsset(id) : null;
     if (!asset) {
         const response = typeof input === "string" ? await fetch(input) : null;
-        if (response && !response.ok) throw new Error("媒体读取失败");
+        if (response && !response.ok) throw new Error(i18n.t("errors.mediaReadFailed"));
         const blob = typeof input === "string" ? await response!.blob() : input;
         assertSession();
-        asset = await uploadAsset(blob, input instanceof File ? input.name : "媒体素材");
+        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.mediaAsset"));
     }
-    if (asset.deleteState) throw new Error("资产已删除");
-    if (asset.saveState !== "saved") throw new Error("媒体尚未可靠保存");
-    if (asset.kind !== "video" && asset.kind !== "audio") throw new Error("请选择视频或音频素材");
-    if ((prefix === "video" || prefix === "audio") && asset.kind !== prefix) throw new Error("媒体类型不匹配");
+    if (asset.deleteState) throw new Error(i18n.t("errors.assetDeleted"));
+    if (asset.saveState !== "saved") throw new Error(i18n.t("errors.mediaNotSaved"));
+    if (asset.kind !== "video" && asset.kind !== "audio") throw new Error(i18n.t("errors.chooseVideoAudio"));
+    if ((prefix === "video" || prefix === "audio") && asset.kind !== prefix) throw new Error(i18n.t("errors.mediaTypeMismatch"));
     assertSession();
     const url = assetUrl(asset.id);
     const element = document.createElement(asset.kind === "audio" ? "audio" : "video");

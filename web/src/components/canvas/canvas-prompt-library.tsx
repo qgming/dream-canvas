@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Tooltip } from "antd";
+import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/popover";
 import { BookOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -16,8 +17,8 @@ export function CanvasPromptLibrary({ onSelect }: { onSelect: (prompt: string) =
         <>
             <Tooltip title={t("navigation.prompts")}>
                 <Button
-                    type="text"
-                    className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0"
+                    variant="ghost"
+                    className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-md !bg-transparent !p-0"
                     style={{ color: theme.node.text }}
                     icon={<BookOpen className="size-3.5" />}
                     onClick={() => setOpen(true)}

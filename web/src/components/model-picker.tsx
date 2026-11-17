@@ -16,9 +16,12 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    id?: string;
+    "aria-label"?: string;
+    "aria-describedby"?: string;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder, onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder, onMissingConfig, id, "aria-label": ariaLabel, "aria-describedby": ariaDescription }: ModelPickerProps) {
     const { t } = useTranslation();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
@@ -46,8 +49,11 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             onValueChange={onChange}
         >
             <SelectTrigger
+                id={id}
+                aria-label={ariaLabel || t("workbench.model")}
+                aria-describedby={ariaDescription}
                 className={cn(
-                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
+                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-md border border-input bg-transparent px-3 text-sm font-normal shadow-none transition-colors",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
                     "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
                     className,
@@ -61,7 +67,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
-                className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
+                className="w-80 max-w-[calc(100vw-32px)] border border-border bg-popover p-1"
                 position="popper"
                 align="start"
                 side="bottom"

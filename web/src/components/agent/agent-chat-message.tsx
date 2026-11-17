@@ -1,6 +1,11 @@
+import appI18n from "@/i18n";
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { App, Button, Image, Modal, Popover } from "antd";
-import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, ExternalLink, FilePenLine, FileText, FolderOpen, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { MediaPreview } from "@/components/ui/media-preview";
+import { Dialog } from "@/components/ui/dialog";
+import { Popover } from "@/components/ui/popover";
+import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, ExternalLink, FilePenLine, FileText, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
 import { Streamdown, type LinkSafetyModalProps } from "streamdown";
 import { useTranslation } from "react-i18next";
 
@@ -28,20 +33,20 @@ function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProp
     const copyText = useCopyText();
     const localPath = localFilePath(url);
     return (
-        <Modal open={isOpen} onCancel={onClose} footer={null} centered width={420} title={t(localPath ? "agent.message.openLocal" : "agent.message.openExternal")}>
-            <div className="text-sm text-black/55 dark:text-white/55">
-                {t(localPath ? "agent.message.localDescription" : "agent.message.externalDescription")}
+        <Dialog open={isOpen} onClose={onClose} footer={null} width={420} title={t(localPath ? "agent.notify.openLocal" : "agent.notify.openExternal")}>
+            <div className="text-sm text-muted-foreground">
+                {t(localPath ? "agent.notify.localDescription" : "agent.notify.externalDescription")}
             </div>
-            <div className="mt-4 max-h-32 overflow-auto break-all rounded-lg bg-black/[.035] px-3 py-2.5 font-mono text-xs leading-5 dark:bg-white/[.06]">{localPath || url}</div>
+            <div className="mt-4 max-h-32 overflow-auto break-all rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5">{localPath || url}</div>
             <div className="mt-5 flex justify-end gap-2">
-                <Button type="text" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.message.pathCopied" : "agent.message.linkCopied"))}>
-                    {t(localPath ? "agent.message.copyPath" : "agent.message.copyLink")}
+                <Button variant="ghost" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.notify.pathCopied" : "agent.notify.linkCopied"))}>
+                    {t(localPath ? "agent.notify.copyPath" : "agent.notify.copyLink")}
                 </Button>
-                <Button type="text" disabled={Boolean(localPath)} icon={<ExternalLink className="size-4" />} onClick={onConfirm}>
-                    {localPath ? "本地路径无法从服务器打开" : t("agent.message.continueOpen")}
+                <Button variant="ghost" disabled={Boolean(localPath)} icon={<ExternalLink className="size-4" />} onClick={onConfirm}>
+                    {localPath ? appI18n.t("workspace.localPath") : t("agent.notify.continueOpen")}
                 </Button>
             </div>
-        </Modal>
+        </Dialog>
     );
 }
 
@@ -87,9 +92,10 @@ export type AgentChatMessageItem = {
 };
 
 export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+    useTranslation();
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
-    const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
+    const color = item.role === "error" ? "var(--destructive)" : item.role === "tool" ? "var(--info)" : theme.node.text;
     if (isSystem) {
         return (
             <div className="flex justify-center text-xs">
@@ -116,13 +122,14 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
                     <Streamdown {...streamdownProps()} animated={streamdownAnimation} isAnimating={!!item.streamId}>{item.text}</Streamdown>
                 )}
                 {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} alignRight={isUser} /> : null}
-                {item.meta ? <div className={`mt-1 text-[11px] tabular-nums opacity-55 ${isUser ? "text-right" : ""}`}>{item.meta}</div> : null}
+                {item.meta ? <div className={`mt-1 text-xs tabular-nums opacity-55 ${isUser ? "text-right" : ""}`}>{item.meta}</div> : null}
             </div>
         </div>
     );
 }
 
 function AgentUserMessageContent({ text, references, skill, theme }: { text: string; references: AgentCanvasReference[]; skill?: AgentSkillReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     const tokens = parseAgentInlineTokens(text, references, skill);
     return (
         <div className="whitespace-pre-wrap break-words">
@@ -136,10 +143,12 @@ function AgentUserMessageContent({ text, references, skill, theme }: { text: str
 }
 
 function AgentSkillMention({ skill, theme }: { skill: AgentSkillReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     return <span className={agentInlineTokenClass} style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} title={skill.path}>/{skill.displayName || skill.name}</span>;
 }
 
 function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     const node = useAgentStore((state) => state.canvasContext?.snapshot.nodes.find((item) => item.id === reference.nodeId));
     const endpoint = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
@@ -150,7 +159,7 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
         <Popover
             trigger={["hover", "focus"]}
             placement="top"
-            mouseEnterDelay={0.15}
+           
             content={<AgentCanvasReferencePreview reference={reference} previewUrl={previewUrl} previewText={previewText} theme={theme} />}
         >
             <span
@@ -172,12 +181,12 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
     const { t } = useTranslation();
     const view = userDetail(detail);
     return (
-        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "rgba(217,119,6,.28)", background: "rgba(217,119,6,.025)", color: theme.node.text }}>
+        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "color-mix(in srgb, var(--warning) 25%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
             <details className="group">
                 <summary className={`list-none ${view ? "cursor-pointer" : "cursor-default"}`} onClick={(event) => { if (!view) event.preventDefault(); }}>
                     <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-5">
-                        <CircleAlert className="size-4 shrink-0 text-amber-600" />
-                        <span className="min-w-0 flex-1">{t("agent.message.awaitingConfirmation")}</span>
+                        <CircleAlert className="size-4 shrink-0 text-warning" />
+                        <span className="min-w-0 flex-1">{t("agent.notify.awaitingConfirmation")}</span>
                         {view ? <ChevronDown className="size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} /> : null}
                     </div>
                     <div className="mt-1 pl-6 text-sm leading-5" style={{ color: theme.node.muted }}>{summary}</div>
@@ -186,11 +195,11 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
             </details>
             {onReject || onApprove ? (
                 <div className="mt-3 flex justify-end gap-2 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                    <Button danger type="text" className="!h-8" icon={<XCircle className="size-3.5" />} onClick={() => onReject?.()}>
-                        {t("agent.message.reject")}
+                    <Button variant="ghost" data-destructive className="!h-8" icon={<XCircle className="size-3.5" />} onClick={() => onReject?.()}>
+                        {t("agent.notify.reject")}
                     </Button>
-                    <Button type="text" className="!h-8" icon={<CheckCircle2 className="size-3.5" />} style={{ color: "#16a34a" }} onClick={() => onApprove?.()}>
-                        {t("agent.message.approve")}
+                    <Button variant="ghost" className="!h-8" icon={<CheckCircle2 className="size-3.5" />} style={{ color: "var(--success)" }} onClick={() => onApprove?.()}>
+                        {t("agent.notify.approve")}
                     </Button>
                 </div>
             ) : null}
@@ -202,28 +211,29 @@ export function AgentApprovalCard({ approval, theme, onDecision }: { approval: A
     const { t } = useTranslation();
     const isFile = approval.method === "item/fileChange/requestApproval";
     const isNetwork = Boolean(approval.networkApprovalContext);
-    const title = t(isNetwork ? "agent.message.networkApproval" : isFile ? "agent.message.fileApproval" : approval.method === "item/permissions/requestApproval" ? "agent.message.permissionApproval" : "agent.message.commandApproval");
+    const title = t(isNetwork ? "agent.notify.networkApproval" : isFile ? "agent.notify.fileApproval" : approval.method === "item/permissions/requestApproval" ? "agent.notify.permissionApproval" : "agent.notify.commandApproval");
     const target = isNetwork ? approvalTarget(approval.networkApprovalContext) : isFile ? approval.grantRoot || approval.cwd : commandText(approval.command) || approval.cwd;
     return (
-        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "rgba(234,88,12,.32)", background: "rgba(234,88,12,.035)", color: theme.node.text }}>
+        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "color-mix(in srgb, var(--warning) 25%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
             <div className="flex items-start gap-2.5">
-                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-orange-600" />
+                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
                 <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{title}</div>
                     {approval.reason ? <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>{approval.reason}</div> : null}
-                    {target ? <div className="mt-1.5 break-all rounded-lg px-2.5 py-2 font-mono text-[11px] leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{target}</div> : null}
+                    {target ? <div className="mt-1.5 break-all rounded-lg px-2.5 py-2 font-mono text-xs leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{target}</div> : null}
                 </div>
             </div>
             <div className="mt-3 flex flex-wrap justify-end gap-1.5 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                <Button danger type="text" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "decline"} onClick={() => onDecision("decline")}>{t("agent.message.decline")}</Button>
-                <Button type="text" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "accept"} onClick={() => onDecision("accept")}>{t("agent.message.allowOnce")}</Button>
-                <Button type="text" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "acceptForSession"} style={{ color: "#ea580c" }} onClick={() => onDecision("acceptForSession")}>{t("agent.message.allowSession")}</Button>
+                <Button variant="ghost" data-destructive className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "decline"} onClick={() => onDecision("decline")}>{t("agent.notify.decline")}</Button>
+                <Button variant="ghost" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "accept"} onClick={() => onDecision("accept")}>{t("agent.notify.allowOnce")}</Button>
+                <Button variant="ghost" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "acceptForSession"} style={{ color: "var(--warning)" }} onClick={() => onDecision("acceptForSession")}>{t("agent.notify.allowSession")}</Button>
             </div>
         </div>
     );
 }
 
 export function AgentToolCard({ title, text, detail, theme }: { title: string; text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     const plan = planDetail(detail);
     if (plan) return <AgentPlanCard title={title} plan={plan} theme={theme} />;
     const kind = String(objectField(detail, "kind") || "");
@@ -239,11 +249,11 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
             <div className="flex min-w-0 items-center gap-2 text-sm leading-5">
                 <span className="shrink-0" style={{ color: state.color }}>{toolIcon(kind, state.icon)}</span>
                 <span className="min-w-0 truncate font-medium">{title}</span>
-                <span className="shrink-0 text-[11px]" style={{ color: state.color }}>{state.label}</span>
+                <span className="shrink-0 text-xs" style={{ color: state.color }}>{state.label}</span>
                 {view ? <ChevronDown className="ml-auto size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} /> : null}
             </div>
             {showText ? (
-                <div className={`mt-1 whitespace-pre-wrap break-words pl-6 text-sm leading-5 ${kind === "command" ? "font-mono text-[12px]" : ""}`} style={{ color: state.isError ? state.color : theme.node.muted }}>
+                <div className={`mt-1 whitespace-pre-wrap break-words pl-6 text-sm leading-5 ${kind === "command" ? "font-mono text-xs" : ""}`} style={{ color: state.isError ? state.color : theme.node.muted }}>
                     {text}
                 </div>
             ) : null}
@@ -267,7 +277,7 @@ function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?:
             <summary className="cursor-pointer list-none py-1 text-sm" style={{ color: theme.node.muted }}>
                 <div className="flex min-w-0 items-center gap-2">
                     {running ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <Brain className="size-4 shrink-0" />}
-                    <span>{t(running ? "agent.message.thinking" : "agent.events.reasoning")}</span>
+                    <span>{t(running ? "agent.notify.thinking" : "agent.events.reasoning")}</span>
                     <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
                 </div>
             </summary>
@@ -286,8 +296,8 @@ export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[];
     const running = states.some((state) => state.running);
     const failed = states.filter((state) => state.failed).length;
     const expandable = items.some((item) => Boolean(item.text.trim() || userDetail(item.detail)));
-    const color = running ? "#d97706" : failed ? "#dc2626" : theme.node.muted;
-    const label = running ? t(items.length > 1 ? "agent.message.commandsRunning" : "agent.message.commandRunning", { count: items.length }) : t("agent.message.commandsCompleted", { count: items.length, failed: failed ? t("agent.message.commandsFailed", { count: failed }) : "" });
+    const color = running ? "var(--warning)" : failed ? "var(--destructive)" : theme.node.muted;
+    const label = running ? t(items.length > 1 ? "agent.notify.commandsRunning" : "agent.notify.commandRunning", { count: items.length }) : t("agent.notify.commandsCompleted", { count: items.length, failed: failed ? t("agent.notify.commandsFailed", { count: failed }) : "" });
     const header = (
         <div className="flex min-w-0 items-center gap-2 text-sm" style={{ color }}>
             {running ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <TerminalSquare className="size-4 shrink-0" />}
@@ -308,10 +318,11 @@ export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[];
 }
 
 function AgentSingleCommand({ item, theme }: { item: AgentCommandItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     const view = userDetail(item.detail);
     return (
         <div className="ml-6 pb-1">
-            {item.text ? <div className="mt-1.5 whitespace-pre-wrap break-all font-mono text-[11px] leading-5" style={{ color: theme.node.text }}>{item.text}</div> : null}
+            {item.text ? <div className="mt-1.5 whitespace-pre-wrap break-all font-mono text-xs leading-5" style={{ color: theme.node.text }}>{item.text}</div> : null}
             {view ? <AgentDetailBlock detail={view} theme={theme} /> : null}
         </div>
     );
@@ -323,12 +334,12 @@ function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; ind
     const detailId = useId();
     const view = userDetail(item.detail);
     const state = commandViewState(item.detail);
-    const status = t(state.failed ? "agent.message.failed" : state.running ? "agent.message.running" : "agent.message.completed");
-    const color = state.failed ? "#dc2626" : state.running ? "#d97706" : "#16a34a";
+    const status = t(state.failed ? "agent.notify.failed" : state.running ? "agent.notify.running" : "agent.notify.completed");
+    const color = state.failed ? "var(--destructive)" : state.running ? "var(--warning)" : "var(--success)";
     const content = (
         <>
-            <span className="w-4 shrink-0 text-center text-[10px] tabular-nums opacity-50" style={{ color: theme.node.muted }}>{index + 1}</span>
-            <code className="min-w-0 flex-1 truncate text-[11px] leading-5" style={{ color: theme.node.text }} title={item.text}>{item.text || t("agent.message.command")}</code>
+            <span className="w-4 shrink-0 text-center text-xs tabular-nums opacity-50" style={{ color: theme.node.muted }}>{index + 1}</span>
+            <code className="min-w-0 flex-1 truncate text-xs leading-5" style={{ color: theme.node.text }} title={item.text}>{item.text || t("agent.notify.command")}</code>
             <span className="shrink-0" style={{ color }} title={status} aria-label={status}>
                 {state.running ? <LoaderCircle className="size-3.5 animate-spin" /> : state.failed ? <XCircle className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
             </span>
@@ -354,6 +365,7 @@ function commandViewState(detail: unknown) {
 }
 
 function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    useTranslation();
     const [open, setOpen] = useState(true);
     const completed = plan.tasks.filter((item) => item.status === "completed").length;
     const state = planCardState(plan, completed);
@@ -362,8 +374,8 @@ function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail
             <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2.5">
                 <ListChecks className="size-4 shrink-0" style={{ color: state.color }} />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
-                <span className="shrink-0 text-[11px]" style={{ color: state.color }}>{state.label}</span>
-                <span aria-live="polite" className="shrink-0 text-[11px] tabular-nums" style={{ color: theme.node.muted }}>{completed}/{plan.tasks.length}</span>
+                <span className="shrink-0 text-xs" style={{ color: state.color }}>{state.label}</span>
+                <span aria-live="polite" className="shrink-0 text-xs tabular-nums" style={{ color: theme.node.muted }}>{completed}/{plan.tasks.length}</span>
                 <ChevronDown className="size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} />
             </summary>
             {plan.explanation ? <div className="mt-1.5 text-xs leading-5" style={{ color: theme.node.muted }}>{plan.explanation}</div> : null}
@@ -374,7 +386,7 @@ function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail
                         <div key={`${index}-${item.step}`} className="flex items-start gap-2 text-sm leading-5">
                             <span className="mt-0.5 shrink-0" style={{ color: task.color }}>{task.icon}</span>
                             <span className={`min-w-0 flex-1 ${item.status === "completed" ? "opacity-55" : item.status === "inProgress" ? "font-medium" : ""}`} style={{ color: item.status === "inProgress" ? theme.node.text : theme.node.muted }}>{item.step}</span>
-                            <span className="shrink-0 text-[11px]" style={{ color: task.color }}>{task.label}</span>
+                            <span className="shrink-0 text-xs" style={{ color: task.color }}>{task.label}</span>
                         </div>
                     );
                 })}
@@ -395,16 +407,16 @@ export function AgentWorkingMessage({ text, detail, status = "running", mcpStatu
     return (
         <div className="min-w-0 py-1" aria-live="polite">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" style={{ color: theme.node.muted }}>
-                {status === "running" ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : status === "ready" ? <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" /> : <XCircle className="size-3.5 shrink-0 text-red-600" />}
+                {status === "running" ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : status === "ready" ? <CheckCircle2 className="size-3.5 shrink-0 text-success" /> : <XCircle className="size-3.5 shrink-0 text-destructive" />}
                 <span className="min-w-0">{text}</span>
-                {status === "running" && elapsed >= 5 ? <span className="shrink-0 text-[11px] tabular-nums opacity-60">{waitingTime(elapsed)}</span> : null}
+                {status === "running" && elapsed >= 5 ? <span className="shrink-0 text-xs tabular-nums opacity-60">{waitingTime(elapsed)}</span> : null}
             </div>
             {detail ? <div className="ml-5.5 mt-1 text-xs leading-5 opacity-65" style={{ color: theme.node.muted }}>{detail}</div> : null}
             {mcpStatuses.length ? (
                 <div className="ml-5.5 mt-3 space-y-2">
                     {mcpStatuses.map((item) => (
                         <div key={item.name} className="flex min-w-0 items-start gap-2 text-xs leading-5" style={{ color: theme.node.muted }}>
-                            {item.status === "running" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : item.status === "ready" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" /> : <XCircle className="mt-0.5 size-3.5 shrink-0 text-red-600" />}
+                            {item.status === "running" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : item.status === "ready" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" /> : <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />}
                             <div className="min-w-0">
                                 <div className="font-medium" style={{ color: theme.node.text }}>{item.name}</div>
                                 <div className="opacity-65">{item.detail}</div>
@@ -413,7 +425,7 @@ export function AgentWorkingMessage({ text, detail, status = "running", mcpStatu
                     ))}
                 </div>
             ) : null}
-            {status === "running" && elapsed >= 30 ? <div className="mt-1 text-xs leading-5 opacity-65" style={{ color: theme.node.muted }}>{t("agent.message.slowResponse")}</div> : null}
+            {status === "running" && elapsed >= 30 ? <div className="mt-1 text-xs leading-5 opacity-65" style={{ color: theme.node.muted }}>{t("agent.notify.slowResponse")}</div> : null}
         </div>
     );
 }
@@ -456,7 +468,7 @@ function AgentDetailBlock({ detail, theme }: { detail: UserDetail; theme: (typeo
             ) : null}
             {detail.files?.length ? (
                 <div className="space-y-1.5">
-                    <div className="opacity-60">{t("agent.message.files")}</div>
+                    <div className="opacity-60">{t("agent.notify.files")}</div>
                     {detail.files.map((file) => (
                         <div key={`${file.action}-${file.path}`} className="flex items-start gap-2">
                             <FileText className="mt-0.5 size-3.5 shrink-0" />
@@ -468,8 +480,8 @@ function AgentDetailBlock({ detail, theme }: { detail: UserDetail; theme: (typeo
             ) : null}
             {detail.output ? (
                 <div className="space-y-1.5">
-                    <div className="opacity-60">{t(detail.status === "failed" || detail.status === "error" ? "agent.message.errorInfo" : "agent.message.output")}</div>
-                    <pre className="thin-scrollbar max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg px-3 py-2 font-mono text-[11px] leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{detail.output}</pre>
+                    <div className="opacity-60">{t(detail.status === "failed" || detail.status === "error" ? "agent.notify.errorInfo" : "agent.notify.output")}</div>
+                    <pre className="thin-scrollbar max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg px-3 py-2 font-mono text-xs leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{detail.output}</pre>
                 </div>
             ) : null}
         </div>
@@ -487,7 +499,7 @@ function AgentMessageAttachments({ attachments, alignRight }: { attachments: Age
                         key={item.id}
                         src={item.url}
                         alt={item.name}
-                        title={t("agent.message.viewLarge")}
+                        title={t("agent.notify.viewLarge")}
                         className="size-10 cursor-zoom-in rounded-lg object-cover"
                         draggable={false}
                         onClick={() => setPreviewUrl(item.url)}
@@ -496,7 +508,7 @@ function AgentMessageAttachments({ attachments, alignRight }: { attachments: Age
             </div>
             {previewUrl ? (
                 <div className="hidden">
-                    <Image src={previewUrl} alt={t("agent.message.attachmentPreview")} preview={{ visible: true, src: previewUrl, onVisibleChange: (visible) => !visible && setPreviewUrl(null) }} />
+                    <MediaPreview src={previewUrl} alt={t("agent.notify.attachmentPreview")} open onOpenChange={(visible) => !visible && setPreviewUrl(null)} />
                 </div>
             ) : null}
         </>
@@ -507,12 +519,12 @@ function toolCardState(title: string, text: string, detail?: unknown) {
     const raw = `${title} ${text} ${normalizeText(objectField(detail, "error"))}`;
     const lower = raw.toLowerCase();
     const status = String(objectField(detail, "status") || "").toLowerCase();
-    if (status === "noop" || /未生效|无需|没有找到|没有.*可|已存在/.test(raw)) return { label: tr("noEffect"), color: "#d97706", icon: <CircleAlert className="size-4" />, isError: false };
-    if (["declined", "rejected", "cancelled", "canceled"].includes(status) || /拒绝|取消/.test(raw)) return { label: tr("canceled"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
-    if (["failed", "error"].includes(status) || /失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: tr("failed"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
-    if (["inprogress", "in_progress", "running", "started", "pending"].includes(status)) return { label: tr("running"), color: "#d97706", icon: <LoaderCircle className="size-4 animate-spin" />, isError: false };
-    if (["completed", "succeeded", "success"].includes(status) || /完成|成功/.test(raw)) return { label: tr("completed"), color: "#16a34a", icon: <CheckCircle2 className="size-4" />, isError: false };
-    return { label: tr("recorded"), color: "#2563eb", icon: <Wrench className="size-4" />, isError: false };
+    if (status === "noop" || /未生效|无需|没有找到|没有.*可|已存在/.test(raw)) return { label: tr("noEffect"), color: "var(--warning)", icon: <CircleAlert className="size-4" />, isError: false };
+    if (["declined", "rejected", "cancelled", "canceled"].includes(status) || /拒绝|取消/.test(raw)) return { label: tr("canceled"), color: "var(--destructive)", icon: <XCircle className="size-4" />, isError: true };
+    if (["failed", "error"].includes(status) || /失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: tr("failed"), color: "var(--destructive)", icon: <XCircle className="size-4" />, isError: true };
+    if (["inprogress", "in_progress", "running", "started", "pending"].includes(status)) return { label: tr("running"), color: "var(--warning)", icon: <LoaderCircle className="size-4 animate-spin" />, isError: false };
+    if (["completed", "succeeded", "success"].includes(status) || /完成|成功/.test(raw)) return { label: tr("completed"), color: "var(--success)", icon: <CheckCircle2 className="size-4" />, isError: false };
+    return { label: tr("recorded"), color: "var(--info)", icon: <Wrench className="size-4" />, isError: false };
 }
 
 function toolIcon(kind: string | undefined, fallback: ReactNode) {
@@ -523,16 +535,16 @@ function toolIcon(kind: string | undefined, fallback: ReactNode) {
 }
 
 function planCardState(plan: PlanDetail, completed: number) {
-    if (plan.status === "failed") return { label: tr("failed"), color: "#dc2626" };
-    if (["interrupted", "cancelled", "canceled"].includes(plan.status)) return { label: tr("stopped"), color: "#d97706" };
-    if (completed === plan.tasks.length) return { label: tr("completed"), color: "#16a34a" };
-    if (plan.status === "finished") return { label: tr("finished"), color: "#2563eb" };
-    return { label: tr("running"), color: "#d97706" };
+    if (plan.status === "failed") return { label: tr("failed"), color: "var(--destructive)" };
+    if (["interrupted", "cancelled", "canceled"].includes(plan.status)) return { label: tr("stopped"), color: "var(--warning)" };
+    if (completed === plan.tasks.length) return { label: tr("completed"), color: "var(--success)" };
+    if (plan.status === "finished") return { label: tr("finished"), color: "var(--info)" };
+    return { label: tr("running"), color: "var(--warning)" };
 }
 
 function planTaskState(status: string, muted: string) {
-    if (status === "completed") return { label: tr("completed"), color: "#16a34a", icon: <CheckCircle2 className="size-3.5" /> };
-    if (status === "inProgress") return { label: tr("running"), color: "#d97706", icon: <LoaderCircle className="size-3.5 animate-spin" /> };
+    if (status === "completed") return { label: tr("completed"), color: "var(--success)", icon: <CheckCircle2 className="size-3.5" /> };
+    if (status === "inProgress") return { label: tr("running"), color: "var(--warning)", icon: <LoaderCircle className="size-3.5 animate-spin" /> };
     return { label: tr("pending"), color: muted, icon: <Circle className="size-3.5" /> };
 }
 
@@ -585,5 +597,5 @@ function objectField(value: unknown, key: string) {
 }
 
 function tr(key: string, options?: Record<string, unknown>) {
-    return i18n.t(`agent.message.${key}`, options);
+    return i18n.t(`agent.notify.${key}`, options);
 }

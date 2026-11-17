@@ -2,7 +2,6 @@ import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
-import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig, ReasoningEffort } from "@/stores/use-config-store";
 
@@ -18,10 +17,10 @@ type TextSettingsPanelProps = {
 export function TextSettingsPanel({ config, onConfigChange, theme, className = "space-y-4" }: TextSettingsPanelProps) {
     const { t } = useTranslation();
     return (
-        <ImageSettingsTheme theme={theme}>
+        <>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 <div className="text-lg font-semibold">{t("settingsPanels.text.title")}</div>
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                     <div className="text-sm font-medium" style={{ color: theme.node.muted }}>
                         {t("settingsPanels.text.reasoning")}
                     </div>
@@ -34,7 +33,7 @@ export function TextSettingsPanel({ config, onConfigChange, theme, className = "
                     </div>
                 </div>
             </div>
-        </ImageSettingsTheme>
+        </>
     );
 }
 
@@ -46,8 +45,8 @@ function OptionPill({ selected, theme, onClick, children }: { selected: boolean;
     return (
         <button
             type="button"
-            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80"
-            style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+            className="h-8 cursor-pointer rounded-md border px-2 text-sm transition hover:opacity-80"
+            aria-pressed={selected} style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClick}
         >

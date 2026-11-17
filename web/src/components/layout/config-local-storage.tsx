@@ -1,4 +1,7 @@
-import { Alert, Button, Progress, Spin } from "antd";
+import { Notice as Alert } from "@/components/ui/display";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/display";
+import { Spinner as Spin } from "@/components/ui/display";
 import type { TFunction } from "i18next";
 import { Database, HardDrive, Layers3, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -44,20 +47,20 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
 
     return (
         <div className="space-y-3">
-            <section className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+            <section className="rounded-lg border border-border p-4 ">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <div className="flex items-center gap-2 text-sm font-semibold">
                             <Database className="size-4" />
                             {t("config.localStorage.title")}
                         </div>
-                        <div className="mt-1 text-xs text-stone-500">{t("config.localStorage.description")}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{t("config.localStorage.description")}</div>
                     </div>
                     <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={() => void refresh()}>
                         {t("config.localStorage.refresh")}
                     </Button>
                 </div>
-                {error ? <Alert className="mt-4" type="error" showIcon message={t("config.localStorage.readFailed")} description={error} /> : null}
+                {error ? <Alert className="mt-4" type="error" title={t("config.localStorage.readFailed")} description={error} /> : null}
                 {!usage && loading ? (
                     <div className="flex min-h-48 items-center justify-center"><Spin /></div>
                 ) : usage ? (
@@ -69,33 +72,33 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
                         </div>
                         {usage.quota ? (
                             <div className="mt-4">
-                                <div className="mb-1 flex justify-between text-xs text-stone-500">
+                                <div className="mb-1 flex justify-between text-xs text-muted-foreground">
                                     <span>{t("config.localStorage.quotaProgress")}</span>
                                     <span className="tabular-nums">{percent.toFixed(2)}%</span>
                                 </div>
-                                <Progress percent={percent} showInfo={false} />
+                                <Progress percent={percent}  />
                             </div>
                         ) : null}
                     </>
                 ) : null}
             </section>
             {usage?.databases.map((database) => (
-                <section key={database.name} className="overflow-hidden rounded-lg border border-stone-200 dark:border-stone-800">
-                    <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
+                <section key={database.name} className="overflow-hidden rounded-lg border border-border ">
+                    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 ">
                         <div className="min-w-0">
                             <div className="truncate text-sm font-semibold">{t("config.localStorage.mainDatabase")}</div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-stone-500">{database.name} · v{database.version}</div>
+                            <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{database.name} · v{database.version}</div>
                         </div>
                         <div className="shrink-0 text-sm font-medium tabular-nums">{formatStorageBytes(database.bytes)}</div>
                     </div>
-                    <div className="divide-y divide-stone-200 dark:divide-stone-800">
+                    <div className="divide-y divide-border">
                         {database.stores.map((store) => (
                             <div key={store.name} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 px-4 py-3 text-sm">
                                 <div className="min-w-0">
                                     <div className="truncate font-medium">{storeLabel(store.name, t)}</div>
-                                    <div className="mt-0.5 truncate font-mono text-[11px] text-stone-500">{store.name}</div>
+                                    <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{store.name}</div>
                                 </div>
-                                <div className="text-right text-xs text-stone-500 tabular-nums">{t("config.localStorage.records", { count: store.records })}</div>
+                                <div className="text-right text-xs text-muted-foreground tabular-nums">{t("config.localStorage.records", { count: store.records })}</div>
                                 <div className="w-20 text-right font-medium tabular-nums">{formatStorageBytes(store.bytes)}</div>
                             </div>
                         ))}
@@ -108,10 +111,10 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
 
 function StorageMetric({ icon, label, value, hint }: { icon: ReactNode; label: string; value: string; hint: string }) {
     return (
-        <div className="rounded-lg bg-stone-100/70 p-3 dark:bg-stone-900/70">
-            <div className="flex items-center gap-2 text-xs text-stone-500">{icon}{label}</div>
+        <div className="rounded-lg bg-muted p-3 ">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">{icon}{label}</div>
             <div className="mt-2 text-xl font-semibold tabular-nums">{value}</div>
-            <div className="mt-1 text-[11px] text-stone-500">{hint}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
         </div>
     );
 }

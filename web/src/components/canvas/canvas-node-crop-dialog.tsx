@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Modal, Segmented, Tooltip } from "antd";
-import { Check, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Segmented } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
+import { ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useImageEditorViewport } from "@/components/canvas/use-image-editor-viewport";
@@ -19,11 +22,12 @@ type ResizeHandle = "n" | "e" | "s" | "w" | "ne" | "nw" | "se" | "sw";
 const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const minSize = 0.06;
 const defaultCrop = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
-export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
+export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void | Promise<unknown> }) {
     const { t } = useTranslation();
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
     const [ratioPreset, setRatioPreset] = useState("free");
     const [fixedRatio, setFixedRatio] = useState<number | null>(null);
+    const [readError, setReadError] = useState("");
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const dragAbortRef = useRef<AbortController | null>(null);
     const viewport = useImageEditorViewport(image, open);
@@ -40,7 +44,11 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
     useEffect(() => {
         if (!open) return;
-        void readImageMeta(dataUrl).then(setImage);
+        let active = true;
+        setImage(null);
+        setReadError("");
+        void readImageMeta(dataUrl).then((value) => { if (active) setImage(value); }).catch((error) => { if (active) setReadError(error instanceof Error ? error.message : t("errors.imageReadFailed")); });
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -69,7 +77,8 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     };
 
     return (
-        <Modal title={t("canvas.editors.cropTitle")} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden transitionName="" maskTransitionName="">
+        <Dialog title={t("canvas.editors.cropTitle")} open={open && Boolean(dataUrl)} onClose={onClose} dirty={JSON.stringify(crop) !== JSON.stringify(defaultCrop)} onConfirm={() => onConfirm(crop)} confirmDisabled={!image} confirmText={t("canvas.editors.confirmCrop")} width={780}>
+            {readError ? <p role="alert" className="mb-4 text-sm text-destructive">{readError}</p> : null}
             <div className="space-y-4">
                 <div
                     ref={viewport.viewportRef}
@@ -104,13 +113,13 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
                 <div className="flex items-center justify-center gap-1">
                     <Tooltip title={t("canvas.editors.zoomOut")}>
-                        <Button type="text" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
+                        <Button variant="ghost" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
                     </Tooltip>
                     <button type="button" className="min-w-14 text-center text-xs font-semibold tabular-nums opacity-70" onClick={viewport.resetZoom}>
                         {Math.round(viewport.zoom * 100)}%
                     </button>
                     <Tooltip title={t("canvas.editors.zoomIn")}>
-                        <Button type="text" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
+                        <Button variant="ghost" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
                     </Tooltip>
                     <span className="ml-2 text-xs opacity-55">{t("canvas.editors.cropHint")}</span>
                 </div>
@@ -146,15 +155,9 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
                 <div className="flex items-center justify-end gap-2">
                     <Button onClick={() => setCrop(defaultCrop)}>{t("canvas.editors.reset")}</Button>
-                    <Button icon={<X className="size-4" />} onClick={onClose}>
-                        {t("canvas.editors.cancel")}
-                    </Button>
-                    <Button type="primary" icon={<Check className="size-4" />} onClick={() => onConfirm(crop)}>
-                        {t("canvas.editors.confirmCrop")}
-                    </Button>
                 </div>
             </div>
-        </Modal>
+        </Dialog>
     );
 }
 

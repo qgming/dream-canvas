@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Card, Checkbox, Form, Modal, Space, Switch, Tag, Tooltip, Typography, theme as antdTheme } from "antd";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/controls";
+import { EditorForm, Field } from "@/components/ui/form";
+import { z } from "zod";
+import { Dialog } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/controls";
+import { Badge as Tag } from "@/components/ui/display";
+import { Tooltip } from "@/components/ui/popover";
 import { Ellipsis, Image as ImageIcon, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -50,10 +57,11 @@ export function ImageToolSettingsModal({
     onSave: () => void;
 }) {
     const { t } = useTranslation();
-    const { token } = antdTheme.useToken();
     const previewToolbarRef = useRef<HTMLDivElement>(null);
     const scrollbarTrackRef = useRef<HTMLInputElement>(null);
     const [previewScroll, setPreviewScroll] = useState<PreviewScroll>({ left: 0, max: 0, viewport: 1, content: 1 });
+    const baseline = useRef("");
+    useEffect(() => { if (open) baseline.current = JSON.stringify({ selectedIds, showLabels }); }, [open]);
     const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
     const selectedTools = tools.filter((tool) => selected.has(tool.id));
     const previewTools: PreviewTool[] = [
@@ -122,47 +130,37 @@ export function ImageToolSettingsModal({
     const scrollbarThumbWidth = previewScroll.max > 0 ? Math.min(scrollbarWidth, Math.max(64, (previewScroll.viewport / previewScroll.content) * scrollbarWidth)) : scrollbarWidth;
 
     return (
-        <Modal
+        <Dialog
             title={t("canvas.imageTools.customize")}
             open={open}
-            centered
             width={760}
-            onCancel={onCancel}
-            destroyOnHidden
+            onClose={onCancel}
+            dirty={Boolean(baseline.current && baseline.current !== JSON.stringify({ selectedIds, showLabels }))}
             footer={
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <span>{t("canvas.imageTools.showLabels")}</span>
                         <Switch checked={showLabels} onChange={onShowLabelsChange} />
                     </div>
-                    <Space>
-                        <Button onClick={onCancel}>{t("common.cancel")}</Button>
-                        <Button type="primary" onClick={onSave}>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="default" onClick={onSave}>
                             {t("common.save")}
                         </Button>
-                    </Space>
+                    </div>
                 </div>
             }
         >
-            <Typography.Paragraph type="secondary" className="!mb-4">
+            <p data-secondary className="!mb-4">
                 {t("canvas.imageTools.description")}
-            </Typography.Paragraph>
+            </p>
 
-            <Card
-                size="small"
-                title={
-                    <Space size={6}>
-                        <Settings2 className="size-4" />
-                        {t("canvas.imageTools.preview")}
-                    </Space>
-                }
-                className="mb-4"
-            >
+            <section className="mb-4 rounded-xl border border-border p-4">
+                <h3 className="flex items-center gap-2 text-base font-medium"><Settings2 className="size-4" />{t("canvas.imageTools.preview")}</h3>
                 <div className="relative flex min-h-[300px] w-full justify-center pt-20 pb-9">
                     <div
                         ref={previewToolbarRef}
-                        className="hide-scrollbar absolute left-2 right-2 top-3 z-10 flex h-12 items-center overflow-x-auto rounded-[18px] border px-1 text-[13px]"
-                        style={{ background: token.colorBgElevated, borderColor: token.colorBorderSecondary, boxShadow: token.boxShadowSecondary, color: token.colorText }}
+                        className="hide-scrollbar absolute left-2 right-2 top-3 z-10 flex h-12 items-center overflow-x-auto rounded-xl border px-1 text-sm"
+                        style={{ background: "var(--popover)", borderColor: "var(--border)", color: "var(--foreground)" }}
                         onScroll={syncPreviewScroll}
                     >
                         {previewTools.map((tool) => (
@@ -171,10 +169,10 @@ export function ImageToolSettingsModal({
                     </div>
                     <div
                         className="flex h-48 w-full max-w-[360px] flex-col items-center justify-center rounded-xl border"
-                        style={{ background: token.colorFillAlter, borderColor: token.colorBorderSecondary, color: token.colorTextSecondary }}
+                        style={{ background: "var(--muted)", borderColor: "var(--border)", color: "var(--muted-foreground)" }}
                     >
                         <ImageIcon className="mb-2 size-8" />
-                        <Typography.Text type="secondary">{t("canvas.imageTools.imageNode")}</Typography.Text>
+                        <span data-secondary>{t("canvas.imageTools.imageNode")}</span>
                     </div>
                     <input
                         ref={scrollbarTrackRef}
@@ -183,24 +181,24 @@ export function ImageToolSettingsModal({
                         max={Math.max(previewScroll.max, 1)}
                         value={Math.min(previewScroll.left, Math.max(previewScroll.max, 1))}
                         disabled={previewScroll.max <= 0}
-                        className="absolute bottom-4 left-10 right-10 h-2.5 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[#8d9498] [&::-moz-range-track]:h-2.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#bdc4c8] [&::-webkit-slider-runnable-track]:h-2.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#bdc4c8] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#8d9498]"
+                        className="absolute bottom-4 left-10 right-10 h-2.5 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--muted-foreground)] [&::-moz-range-track]:h-2.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[var(--muted)] [&::-webkit-slider-runnable-track]:h-2.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[var(--muted)] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--muted-foreground)]"
                         style={{ "--preview-scrollbar-thumb-width": `${scrollbarThumbWidth}px` } as CSSProperties}
                         onInput={(event) => setPreviewScrollLeft(Number(event.currentTarget.value))}
                         onChange={(event) => setPreviewScrollLeft(Number(event.target.value))}
                     />
                 </div>
-            </Card>
+            </section>
 
-            <Form layout="vertical" className="!mb-0">
-                <Form.Item
+            <EditorForm className="!mb-0">
+                <Field
                     className="!mb-4"
                     label={
-                        <Space size={8}>
+                        <div className="flex flex-wrap items-center gap-2">
                             <span>{t("canvas.imageTools.quickTools")}</span>
                             <Tag className="m-0">
                                 {selectedTools.length}/{tools.length}
                             </Tag>
-                        </Space>
+                        </div>
                     }
                 >
                     <Checkbox.Group value={selectedIds} className="grid w-full gap-3 md:grid-cols-3" onChange={(values) => updateSelectedTools(values as ImageQuickToolId[])}>
@@ -213,17 +211,17 @@ export function ImageToolSettingsModal({
                             </Checkbox>
                         ))}
                     </Checkbox.Group>
-                </Form.Item>
-            </Form>
-        </Modal>
+                </Field>
+            </EditorForm>
+        </Dialog>
     );
 }
 
 function PreviewToolbarItem({ tool, showLabels }: { tool: PreviewTool; showLabels: boolean }) {
     return (
         <Tooltip title={tool.title}>
-            <span className="flex h-12 shrink-0 items-center px-1.5" style={{ color: tool.danger ? "#ef4444" : undefined }}>
-                <span className={`flex h-9 items-center rounded-lg px-2 ${showLabels ? "gap-2" : "justify-center"}`}>
+            <span className="flex h-12 shrink-0 items-center px-1.5" style={{ color: tool.danger ? "var(--destructive)" : undefined }}>
+                <span className={`flex h-8 items-center rounded-lg px-2 ${showLabels ? "gap-2" : "justify-center"}`}>
                     {tool.icon}
                     {showLabels ? <span className="whitespace-nowrap">{tool.label}</span> : null}
                 </span>

@@ -1,3 +1,4 @@
+import appI18n from "@/i18n";
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -55,7 +56,7 @@ export function usePluginHost(params: PluginHostParams) {
             }));
         };
         const target = (nodeId?: string, signal?: AbortSignal) => {
-            if (!nodeId) throw new Error("插件生成需要明确目标节点，请通过节点上下文调用");
+            if (!nodeId) throw new Error(appI18n.t("workspace.pluginTargetRequired"));
             return prepareTarget(nodeId, signal);
         };
         // Open the configuration dialog and throw when AI is not configured, allowing the plugin to handle the error.
@@ -69,7 +70,7 @@ export function usePluginHost(params: PluginHostParams) {
             generateImage: async (prompt, options) => {
                 assertSession();
                 const node = nodesRef.current.find((node) => node.id === options?.nodeId);
-                if (!node) throw new Error("插件生成的目标节点不存在");
+                if (!node) throw new Error(appI18n.t("workspace.pluginTargetMissing"));
                 const config = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}), ...(options?.size ? { size: options.size } : {}), ...(options?.parameters ? { modelParameters: options.parameters } : {}) };
                 ensureReady(config);
                 const references = await toReferences(options?.references, options?.signal);
@@ -81,7 +82,7 @@ export function usePluginHost(params: PluginHostParams) {
             generateVideo: async (prompt, options) => {
                 assertSession();
                 const node = nodesRef.current.find((node) => node.id === options?.nodeId);
-                if (!node) throw new Error("插件生成的目标节点不存在");
+                if (!node) throw new Error(appI18n.t("workspace.pluginTargetMissing"));
                 const config = {
                     ...buildGenerationConfig(effectiveConfig, node, "video"),
                     ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}),
@@ -99,7 +100,7 @@ export function usePluginHost(params: PluginHostParams) {
             generateText: async (prompt, options) => {
                 assertSession();
                 const node = nodesRef.current.find((node) => node.id === options?.nodeId);
-                if (!node) throw new Error("插件生成的目标节点不存在");
+                if (!node) throw new Error(appI18n.t("workspace.pluginTargetMissing"));
                 const config = { ...buildGenerationConfig(effectiveConfig, node, "text"), ...(options?.model ? { model: options.model, modelParameters: node.metadata?.modelParameters?.[options.model] } : {}), ...(options?.parameters ? { modelParameters: options.parameters } : {}) };
                 ensureReady(config);
                 const messages: AiTextMessage[] = [...(options?.system ? [{ role: "system" as const, content: options.system }] : []), { role: "user" as const, content: prompt }];

@@ -1,6 +1,17 @@
+import appI18n from "@/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Collapse, Dropdown, Form, Input, Modal, Select, Switch, Tooltip } from "antd";
-import type { MenuProps } from "antd";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/tabs";
+import { Menu } from "@/components/ui/popover";
+import { EditorForm, Field, useEditorForm, validateForm } from "@/components/ui/form";
+import { z } from "zod";
+import { Input, Textarea } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Choice } from "@/components/ui/choice";
+import { Switch } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
+import type { MenuItem } from "@/components/ui/popover";
 import { Check, ChevronDown, CircleAlert, FilePenLine, LoaderCircle, LockKeyhole, MessageSquareText, Plus, RefreshCw, Search, Sparkles, Trash2, Workflow } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -20,7 +31,7 @@ const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export function AgentSkillsView({ clientId }: { clientId: string }) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const { message, modal } = App.useApp();
+    const { notify, confirm } = useFeedback();
     const connected = useAgentStore((state) => state.connected);
     const url = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
@@ -51,7 +62,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     const [busySkill, setBusySkill] = useState("");
     const [errorsOpen, setErrorsOpen] = useState(false);
     const confirmRef = useRef<{ destroy: () => void } | null>(null);
-    const [form] = Form.useForm<SkillFormValues>();
+    const form = useEditorForm<SkillFormValues>();
     const endpoint = url.trim().replace(/\/$/, "");
     const filteredSkills = useMemo(() => {
         const keyword = query.trim().toLowerCase();
@@ -82,7 +93,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         setCreateMenuOpen(false);
         setBusySkill("");
         setErrorsOpen(false);
-        form.resetFields();
+        form.reset({});
     }, [connected, form]);
     const useSkill = (skill: AgentSkillSummary) => {
         selectSkill(skill);
@@ -90,10 +101,10 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     };
     const generateDraft = async (source: SkillDraftSource) => {
         const agent = useAgentStore.getState();
-        if (agent.sending || agent.waiting) return message.warning(t("agent.skillManager.codexBusy"));
-        if (source === "conversation" && !hasSettledConversation(agent.messages, agent.activeThreadId)) return message.warning(t("agent.skillManager.noConversation"));
-        if (source === "canvas" && !agent.canvasContext) return message.warning(t("agent.skillManager.noCanvas"));
-        if (!clientId) return message.warning(t("agent.skillManager.connecting"));
+        if (agent.sending || agent.waiting) return notify.warning(t("agent.skillManager.codexBusy"));
+        if (source === "conversation" && !hasSettledConversation(agent.messages, agent.activeThreadId)) return notify.warning(t("agent.skillManager.noConversation"));
+        if (source === "canvas" && !agent.canvasContext) return notify.warning(t("agent.skillManager.noCanvas"));
+        if (!clientId) return notify.warning(t("agent.skillManager.connecting"));
         const connectionRevision = useAgentSkillStore.getState().connectionRevision;
         setGeneratingSource(source);
         try {
@@ -109,9 +120,9 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             if (!connectionIsCurrent(connectionRevision)) return;
             if (!response.data) throw new Error(t("agent.skillManager.noDraft"));
             setDraft(response.data);
-            message.success(t("agent.skillManager.draftCreated"));
+            notify.success(t("agent.skillManager.draftCreated"));
         } catch (error) {
-            if (connectionIsCurrent(connectionRevision)) message.error(error instanceof Error ? error.message : t("agent.skillManager.draftFailed"));
+            if (connectionIsCurrent(connectionRevision)) notify.error(error instanceof Error ? error.message : t("agent.skillManager.draftFailed"));
         } finally {
             if (connectionIsCurrent(connectionRevision)) setGeneratingSource(null);
         }
@@ -126,7 +137,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             if (!response.data) throw new Error(t("agent.skillManager.contentMissing"));
             setEditor({ mode: "edit", detail: response.data });
         } catch (error) {
-            if (connectionIsCurrent(connectionRevision)) message.error(error instanceof Error ? error.message : t("agent.skillManager.readFailed"));
+            if (connectionIsCurrent(connectionRevision)) notify.error(error instanceof Error ? error.message : t("agent.skillManager.readFailed"));
         } finally {
             if (connectionIsCurrent(connectionRevision)) setBusySkill("");
         }
@@ -136,20 +147,20 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         const connectionRevision = useAgentSkillStore.getState().connectionRevision;
         let values: SkillFormValues;
         try {
-            values = await form.validateFields();
+            values = await validateForm(form);
         } catch {
-            const firstError = form.getFieldsError().find((field) => field.errors.length);
-            if (firstError?.name.some((name) => name === "shortDescription" || name === "defaultPrompt")) setAdvancedOpen(true);
-            if (firstError) requestAnimationFrame(() => form.scrollToField(firstError.name, { block: "center" }));
+            const firstError = Object.keys(form.formState.errors)[0] as keyof SkillFormValues | undefined;
+            if (firstError === "shortDescription" || firstError === "defaultPrompt") setAdvancedOpen(true);
+            if (firstError) requestAnimationFrame(() => form.setFocus(firstError));
             return;
         }
         if (!connectionIsCurrent(connectionRevision)) return;
         const name = editor.mode === "edit" ? editor.detail.name : values.name.trim();
         const skillInterface = compactInterface(values);
         if (skillInterface?.defaultPrompt && !mentionsSkill(skillInterface.defaultPrompt, name)) {
-            form.setFields([{ name: "defaultPrompt", errors: [t("agent.skillManager.defaultPromptMention", { name })] }]);
+            form.setError("defaultPrompt", { message: t("agent.skillManager.defaultPromptMention", { name }) });
             setAdvancedOpen(true);
-            requestAnimationFrame(() => form.scrollToField("defaultPrompt", { block: "center" }));
+            requestAnimationFrame(() => form.setFocus("defaultPrompt"));
             return;
         }
         setSaving(true);
@@ -163,22 +174,23 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             setAdvancedOpen(false);
             await refresh();
             if (!connectionIsCurrent(connectionRevision)) return;
-            message.success(t(editor.mode === "create" ? "agent.skillManager.created" : "agent.skillManager.updated"));
+            notify.success(t(editor.mode === "create" ? "agent.skillManager.created" : "agent.skillManager.updated"));
         } catch (error) {
-            if (connectionIsCurrent(connectionRevision)) message.error(error instanceof Error ? error.message : t("agent.skillManager.saveFailed"));
+            if (connectionIsCurrent(connectionRevision)) notify.error(error instanceof Error ? error.message : t("agent.skillManager.saveFailed"));
+            throw error;
         } finally {
             if (connectionIsCurrent(connectionRevision)) setSaving(false);
         }
     };
     const confirmDelete = (skill: AgentSkillSummary) => {
         const connectionRevision = useAgentSkillStore.getState().connectionRevision;
-        confirmRef.current = modal.confirm({
+        confirmRef.current = confirm({
             title: t("agent.skillManager.deleteTitle", { name: skill.interface?.displayName || skill.name }),
             content: t("agent.skillManager.deleteDescription"),
-            okText: t("agent.skillManager.delete"),
-            okType: "danger",
+            confirmText: t("agent.skillManager.delete"),
+            destructive: true,
             cancelText: t("common.cancel"),
-            onOk: async () => {
+            onConfirm: async () => {
                 if (!connectionIsCurrent(connectionRevision)) return;
                 setBusySkill(skill.path);
                 try {
@@ -190,16 +202,16 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                     if (selectedSkill?.name === skill.name && selectedSkill.path === skill.path) clearSelection();
                     await refresh();
                     if (!connectionIsCurrent(connectionRevision)) return;
-                    message.success(t("agent.skillManager.deleted"));
+                    notify.success(t("agent.skillManager.deleted"));
                 } catch (error) {
                     if (!connectionIsCurrent(connectionRevision)) return;
-                    message.error(error instanceof Error ? error.message : t("agent.skillManager.deleteFailed"));
+                    notify.error(error instanceof Error ? error.message : t("agent.skillManager.deleteFailed"));
                     throw error;
                 } finally {
                     if (connectionIsCurrent(connectionRevision)) setBusySkill("");
                 }
             },
-            afterClose: () => {
+            onCancel: () => {
                 confirmRef.current = null;
             },
         });
@@ -214,16 +226,17 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             if (!enabled && selectedSkill?.name === skill.name && selectedSkill.path === skill.path) clearSelection();
             await refresh();
         } catch (error) {
-            if (connectionIsCurrent(connectionRevision)) message.error(error instanceof Error ? error.message : t("agent.skillManager.statusFailed"));
+            if (connectionIsCurrent(connectionRevision)) notify.error(error instanceof Error ? error.message : t("agent.skillManager.statusFailed"));
         } finally {
             if (connectionIsCurrent(connectionRevision)) setBusySkill("");
         }
     };
     const codexBusy = sending || waiting;
-    const createMenu: MenuProps = {
+    const createMenu: { items: MenuItem[] } = {
         items: [
             {
                 key: "conversation",
+                onClick: () => void generateDraft("conversation"),
                 icon: <MessageSquareText className="size-4" />,
                 disabled: codexBusy || !hasConversation,
                 label: (
@@ -235,6 +248,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             },
             {
                 key: "canvas",
+                onClick: () => void generateDraft("canvas"),
                 icon: <Workflow className="size-4" />,
                 disabled: codexBusy || !hasCanvas,
                 label: (
@@ -247,6 +261,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             { type: "divider" as const },
             {
                 key: "manual",
+                onClick: () => { setDraft(null); form.reset({}); setEditor({ mode: "create" }); },
                 icon: <FilePenLine className="size-4" />,
                 label: (
                     <div className="py-0.5">
@@ -256,13 +271,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 ),
             },
         ],
-        onClick: ({ key }) => {
-            if (key === "manual") {
-                setDraft(null);
-                setEditor({ mode: "create" });
-            }
-            else void generateDraft(key as SkillDraftSource);
-        },
+
     };
 
     return (
@@ -270,25 +279,25 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: theme.node.stroke }}>
                 <div className="flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-sm font-semibold">个人 Skill</div>
-                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>Skill 保存于服务端，供此账号的助手使用。</div>
+                        <div className="text-sm font-semibold">{appI18n.t("workspace.personalSkills")}</div>
+                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{appI18n.t("workspace.skillsDescription")}</div>
                     </div>
                     <div className="flex items-center gap-1">
                         <Tooltip title={t("agent.skillManager.reload")}>
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" aria-label={t("agent.skillManager.reloadSkill")} disabled={!connected || loading} icon={<RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />} onClick={() => void refresh()} />
+                            <Button variant="ghost"  className="!h-8 !w-8 !min-w-8" aria-label={t("agent.skillManager.reloadSkill")} disabled={!connected || loading} icon={<RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />} onClick={() => void refresh()} />
                         </Tooltip>
-                        <Dropdown trigger={["click"]} placement="bottomRight" open={createMenuOpen} onOpenChange={setCreateMenuOpen} disabled={!connected || !clientId || Boolean(generatingSource)} menu={createMenu}>
-                            <Button type="text" className="!h-8 !px-2" aria-haspopup="menu" aria-expanded={createMenuOpen} disabled={!connected || !clientId} loading={Boolean(generatingSource)} icon={<Plus className="size-4" />}>
+                        <Menu placement="bottomRight" open={createMenuOpen} onOpenChange={setCreateMenuOpen} disabled={!connected || !clientId || Boolean(generatingSource)} items={createMenu.items}>
+                            <Button variant="ghost" className="!h-8 !px-2" aria-haspopup="menu" aria-expanded={createMenuOpen} disabled={!connected || !clientId} loading={Boolean(generatingSource)} icon={<Plus className="size-4" />}>
                                 {t("agent.skillManager.createSkill")} <ChevronDown className="size-3.5 opacity-60" />
                             </Button>
-                        </Dropdown>
+                        </Menu>
                     </div>
                 </div>
                 <div className="mt-3 flex gap-2">
-                    <Input aria-label={t("agent.skills.search")} className="min-w-0 flex-1" allowClear disabled={!connected} value={query} onChange={(event) => setQuery(event.target.value)} prefix={<Search className="size-3.5" />} placeholder={t("agent.skills.search")} />
-                    <Select<ScopeFilter>
-                        size="small"
-                        variant="borderless"
+                    <Input aria-label={t("agent.skills.search")} className="min-w-0 flex-1" disabled={!connected} value={query} onChange={(event) => setQuery(event.target.value)} prefix={<Search className="size-3.5" />} placeholder={t("agent.skills.search")} />
+                    <Choice<ScopeFilter>
+                        compact
+                        borderless
                         aria-label={t("agent.skillManager.filterBySource")}
                         className="w-28 shrink-0"
                         disabled={!connected}
@@ -298,7 +307,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                     />
                 </div>
                 {errors.length ? (
-                    <Button danger type="text" size="small" className="!mt-1 !h-7 !px-1 text-xs" icon={<CircleAlert className="size-3.5" />} onClick={() => setErrorsOpen(true)}>{t("agent.skillManager.loadErrors", { count: errors.length })}</Button>
+                    <Button variant="ghost" data-destructive size="sm" className="!mt-1 !h-7 !px-1 text-xs" icon={<CircleAlert className="size-3.5" />} onClick={() => setErrorsOpen(true)}>{t("agent.skillManager.loadErrors", { count: errors.length })}</Button>
                 ) : null}
             </div>
             <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4">
@@ -320,7 +329,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                                             </div>
                                             <div className="mt-1 line-clamp-2 text-xs leading-5" style={{ color: theme.node.muted }}>{skill.interface?.shortDescription || skill.shortDescription || skill.description || t("agent.skillManager.noDescription")}</div>
                                             <Tooltip title={skill.path}>
-                                                <div className="mt-1.5 truncate text-[11px]" style={{ color: theme.node.faint }}>{t(`agent.skillManager.scopes.${skill.scope}`)} · {skill.name}</div>
+                                                <div className="mt-1.5 truncate text-xs" style={{ color: theme.node.faint }}>{t(`agent.skillManager.scopes.${skill.scope}`)} · {skill.name}</div>
                                             </Tooltip>
                                         </div>
                                     </div>
@@ -330,11 +339,11 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                                             {t(skill.enabled ? "agent.skillManager.enabled" : "agent.skillManager.disabled")}
                                         </label>
                                         <div className="flex items-center gap-0.5">
-                                            <Button type="text" size="small" disabled={!connected || !skill.enabled || Boolean(busySkill)} icon={selected ? <Check className="size-3.5" /> : <Sparkles className="size-3.5" />} onClick={() => useSkill(skill)}>{t(selected ? "agent.skillManager.selected" : "agent.skillManager.use")}</Button>
+                                            <Button variant="ghost" size="sm" disabled={!connected || !skill.enabled || Boolean(busySkill)} icon={selected ? <Check className="size-3.5" /> : <Sparkles className="size-3.5" />} onClick={() => useSkill(skill)}>{t(selected ? "agent.skillManager.selected" : "agent.skillManager.use")}</Button>
                                             {skill.managed ? (
                                                 <>
-                                                    <Tooltip title={t("common.edit")}><Button type="text" shape="circle" size="small" aria-label={t("agent.skillManager.editNamed", { name: skill.interface?.displayName || skill.name })} disabled={!connected || Boolean(busySkill) || Boolean(generatingSource)} icon={<FilePenLine className="size-3.5" />} onClick={() => void openEdit(skill)} /></Tooltip>
-                                                    <Tooltip title={t("common.delete")}><Button danger type="text" shape="circle" size="small" aria-label={t("agent.skillManager.deleteNamed", { name: skill.interface?.displayName || skill.name })} disabled={!connected || Boolean(busySkill) || Boolean(generatingSource)} icon={<Trash2 className="size-3.5" />} onClick={() => confirmDelete(skill)} /></Tooltip>
+                                                    <Tooltip title={t("common.edit")}><Button variant="ghost"  size="sm" aria-label={t("agent.skillManager.editNamed", { name: skill.interface?.displayName || skill.name })} disabled={!connected || Boolean(busySkill) || Boolean(generatingSource)} icon={<FilePenLine className="size-3.5" />} onClick={() => void openEdit(skill)} /></Tooltip>
+                                                    <Tooltip title={t("common.delete")}><Button variant="ghost" data-destructive  size="sm" aria-label={t("agent.skillManager.deleteNamed", { name: skill.interface?.displayName || skill.name })} disabled={!connected || Boolean(busySkill) || Boolean(generatingSource)} icon={<Trash2 className="size-3.5" />} onClick={() => confirmDelete(skill)} /></Tooltip>
                                                 </>
                                             ) : null}
                                         </div>
@@ -352,61 +361,45 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 )}
             </div>
 
-            <Modal title={t("agent.skillManager.loadErrors", { count: errors.length })} open={errorsOpen} footer={null} width={720} onCancel={() => setErrorsOpen(false)}>
+            <Dialog title={t("agent.skillManager.loadErrors", { count: errors.length })} open={errorsOpen} footer={null} width={720} onClose={() => setErrorsOpen(false)}>
                 <div className="thin-scrollbar mt-4 max-h-[60vh] overflow-y-auto rounded-md border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke }}>
                     {errors.map((error, index) => <div key={`${index}:${error}`} className="break-all py-1" style={{ color: theme.node.muted }}>{error}</div>)}
                 </div>
-            </Modal>
+            </Dialog>
 
-            <Modal
+            <Dialog
                 title={editor?.mode === "edit" ? t("agent.skillManager.editNamed", { name: editor.detail.interface?.displayName || editor.detail.name }) : t("agent.skillManager.createSkill")}
                 open={Boolean(editor)}
-                okText={t(editor?.mode === "edit" ? "agent.skillManager.saveChanges" : "agent.skillManager.createSkill")}
+                confirmText={t(editor?.mode === "edit" ? "agent.skillManager.saveChanges" : "agent.skillManager.createSkill")}
                 cancelText={t("common.cancel")}
-                confirmLoading={saving}
+                busy={saving}
                 width={680}
-                centered
-                destroyOnHidden
-                styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto" } }}
-                onCancel={() => {
+                
+                onClose={() => {
                     if (saving) return;
                     setDraft(null);
                     setEditor(null);
                     setAdvancedOpen(false);
                 }}
-                onOk={() => void saveSkill()}
+                onConfirm={saveSkill}
             >
-                <div className="mb-5 text-xs" style={{ color: theme.node.muted }}>保存于此账号的服务端 Skill 库</div>
-                <Form key={editor?.mode === "edit" ? editor.detail.revision : `create:${editor?.values?.name || "blank"}`} form={form} initialValues={editorValues} layout="vertical" requiredMark="optional" preserve={false}>
+                <div className="mb-5 text-xs" style={{ color: theme.node.muted }}>{appI18n.t("workspace.skillsSaved")}</div>
+                <EditorForm key={editor?.mode === "edit" ? editor.detail.revision : `create:${editor?.values?.name || "blank"}`} form={form} initialValues={editorValues}>
                     <div className="mb-3 text-xs font-medium" style={{ color: theme.node.muted }}>{t("agent.skillManager.basicInfo")}</div>
                     <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-                        <Form.Item name="name" label={t("agent.skillManager.identifier")} extra={t("agent.skillManager.identifierExtra")} rules={[{ required: true, message: t("agent.skillManager.identifierRequired") }, { max: 64, message: t("agent.skillManager.identifierMax") }, { pattern: skillNamePattern, message: t("agent.skillManager.identifierPattern") }]}>
+                        <Field name="name" label={t("agent.skillManager.identifier")} description={t("agent.skillManager.identifierExtra")} schema={z.string().trim().min(1, t("agent.skillManager.identifierRequired")).max(64, t("agent.skillManager.identifierMax")).regex(skillNamePattern, t("agent.skillManager.identifierPattern"))}>
                             <Input maxLength={64} disabled={editor?.mode === "edit"} placeholder={t("agent.skillManager.identifierPlaceholder")} />
-                        </Form.Item>
-                        <Form.Item name="displayName" label={t("agent.skillManager.displayName")} rules={[{ max: 64, message: t("agent.skillManager.displayNameMax") }]}><Input maxLength={64} placeholder={t("agent.skillManager.displayNamePlaceholder")} /></Form.Item>
+                        </Field>
+                        <Field name="displayName" label={t("agent.skillManager.displayName")} schema={z.preprocess((value) => value === "" || value == null ? undefined : value, z.string().max(64, t("agent.skillManager.displayNameMax")).optional())}><Input maxLength={64} placeholder={t("agent.skillManager.displayNamePlaceholder")} /></Field>
                     </div>
-                    <Form.Item name="description" label={t("agent.skillManager.whenToUse")} extra={t("agent.skillManager.whenToUseExtra")} rules={[{ required: true, message: t("agent.skillManager.whenToUseRequired") }, { max: 1024, message: t("agent.skillManager.whenToUseMax") }, { validator: (_, value) => typeof value === "string" && /[<>]/.test(value) ? Promise.reject(new Error(t("agent.skillManager.noAngleBrackets"))) : Promise.resolve() }]}><Input.TextArea maxLength={1024} autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t("agent.skillManager.whenToUsePlaceholder")} /></Form.Item>
-                    <Form.Item name="instructions" label={t("agent.skillManager.instructions")} extra={t("agent.skillManager.instructionsExtra")} rules={[{ required: true, message: t("agent.skillManager.instructionsRequired") }]}><Input.TextArea className="!leading-6" autoSize={{ minRows: 6, maxRows: 10 }} placeholder={t("agent.skillManager.instructionsPlaceholder")} /></Form.Item>
-                    <Collapse
-                        ghost
-                        size="small"
-                        activeKey={advancedOpen ? ["advanced"] : []}
-                        expandIconPlacement="end"
-                        onChange={(keys) => setAdvancedOpen((Array.isArray(keys) ? keys : [keys]).includes("advanced"))}
-                        items={[{
-                            key: "advanced",
-                            forceRender: true,
-                            label: <span className="text-sm font-medium">{t("agent.skillManager.advanced")}</span>,
-                            children: (
-                                <>
-                                    <Form.Item name="shortDescription" label={t("agent.skillManager.shortDescription")} extra={t("agent.skillManager.shortDescriptionExtra")} rules={[{ min: 25, message: t("agent.skillManager.shortDescriptionMin") }, { max: 64, message: t("agent.skillManager.shortDescriptionMax") }]}><Input maxLength={64} showCount placeholder={t("agent.skillManager.shortDescriptionPlaceholder")} /></Form.Item>
-                                    <Form.Item name="defaultPrompt" label={t("agent.skillManager.defaultPrompt")} extra={t("agent.skillManager.defaultPromptExtra")} rules={[{ max: 1024, message: t("agent.skillManager.defaultPromptMax") }]}><Input.TextArea maxLength={1024} autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t("agent.skillManager.defaultPromptPlaceholder")} /></Form.Item>
-                                </>
-                            ),
-                        }]}
-                    />
-                </Form>
-            </Modal>
+                    <Field name="description" label={t("agent.skillManager.whenToUse")} description={t("agent.skillManager.whenToUseExtra")} schema={z.string().trim().min(1, t("agent.skillManager.whenToUseRequired")).max(1024, t("agent.skillManager.whenToUseMax")).refine((value) => !/[<>]/.test(value), t("agent.skillManager.noAngleBrackets"))}><Textarea maxLength={1024} autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t("agent.skillManager.whenToUsePlaceholder")} /></Field>
+                    <Field name="instructions" label={t("agent.skillManager.instructions")} description={t("agent.skillManager.instructionsExtra")} schema={z.string().trim().min(1, t("agent.skillManager.instructionsRequired"))}><Textarea className="!leading-6" autoSize={{ minRows: 6, maxRows: 10 }} placeholder={t("agent.skillManager.instructionsPlaceholder")} /></Field>
+                    <Disclosure title={t("agent.skillManager.advanced")} open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                                    <Field name="shortDescription" label={t("agent.skillManager.shortDescription")} description={t("agent.skillManager.shortDescriptionExtra")} schema={z.preprocess((value) => value === "" || value == null ? undefined : value, z.string().min(25, t("agent.skillManager.shortDescriptionMin")).max(64, t("agent.skillManager.shortDescriptionMax")).optional())}><Input maxLength={64} showCount placeholder={t("agent.skillManager.shortDescriptionPlaceholder")} /></Field>
+                                    <Field name="defaultPrompt" label={t("agent.skillManager.defaultPrompt")} description={t("agent.skillManager.defaultPromptExtra")} schema={z.preprocess((value) => value === "" || value == null ? undefined : value, z.string().max(1024, t("agent.skillManager.defaultPromptMax")).optional())}><Textarea maxLength={1024} autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t("agent.skillManager.defaultPromptPlaceholder")} /></Field>
+                    </Disclosure>
+                </EditorForm>
+            </Dialog>
         </div>
     );
 }

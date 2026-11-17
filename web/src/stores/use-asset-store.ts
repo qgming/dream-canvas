@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { create } from "zustand";
 
 import * as api from "@/services/api/assets";
@@ -53,7 +54,7 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
                 for (const previous of get().assets) if (!records.some((record) => record.id === previous.id)) window.dispatchEvent(new CustomEvent("asset-deleted", { detail: previous.id }));
                 set({ assets: records.map(fromServer), deleting, hydrated: true, error: "" });
             }
-        } catch (error) { if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ hydrated: true, error: error instanceof Error ? error.message : "读取资产失败" }); }
+        } catch (error) { if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ hydrated: true, error: error instanceof Error ? error.message : i18n.t("errors.assetReadFailed") }); }
     },
     addAsset: async (input) => {
         const assertSession = captureSession();
@@ -62,7 +63,7 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
         if (input.kind === "text") id = (await api.createTextAsset(input.title, metadata)).id;
         else {
             id = api.assetId((input.data as ImageAsset["data"]).storageKey) || "";
-            if (!id) throw new Error("媒体尚未保存到资产库");
+            if (!id) throw new Error(i18n.t("errors.mediaNotUploaded"));
             await api.updateAsset(id, input.title, metadata);
         }
         assertSession();
@@ -73,7 +74,7 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
     updateAsset: async (id, patch) => {
         const assertSession = captureSession();
         const current = get().assets.find((asset) => asset.id === id);
-        if (!current) throw new Error("资产不存在");
+        if (!current) throw new Error(i18n.t("errors.assetMissing"));
         const next = { ...current, ...patch } as Asset;
         await api.updateAsset(id, next.title, { ...next.metadata, coverUrl: next.coverUrl, tags: next.tags, source: next.source, note: next.note, ...(next.kind === "text" ? next.data : {}) });
         assertSession();
@@ -88,7 +89,7 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
         await get().loadAssets();
         assertSession();
         window.dispatchEvent(new CustomEvent("asset-deleted", { detail: id }));
-        if ("deleteState" in result) throw new Error("资产已标记删除，文件清理待处理，请在删除记录中重试");
+        if ("deleteState" in result) throw new Error(i18n.t("errors.assetCleanupPending"));
     },
     cleanupImages: () => {},
 }));

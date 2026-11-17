@@ -96,7 +96,7 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
     };
 
     return (
-        <div className="absolute bottom-24 left-6 z-50 overflow-hidden rounded-lg border shadow-2xl backdrop-blur-sm" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+        <div data-canvas-no-zoom data-canvas-shortcuts-ignore className="absolute bottom-40 left-4 z-50 overflow-hidden rounded-xl border shadow-lg" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             <div
                 ref={containerRef}
                 className="relative h-full w-full cursor-crosshair"
@@ -110,7 +110,8 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
                     if (isDragging) updateViewportFromEvent(event);
                 }}
                 onPointerUp={() => setIsDragging(false)}
-                onPointerLeave={() => setIsDragging(false)}
+                onPointerCancel={() => setIsDragging(false)}
+                onLostPointerCapture={() => setIsDragging(false)}
             >
                 {nodes.map((node) => {
                     const pos = toMinimap(node.position.x, node.position.y);

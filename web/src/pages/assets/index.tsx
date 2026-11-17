@@ -1,6 +1,22 @@
-import { Copy, Download, PencilLine, Search, Trash2, Upload } from "lucide-react";
+import appI18n from "@/i18n";
+import { Copy, Download, PencilLine, Trash2, Upload, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
+import { Notice as Alert, Spinner } from "@/components/ui/display";
+import { Checkbox } from "@/components/ui/controls";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Menu } from "@/components/ui/popover";
+import { PageHeader } from "@/components/layout/page-header";
+import { Sheet } from "@/components/ui/dialog";
+import { EmptyState as Empty } from "@/components/ui/display";
+import { EditorForm, Field, useEditorForm, useWatch, validateForm } from "@/components/ui/form";
+import { z } from "zod";
+import { MediaPreview } from "@/components/ui/media-preview";
+import { Input, Textarea, SearchInput } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Pagination } from "@/components/ui/data-table";
+import { Choice } from "@/components/ui/choice";
+import { Badge as Tag, FilterChip } from "@/components/ui/display";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
@@ -29,14 +45,15 @@ type ImageDraft = ImageAsset["data"] | null;
 const kindOptions = ["all", "text", "image", "video", "audio"] as const;
 
 export default function AssetsPage() {
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     const copyText = useCopyText();
-    const [form] = Form.useForm<AssetFormValues>();
+    const form = useEditorForm<AssetFormValues>();
     const coverInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
+    const hydrated = useAssetStore((state) => state.hydrated);
     const assetError = useAssetStore((state) => state.error);
     const deleting = useAssetStore((state) => state.deleting);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -54,11 +71,16 @@ export default function AssetsPage() {
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
     const [mediaDraft, setMediaDraft] = useState<UploadedFile | null>(null);
     const [saving, setSaving] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+    const savingRef = useRef(false);
+    const deleteRef = useRef(false);
     const editorRevision = useRef(0);
-    const coverUrl = Form.useWatch("coverUrl", form) || "";
-    const title = Form.useWatch("title", form) || "";
-    const tags = Form.useWatch("tags", form) || [];
-    const content = Form.useWatch("content", form) || "";
+    const coverUrl = useWatch({ name: "coverUrl", control: form.control }) || "";
+    const title = useWatch({ name: "title", control: form.control }) || "";
+    const tags = useWatch({ name: "tags", control: form.control }) || [];
+    const content = useWatch({ name: "content", control: form.control }) || "";
     const validAssets = assets;
 
     const filteredAssets = useMemo(() => {
@@ -74,6 +96,9 @@ export default function AssetsPage() {
         const start = (page - 1) * pageSize;
         return filteredAssets.slice(start, start + pageSize);
     }, [filteredAssets, page, pageSize]);
+    const selectedAssets = validAssets.filter((asset) => selectedIds.includes(asset.id));
+    const allFilteredSelected = filteredAssets.length > 0 && filteredAssets.every((asset) => selectedIds.includes(asset.id));
+    useEffect(() => { setSelectedIds((ids) => ids.filter((id) => assets.some((asset) => asset.id === id))); }, [assets]);
 
     useEffect(() => {
         const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
@@ -86,7 +111,7 @@ export default function AssetsPage() {
         setImageDraft(null);
         setMediaDraft(null);
         setFormKind("text");
-        form.setFieldsValue({ kind: "text", title: "", coverUrl: "", tags: [], source: t("assets.manual"), note: "", content: "" });
+        form.reset({ kind: "text", title: "", coverUrl: "", tags: [], source: t("assets.manual"), note: "", content: "" });
         setIsAssetOpen(true);
     };
 
@@ -96,7 +121,7 @@ export default function AssetsPage() {
         setFormKind(asset.kind);
         setImageDraft(asset.kind === "image" ? asset.data : null);
         setMediaDraft(null);
-        form.setFieldsValue({
+        form.reset({
             kind: asset.kind,
             title: asset.title,
             coverUrl: asset.coverUrl,
@@ -109,8 +134,8 @@ export default function AssetsPage() {
     };
 
     const closeEditor = () => { editorRevision.current++; setIsAssetOpen(false); };
-    const saveAsset = async () => { if (saving) return; const assertSession = captureSession(); const revision = editorRevision.current; setSaving(true); try {
-        const values = await form.validateFields();
+    const saveAsset = async () => { if (savingRef.current) return; savingRef.current = true; const assertSession = captureSession(); const revision = editorRevision.current; setSaving(true); try {
+        const values = await validateForm(form);
         assertSession();
         if (revision !== editorRevision.current) return;
         const base = {
@@ -129,23 +154,22 @@ export default function AssetsPage() {
             await updateAsset(editingAsset.id, base);
         } else if (values.kind === "image") {
             if (!imageDraft) {
-                message.error(t("assets.selectImage"));
+                notify.error(t("assets.selectImage"));
                 return;
             }
             const asset = { ...base, kind: "image" as const, data: imageDraft };
             await addAsset(asset);
         } else {
-            if (!mediaDraft) { message.error("请选择视频或音频原件"); return; }
+            if (!mediaDraft) { notify.error(appI18n.t("workspace.chooseOriginal")); return; }
             const data = { ...mediaDraft, width: mediaDraft.width || 0, height: mediaDraft.height || 0 };
             if (values.kind === "video") await addAsset({ ...base, kind: "video", data });
             else await addAsset({ ...base, kind: "audio", data });
         }
         assertSession();
         if (revision !== editorRevision.current) return;
-        message.success(editingAsset ? t("assets.updated") : t("assets.saved"));
+        notify.success(editingAsset ? t("assets.updated") : t("assets.saved"));
         closeEditor();
-        } catch (error) { if (error instanceof Error) message.error(error.message); }
-        finally { setSaving(false); }
+        } finally { savingRef.current = false; setSaving(false); }
     };
 
     const readCoverFile = async (file?: File) => {
@@ -155,7 +179,7 @@ export default function AssetsPage() {
         const image = await uploadImage(file);
         assertSession();
         if (revision !== editorRevision.current) return;
-        form.setFieldValue("coverUrl", image.url);
+        form.setValue("coverUrl", image.url, { shouldDirty: true });
     };
 
     const readImageFile = async (file?: File) => {
@@ -166,19 +190,19 @@ export default function AssetsPage() {
         if (kind === "video" || kind === "audio") {
             const media = await uploadMediaFile(file, kind);
             assertSession();
-            if (revision !== editorRevision.current || form.getFieldValue("kind") !== kind) return;
+            if (revision !== editorRevision.current || form.getValues("kind") !== kind) return;
             setMediaDraft(media);
-            if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
+            if (!form.getValues("title")) form.setValue("title", file.name, { shouldDirty: true });
             return;
         }
         if (!file.type.startsWith("image/")) return;
         const image = await uploadImage(file);
         assertSession();
-        if (revision !== editorRevision.current || form.getFieldValue("kind") !== kind) return;
+        if (revision !== editorRevision.current || form.getValues("kind") !== kind) return;
         const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
         setImageDraft(draft);
-        if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
-        if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
+        if (!form.getValues("coverUrl")) form.setValue("coverUrl", draft.dataUrl, { shouldDirty: true });
+        if (!form.getValues("title")) form.setValue("title", file.name, { shouldDirty: true });
     };
 
     const copyAssetText = async (asset: Asset) => {
@@ -191,23 +215,23 @@ export default function AssetsPage() {
         try {
             const blob = await readAssetMediaBlob(asset);
             if (!blob) {
-                message.error(t("assets.downloadFailed"));
+                notify.error(t("assets.downloadFailed"));
                 return;
             }
             const ext = asset.data.mimeType?.split("/")[1]?.split("+")[0] || (asset.kind === "audio" ? "mp3" : asset.kind === "video" ? "mp4" : "png");
             saveAs(blob, `${asset.title || "asset"}.${ext}`);
         } catch {
-            message.error(t("assets.downloadFailed"));
+            notify.error(t("assets.downloadFailed"));
         }
     };
 
     const exportAllAssets = async () => {
         if (!validAssets.length) {
-            message.warning(t("assets.noneToExport"));
+            notify.warning(t("assets.noneToExport"));
             return;
         }
         try { await exportAssets(validAssets, t("assets.packageName")); }
-        catch (error) { message.error(error instanceof Error ? error.message : "导出资产失败"); }
+        catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.exportAssetsFailed")); }
     };
 
     const importAssetZip = async (file?: File) => {
@@ -223,113 +247,67 @@ export default function AssetsPage() {
                 delete payload.updatedAt;
                 await addAsset(payload as Parameters<typeof addAsset>[0]);
             }
-            message.success(t("assets.imported", { count: importedAssets.length }));
+            notify.success(t("assets.imported", { count: importedAssets.length }));
         } catch {
-            message.error(t("assets.importFailed"));
+            notify.error(t("assets.importFailed"));
         } finally {
             if (assetInputRef.current) assetInputRef.current.value = "";
         }
     };
 
     const confirmDelete = async () => {
-        if (!deletingAsset) return;
-        try { await removeAsset(deletingAsset.id); message.success(t("assets.deleted")); setDeletingAsset(null); }
-        catch (error) { message.error(error instanceof Error ? error.message : "删除失败"); }
+        if (!deletingAsset || deleteRef.current) return;
+        deleteRef.current = true;
+        try { await removeAsset(deletingAsset.id); notify.success(t("assets.deleted")); setDeletingAsset(null); }
+        finally { deleteRef.current = false; }
+    };
+    const deleteSelected = async () => {
+        if (deleteRef.current) return;
+        deleteRef.current = true; setBulkDeleting(true);
+        const assertSession = captureSession();
+        try {
+            for (const asset of selectedAssets) { assertSession(); await removeAsset(asset.id); setSelectedIds((ids) => ids.filter((id) => id !== asset.id)); }
+            setBulkDeleteOpen(false); notify.success(t("assets.deleted"));
+        } finally { deleteRef.current = false; setBulkDeleting(false); }
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-background text-stone-900 dark:text-stone-100">
-            <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
-                {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>重试读取</Button>} /> : null}
-                {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={`${asset.title}：删除待处理`} description={asset.error || "原件尚未清理完成"} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => message.error(error instanceof Error ? error.message : "清理失败")); }}>重试清理</Button>} />)}
-                <div className="pb-8">
-                    <div className="mx-auto max-w-5xl text-center">
-                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">{t("assets.title")}</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">{t("assets.description")}</p>
-                    </div>
-
-                    <div className="mx-auto mt-8 w-full max-w-2xl">
-                        <Input.Search
-                            className="w-full"
-                            size="large"
-                            allowClear
-                            prefix={<Search className="size-4 text-stone-400" />}
-                            value={keyword}
-                            placeholder={t("assets.search")}
-                            onChange={(event) => {
-                                setPage(1);
-                                setKeyword(event.target.value);
-                            }}
-                            onSearch={(value) => {
-                                setPage(1);
-                                setKeyword(value);
-                            }}
-                        />
-                    </div>
-
-                    <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
-                                <div className="text-xs font-medium text-stone-500 dark:text-stone-400">{t("assets.type")}</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {kindOptions.map((option) => (
-                                        <Tag.CheckableTag
-                                            key={option}
-                                            checked={kindFilter === option}
-                                            className={cn("prompt-filter-tag", kindFilter === option && "is-active")}
-                                            onChange={() => {
-                                                setPage(1);
-                                                setKindFilter(option);
-                                            }}
-                                        >
-                                            {option === "all" ? t("common.all") : t(`assets.kinds.${option}`)}
-                                        </Tag.CheckableTag>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap gap-4">
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => void exportAllAssets()}
-                                >
-                                    {t("assets.export")}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => assetInputRef.current?.click()}
-                                >
-                                    {t("assets.import")}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={openCreate}
-                                >
-                                    {t("assets.add")}
-                                </button>
-                            </div>
+        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground ">
+            <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8 ">
+                {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
+                {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button>} />)}
+                <div className="mx-auto mb-6 max-w-7xl">
+                    <PageHeader title={t("assets.title")} description={t("assets.description")} actions={<>
+                        <Button variant="ghost" disabled={!hydrated} onClick={() => void exportAllAssets()}>{t("assets.export")}</Button>
+                        <Button variant="ghost" onClick={() => assetInputRef.current?.click()}>{t("assets.import")}</Button>
+                        <Button variant="default" disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
+                    </>}>
+                        <div className="flex flex-wrap items-center gap-4">
+                            <SearchInput className="w-full sm:max-w-sm" value={keyword} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
+                            <div className="flex flex-wrap gap-1">{kindOptions.map((kind) => <FilterChip key={kind} checked={kindFilter === kind} onChange={() => { setPage(1); setKindFilter(kind); }}>{t(kind === "all" ? "common.all" : `assets.kinds.${kind}`)}</FilterChip>)}</div>
                         </div>
-                    </div>
+                    </PageHeader>
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
+                    {filteredAssets.length ? <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <Checkbox checked={allFilteredSelected} indeterminate={!allFilteredSelected && filteredAssets.some((asset) => selectedIds.includes(asset.id))} disabled={bulkDeleting} onChange={({ target }) => setSelectedIds((ids) => target.checked ? [...new Set([...ids, ...filteredAssets.map((asset) => asset.id)])] : ids.filter((id) => !filteredAssets.some((asset) => asset.id === id)))}>{t("ui.selectFiltered")}</Checkbox>
+                        {selectedAssets.length ? <><span className="text-muted-foreground">{t("ui.selectedCount", { count: selectedAssets.length })}</span><Button size="sm" disabled={bulkDeleting} onClick={() => { void exportAssets(selectedAssets, t("assets.packageName")).catch((error: unknown) => notify.error(error instanceof Error ? error.message : t("workspace.exportAssetsFailed"))); }}>{t("ui.exportSelected")}</Button><Button variant="ghost" size="sm" data-destructive disabled={bulkDeleting} onClick={() => setBulkDeleteOpen(true)}>{t("ui.deleteSelected")}</Button><Button variant="ghost" size="sm" disabled={bulkDeleting} onClick={() => setSelectedIds([])}>{t("ui.clear")}</Button></> : null}
+                    </div> : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {visibleAssets.map((asset) => (
-                            <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />
+                            <AssetCard key={asset.id} asset={asset} selected={selectedIds.includes(asset.id)} selectionDisabled={bulkDeleting} onSelect={(checked) => setSelectedIds((ids) => checked ? [...new Set([...ids, asset.id])] : ids.filter((id) => id !== asset.id))} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />
                         ))}
                     </div>
 
-                    {!visibleAssets.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("assets.empty")} className="py-20" /> : null}
+                    {!hydrated ? <div className="flex justify-center py-20"><Spinner /></div> : !visibleAssets.length && !assetError ? <Empty description={t("assets.empty")} className="py-20" /> : null}
 
                     <div className="flex justify-center">
                         <Pagination
                             current={page}
                             pageSize={pageSize}
                             total={filteredAssets.length}
-                            showSizeChanger
-                            pageSizeOptions={[10, 20, 50, 100]}
+                            onPageSizeChange={setPageSize}
                             onChange={(nextPage, nextPageSize) => {
                                 setPage(nextPage);
                                 setPageSize(nextPageSize);
@@ -339,11 +317,11 @@ export default function AssetsPage() {
                 </div>
             </main>
 
-            <Modal title={editingAsset ? t("assets.edit") : t("assets.add")} open={isAssetOpen} width={980} onCancel={closeEditor} onOk={() => void saveAsset()} confirmLoading={saving} okText={t("common.save")} cancelText={t("common.cancel")} destroyOnHidden>
+            <Dialog title={editingAsset ? t("assets.edit") : t("assets.add")} open={isAssetOpen} width={980} onClose={closeEditor} onConfirm={saveAsset} busy={saving} confirmText={t("common.save")} cancelText={t("common.cancel")}>
                 <div className="grid gap-6 pt-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-                    <Form form={form} layout="vertical" requiredMark={false} initialValues={{ kind: "text", tags: [] }}>
-                        <Form.Item name="kind" label={t("assets.type")}>
-                            <Select
+                    <EditorForm form={form}>
+                        <Field name="kind" label={t("assets.type")}>
+                            <Choice
                                 disabled={Boolean(editingAsset)}
                                 options={[
                                     { label: t("assets.kinds.text"), value: "text" },
@@ -353,65 +331,61 @@ export default function AssetsPage() {
                                 ]}
                                 onChange={(value) => { editorRevision.current++; setFormKind(value); setImageDraft(null); setMediaDraft(null); }}
                             />
-                        </Form.Item>
-                        <Form.Item name="title" label={t("assets.fields.title")} rules={[{ required: true, message: t("assets.fields.titleRequired") }]}>
+                        </Field>
+                        <Field name="title" label={t("assets.fields.title")} schema={z.string().trim().min(1, t("assets.fields.titleRequired"))}>
                             <Input size="large" placeholder={t("assets.fields.titlePlaceholder")} />
-                        </Form.Item>
-                        <Form.Item name="coverUrl" label={t("assets.fields.coverUrl")}>
-                            <Space.Compact className="w-full">
-                                <Input placeholder={t("assets.fields.coverPlaceholder")} />
-                                <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
-                                    {t("common.upload")}
-                                </Button>
-                            </Space.Compact>
-                        </Form.Item>
-                        <Form.Item name="tags" label={t("assets.fields.tags")}>
-                            <Select mode="tags" tokenSeparators={[",", "，"]} placeholder={t("assets.fields.tagsPlaceholder")} />
-                        </Form.Item>
+                        </Field>
+                        <div className="flex items-end gap-2">
+                            <Field name="coverUrl" label={t("assets.fields.coverUrl")} className="min-w-0 flex-1"><Input placeholder={t("assets.fields.coverPlaceholder")} /></Field>
+                            <Button icon={<Upload className="size-4" />} onClick={() => coverInputRef.current?.click()}>{t("common.upload")}</Button>
+                        </div>
+                        <Field name="tags" label={t("assets.fields.tags")}>
+                            <Choice multiple creatable  placeholder={t("assets.fields.tagsPlaceholder")} />
+                        </Field>
                         <div className="grid gap-4 sm:grid-cols-2">
-                            <Form.Item name="source" label={t("assets.fields.source")}>
+                            <Field name="source" label={t("assets.fields.source")}>
                                 <Input placeholder={t("assets.fields.sourcePlaceholder")} />
-                            </Form.Item>
-                            <Form.Item name="note" label={t("assets.fields.note")}>
+                            </Field>
+                            <Field name="note" label={t("assets.fields.note")}>
                                 <Input placeholder={t("assets.fields.optional")} />
-                            </Form.Item>
+                            </Field>
                         </div>
                         {formKind === "text" ? (
-                            <Form.Item name="content" label={t("assets.fields.textContent")} rules={[{ required: true, message: t("assets.fields.textRequired") }]}>
-                                <Input.TextArea rows={8} placeholder={t("assets.fields.textPlaceholder")} />
-                            </Form.Item>
+                            <Field name="content" label={t("assets.fields.textContent")} schema={z.string().trim().min(1, t("assets.fields.textRequired"))}>
+                                <Textarea rows={8} placeholder={t("assets.fields.textPlaceholder")} />
+                            </Field>
                         ) : (
-                            <Form.Item label={`${t(`assets.kinds.${formKind}`)}原件`} required>
-                                <div className="rounded-lg border border-dashed border-stone-300 p-4 dark:border-stone-700">
+                            <Field label={t("workspace.originalFile", { kind: t(`assets.kinds.${formKind}`) })}>
+                                <div className="rounded-lg border border-dashed border-border p-4 ">
                                     <Button disabled={Boolean(editingAsset)} icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
-                                        {formKind === "image" ? t("assets.selectImageFile") : `选择${t(`assets.kinds.${formKind}`)}文件`}
+                                        {formKind === "image" ? t("assets.selectImageFile") : t("workspace.chooseFile", { kind: t(`assets.kinds.${formKind}`) })}
                                     </Button>
-                                    {editingAsset ? <p className="mt-2 text-xs text-muted-foreground">原件保持不变；替换文件请新增资产，避免改变其他项目引用的内容。</p> : null}
+                                    {editingAsset ? <p className="mt-2 text-xs text-muted-foreground">{appI18n.t("workspace.originalUnchanged")}</p> : null}
                                     {formKind === "image" && imageDraft ? (
-                                        <Typography.Text type="secondary" className="ml-3 text-xs">
+                                        <span data-secondary className="ml-3 text-xs">
                                             {imageDraft.width}x{imageDraft.height} · {formatBytes(imageDraft.bytes)}
-                                        </Typography.Text>
-                                    ) : mediaDraft ? <Typography.Text type="secondary" className="ml-3 text-xs">{formatBytes(mediaDraft.bytes)} · {mediaDraft.mimeType}</Typography.Text> : !editingAsset ? (
-                                        <Typography.Text type="secondary" className="ml-3 text-xs">
-                                            尚未选择文件
-                                        </Typography.Text>
+                                        </span>
+                                    ) : mediaDraft ? <span data-secondary className="ml-3 text-xs">{formatBytes(mediaDraft.bytes)} · {mediaDraft.mimeType}</span> : !editingAsset ? (
+                                        <span data-secondary className="ml-3 text-xs">
+                                            {t("ui.noFileSelected")}
+                                        </span>
                                     ) : null}
                                 </div>
-                            </Form.Item>
+                            </Field>
                         )}
-                    </Form>
-                    <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-800 dark:bg-stone-950">
-                        <Typography.Text strong>{t("assets.preview")}</Typography.Text>
-                        <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+                    </EditorForm>
+                    <div className="rounded-xl border border-border bg-muted p-4  ">
+                        <span className="font-medium">{t("assets.preview")}</span>
+                        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background ">
                             {coverUrl || imageDraft?.dataUrl ? (
                                 <img src={coverUrl || imageDraft?.dataUrl} alt="" className="aspect-[4/3] w-full object-cover" />
                             ) : (
-                                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm text-stone-500 dark:bg-stone-900">{content || t("assets.noCover")}</div>
+                                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground ">{content || t("assets.noCover")}</div>
                             )}
                             <div className="p-4">
-                                <Typography.Text strong ellipsis className="block">
+                                <span data-strong data-ellipsis className="block">
                                     {title || t("assets.untitled")}
-                                </Typography.Text>
+                                </span>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                     {tags.length ? (
                                         tags.map((tag) => (
@@ -433,7 +407,7 @@ export default function AssetsPage() {
                     accept="image/*"
                     className="hidden"
                     onChange={(event) => {
-                        void readCoverFile(event.target.files?.[0]).catch((error: unknown) => message.error(error instanceof Error ? error.message : "上传失败"));
+                        void readCoverFile(event.target.files?.[0]).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.uploadFailed")));
                         event.target.value = "";
                     }}
                 />
@@ -443,89 +417,73 @@ export default function AssetsPage() {
                     accept={formKind === "video" ? "video/*" : formKind === "audio" ? "audio/*" : "image/*"}
                     className="hidden"
                     onChange={(event) => {
-                        void readImageFile(event.target.files?.[0]).catch((error: unknown) => message.error(error instanceof Error ? error.message : "上传失败"));
+                        void readImageFile(event.target.files?.[0]).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.uploadFailed")));
                         event.target.value = "";
                     }}
                 />
-            </Modal>
+            </Dialog>
 
             <AssetDrawer asset={previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || null : null} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
 
-            <Modal title={t("assets.deleteTitle")} open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
-                <p>全局删除「{deletingAsset?.title}」及其文件副本。所有项目中的媒体将显示为「资产已删除」，节点、提示词和参数仍会保留。</p>
-            </Modal>
+            <Dialog title={t("assets.deleteTitle")} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive cancelText={t("common.cancel")}>
+                <p>{t("workspace.deleteAssetDescription", { title: deletingAsset?.title })}</p>
+            </Dialog>
+            <Dialog title={t("ui.deleteSelectedTitle", { count: selectedAssets.length })} open={bulkDeleteOpen} busy={bulkDeleting} onClose={() => setBulkDeleteOpen(false)} onConfirm={deleteSelected} confirmText={t("common.delete")} destructive description={t("workspace.assetDeleteDescription")}><ul className="max-h-48 space-y-1 overflow-auto text-sm">{selectedAssets.map((asset) => <li key={asset.id} className="truncate">{asset.title}</li>)}</ul></Dialog>
         </div>
     );
 }
 
-function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
+function AssetCard({ asset, selected, selectionDisabled, onSelect, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; selected: boolean; selectionDisabled: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = assetCoverUrl(asset);
     const summary = assetSummary(asset);
     return (
-        <Card
-            hoverable
-            className="overflow-hidden"
-            styles={{ body: { padding: 0 } }}
-            cover={
+        <article className={cn("relative overflow-hidden rounded-xl border bg-card text-card-foreground", selected ? "border-primary ring-1 ring-primary" : "border-border")}>
+                <div className="absolute left-3 top-3 z-10 rounded-md bg-card/95 p-1.5"><Checkbox checked={selected} disabled={selectionDisabled} aria-label={t("ui.selectNamed", { name: asset.title })} onChange={({ target }) => onSelect(target.checked)} /></div>
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
                     {cover ? (
                         <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
                     ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
+                        <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm leading-6 text-muted-foreground  ">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
                     )}
                 </button>
-            }
-        >
             <button type="button" className="block w-full text-left" onClick={onOpen}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{asset.title}</h2>
-                            <Typography.Text type="secondary" className="mt-1 block text-xs">
+                            <h2 className="line-clamp-1 text-sm font-medium text-foreground ">{asset.title}</h2>
+                            <span data-secondary className="mt-1 block text-xs">
                                 {asset.source || t("assets.unknownSource")}
-                            </Typography.Text>
+                            </span>
                         </div>
-                        <Tag className="m-0 shrink-0 text-[11px]">{t(`assets.kinds.${asset.kind}`)}</Tag>
+                        <Tag className="m-0 shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
                     </div>
-                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-2 !text-xs !leading-5">
+                    <p data-secondary className="!mb-0 !mt-2 !text-xs !leading-5">
                         {summary}
-                    </Typography.Paragraph>
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                         {(asset.tags || []).slice(0, 3).map((tag) => (
-                            <Tag key={tag} className="m-0 text-[11px]">
+                            <Tag key={tag} className="m-0 text-xs">
                                 {tag}
                             </Tag>
                         ))}
-                        {!asset.tags?.length ? <Tag className="m-0 text-[11px]">{t("assets.noTags")}</Tag> : null}
+                        {!asset.tags?.length ? <Tag className="m-0 text-xs">{t("assets.noTags")}</Tag> : null}
                     </div>
                 </div>
             </button>
-            <div className="flex items-center gap-2 px-4 pb-4">
-                <Button size="small" onClick={onOpen}>
-                    {t("common.view")}
-                </Button>
-                <Button size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
-                    {t("common.edit")}
-                </Button>
-                {asset.kind === "text" ? (
-                    <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void onCopy(asset)}>
-                        {t("common.copy")}
-                    </Button>
-                ) : null}
-                {asset.kind !== "text" ? (
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
-                        {t("common.download")}
-                    </Button>
-                ) : null}
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
-                    {t("common.delete")}
-                </Button>
+            <div className="flex items-center justify-between gap-2 px-4 pb-4">
+                <Button variant="ghost" size="sm" icon={asset.kind === "text" ? <Copy /> : <Download />} onClick={() => asset.kind === "text" ? onCopy(asset) : onDownload(asset)}>{t(asset.kind === "text" ? "common.copy" : "common.download")}</Button>
+                <Menu placement="topRight" items={[
+                    { key: "view", label: t("common.view"), onClick: onOpen },
+                    { key: "edit", label: t("common.edit"), icon: <PencilLine className="size-4" />, onClick: onEdit },
+                    { type: "divider" },
+                    { key: "delete", label: t("common.delete"), icon: <Trash2 className="size-4" />, danger: true, onClick: onDelete },
+                ]}><Button variant="ghost" size="icon" aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>
             </div>
-        </Card>
+        </article>
     );
 }
 
@@ -534,63 +492,63 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     return (
-        <Drawer title={t("assets.details")} open={Boolean(asset)} size="large" onClose={onClose}>
+        <Sheet title={t("assets.details")} open={Boolean(asset)} width={640} onClose={onClose}>
             {asset ? (
                 <div className="space-y-5">
                     {cover ? (
-                        <Image src={assetCoverUrl(asset)} preview={{ src: cover }} alt={asset.title} className="rounded-lg" />
+                        <MediaPreview src={assetCoverUrl(asset)} previewSrc={cover} alt={asset.title} className="rounded-lg" />
                     ) : (
-                        <div className="rounded-lg border border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
+                        <div className="rounded-lg border border-border bg-muted p-5 text-sm leading-6 text-muted-foreground   ">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
                     )}
                     <div>
-                        <Typography.Title level={4} className="!mb-2">
+                        <h3 className="!mb-2">
                             {asset.title}
-                        </Typography.Title>
-                        <Space size={[4, 4]} wrap>
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-2">
                             <Tag>{t(`assets.kinds.${asset.kind}`)}</Tag>
                             {(asset.tags || []).map((tag) => (
                                 <Tag key={tag}>{tag}</Tag>
                             ))}
-                        </Space>
+                        </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">文件保存：{asset.saveState === "saved" ? "已保存" : asset.saveState === "saving" ? "保存中" : "保存失败"} · 云同步：{asset.syncState === "synced" ? "已同步" : asset.syncState === "syncing" ? "同步中" : asset.syncState === "failed" ? "同步失败" : "仅本地"}{asset.error ? ` · ${asset.error}` : ""}</p>
-                    <div className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
-                        <Typography.Text type="secondary" className="block text-xs">
-                            {t("assets.fields.textContent")}
-                        </Typography.Text>
+                    <p className="text-sm text-muted-foreground">{t("workspace.fileSave")}：{asset.saveState === "saved" ? appI18n.t("workspace.saved") : asset.saveState === "saving" ? appI18n.t("workspace.savingFile") : appI18n.t("workspace.saveFileFailed")} · {t("workspace.cloudSync")}：{asset.syncState === "synced" ? appI18n.t("workspace.synced") : asset.syncState === "syncing" ? appI18n.t("workspace.syncing") : asset.syncState === "failed" ? appI18n.t("workspace.syncFailed") : appI18n.t("workspace.local")}{asset.error ? ` · ${asset.error}` : ""}</p>
+                    <div className="rounded-lg border border-border p-4 ">
+                        <span data-secondary className="block text-xs">
+                            {asset.kind === "text" ? t("assets.fields.textContent") : t(`assets.kinds.${asset.kind}`)}
+                        </span>
                         {asset.kind === "text" ? (
-                            <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
+                            <p className="mt-2 whitespace-pre-wrap">{asset.data.content}</p>
                         ) : asset.kind === "audio" ? (
                             <audio src={asset.data.url} controls preload="none" className="mt-2 w-full" />
                         ) : asset.kind === "video" ? (
                             <video src={asset.data.url} controls preload="none" className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : (
-                            <Typography.Text className="mt-2 block">
+                            <span className="mt-2 block">
                                 {asset.data.width}x{asset.data.height} · {formatBytes(asset.data.bytes)} · {asset.data.mimeType}
-                            </Typography.Text>
+                            </span>
                         )}
                     </div>
                     {asset.note ? (
                         <div>
-                            <Typography.Text type="secondary">{t("assets.fields.note")}</Typography.Text>
-                            <Typography.Paragraph className="mt-1">{asset.note}</Typography.Paragraph>
+                            <span data-secondary>{t("assets.fields.note")}</span>
+                            <p className="mt-1">{asset.note}</p>
                         </div>
                     ) : null}
-                    <Space>
+                    <div className="flex flex-wrap items-center gap-2">
                         {asset.kind === "text" ? (
-                            <Button type="primary" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
+                            <Button variant="default" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
                                 {t("assets.copyText")}
                             </Button>
                         ) : null}
                         {asset.kind !== "text" ? (
-                            <Button type="primary" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
-                                {asset.kind === "audio" ? "下载音频" : asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
+                            <Button variant="default" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
+                                {asset.kind === "audio" ? appI18n.t("workspace.downloadAudio") : asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
                             </Button>
                         ) : null}
-                    </Space>
+                    </div>
                 </div>
             ) : null}
-        </Drawer>
+        </Sheet>
     );
 }
 

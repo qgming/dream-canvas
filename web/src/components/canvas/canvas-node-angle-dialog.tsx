@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button, Modal, Segmented, Slider } from "antd";
-import { RotateCcw, WandSparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Segmented } from "@/components/ui/controls";
+import { Slider } from "@/components/ui/controls";
+import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export type CanvasImageAngleParams = {
@@ -17,7 +20,7 @@ const defaultParams: CanvasImageAngleParams = {
     wideAngle: false,
 };
 
-export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageAngleParams) => void }) {
+export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageAngleParams) => void | Promise<unknown> }) {
     const { t } = useTranslation();
     const [params, setParams] = useState(defaultParams);
 
@@ -28,18 +31,17 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
     const update = <Key extends keyof CanvasImageAngleParams>(key: Key, value: CanvasImageAngleParams[Key]) => setParams((current) => ({ ...current, [key]: value }));
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={860} centered destroyOnHidden>
+        <Dialog title={t("canvas.editors.angleTitle")} open={open && Boolean(dataUrl)} onClose={onClose} dirty={JSON.stringify(params) !== JSON.stringify(defaultParams)} onConfirm={() => onConfirm(params)} confirmDisabled={false} confirmText={t("canvas.editors.aiGenerate")} width={860}>
             <div className="space-y-5">
                 <div>
-                    <h2 className="text-xl font-semibold">{t("canvas.editors.angleTitle")}</h2>
+                    
                     <p className="mt-1 text-sm opacity-60">{t("canvas.editors.angleDescription")}</p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_360px]">
                     <div className="flex min-h-[300px] flex-col justify-between rounded-xl border p-4">
                         <div className="grid flex-1 place-items-center">
                             <div className="relative">
-                                <img src={dataUrl} alt="" className="size-48 rounded-2xl object-cover shadow-2xl" draggable={false} style={{ transform: previewTransform(params) }} />
-                                <div className="absolute -bottom-6 left-1/2 h-10 w-24 -translate-x-1/2 rounded-full border bg-black/20 backdrop-blur" />
+                                <img src={dataUrl} alt="" className="max-h-64 max-w-64 rounded-lg object-contain" draggable={false} style={{ transform: previewTransform(params) }} />
                             </div>
                         </div>
                         <Button className="w-fit" icon={<RotateCcw className="size-4" />} onClick={() => setParams(defaultParams)}>
@@ -64,13 +66,8 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
                         </div>
                     </div>
                 </div>
-                <div className="flex justify-end">
-                    <Button type="primary" size="large" icon={<WandSparkles className="size-4" />} onClick={() => onConfirm(params)}>
-                        {t("canvas.editors.aiGenerate")}
-                    </Button>
-                </div>
             </div>
-        </Modal>
+        </Dialog>
     );
 }
 
@@ -78,7 +75,7 @@ function AngleSlider({ label, value, min, max, step, suffix = "", onChange }: { 
     return (
         <div className="grid grid-cols-[88px_1fr_72px] items-center gap-4">
             <span className="font-medium opacity-75">{label}</span>
-            <Slider min={min} max={max} step={step} value={value} onChange={onChange} />
+            <Slider aria-label={label} min={min} max={max} step={step} value={value} onChange={onChange} />
             <span className="whitespace-nowrap text-right font-semibold">
                 {Number.isInteger(value) ? value : value.toFixed(1)}
                 {suffix}

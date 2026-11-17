@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { create } from "zustand";
 import localforage from "localforage";
 
@@ -56,26 +57,26 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         await running;
         try { assertSession(); } catch { return; }
         if (useAuthStore.getState().user?.id !== owner) return;
-        if (edit !== editRevision) { set({ error: "读取期间偏好又发生了修改，请重新操作" }); return; }
+        if (edit !== editRevision) { set({ error: i18n.t("errors.preferenceChangedDuringRead") }); return; }
         const scope = ++scopeRevision;
         try {
             const record = await getPreference<GenerationPreference>("generation");
             await pendingWrite.catch(() => undefined);
             if (scope !== scopeRevision || useAuthStore.getState().user?.id !== owner) return;
-            if (edit !== editRevision) throw new Error("读取期间偏好又发生了修改，当前编辑仍保留");
+            if (edit !== editRevision) throw new Error(i18n.t("errors.preferenceEditsPreserved"));
             if (discardDraft) {
                 pendingWrite = pendingWrite.catch(() => undefined).then(async () => {
                     assertSession();
-                    if (edit !== editRevision) throw new Error("读取期间偏好又发生了修改，当前编辑仍保留");
+                    if (edit !== editRevision) throw new Error(i18n.t("errors.preferenceEditsPreserved"));
                     await drafts.removeItem(draftKey(owner));
                 });
                 await pendingWrite;
             }
             const draft = discardDraft ? null : await drafts.getItem<{ value: GenerationPreference; version: number }>(draftKey(owner));
             if (scope !== scopeRevision || useAuthStore.getState().user?.id !== owner) return;
-            if (edit !== editRevision) throw new Error("读取期间偏好又发生了修改，当前编辑仍保留");
-            set((state) => ({ config: { ...defaultConfig, ...(draft?.value || record.value), channels: state.config.channels, models: state.config.models }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict: Boolean(draft && draft.version !== record.version), error: draft ? "已保留未保存的创作偏好；发生版本冲突时请先复制需要保留的内容再重新读取。" : "" }));
-        } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : "读取偏好失败" }); }
+            if (edit !== editRevision) throw new Error(i18n.t("errors.preferenceEditsPreserved"));
+            set((state) => ({ config: { ...defaultConfig, ...(draft?.value || record.value), channels: state.config.channels, models: state.config.models }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict: Boolean(draft && draft.version !== record.version), error: draft ? i18n.t("errors.preferenceDraftRestored") : "" }));
+        } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
         const channels = catalog.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, capability: model.capability, parameters: model.parameters })) }));
@@ -89,8 +90,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         if (!owner) return;
         const draft = { value: preference(get().config), version: get().version };
         pendingWrite = pendingWrite.catch(() => undefined).then(async () => { await drafts.setItem(draftKey(owner), draft); });
-        void pendingWrite.catch((error: unknown) => { if (useAuthStore.getState().user?.id === owner) set({ error: error instanceof Error ? error.message : "偏好暂存失败" }); });
-        void get().save();
+        void pendingWrite.catch((error: unknown) => { if (useAuthStore.getState().user?.id === owner) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceDraftFailed") }); });
     },
     save: () => {
         if (running) return running;
@@ -114,7 +114,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
                     pendingWrite = pendingWrite.catch(() => undefined).then(async () => { if (changed) await drafts.setItem(draftKey(owner), draft); else await drafts.removeItem(draftKey(owner)); });
                     await pendingWrite;
                 }
-            } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : "保存失败，编辑已暂存", conflict: error instanceof ApiError && error.code === "version_conflict" }); }
+            } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceSaveFailed"), conflict: error instanceof ApiError && error.code === "version_conflict" }); }
             finally { if (scope === scopeRevision) set({ saving: false }); }
         })();
         running = operation;

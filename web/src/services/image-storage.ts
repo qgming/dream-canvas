@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { assetBlob, assetId, assetUrl, getAsset, uploadAsset } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 
@@ -10,13 +11,13 @@ export async function uploadImage(input: string | Blob, options?: ImageReadOptio
     let asset = id ? await getAsset(id) : null;
     if (!asset) {
         const response = typeof input === "string" ? await fetch(input, { signal: options?.signal }) : null;
-        if (response && !response.ok) throw new Error("图片读取失败");
+        if (response && !response.ok) throw new Error(i18n.t("errors.imageReadFailed"));
         const blob = typeof input === "string" ? await response!.blob() : input;
         assertSession();
-        asset = await uploadAsset(blob, input instanceof File ? input.name : "图片素材", options?.signal);
+        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.imageAsset"), options?.signal);
     }
-    if (asset.kind !== "image" || asset.deleteState) throw new Error(asset.deleteState ? "资产已删除" : "请选择图片素材");
-    if (asset.saveState !== "saved") throw new Error("图片尚未可靠保存");
+    if (asset.kind !== "image" || asset.deleteState) throw new Error(asset.deleteState ? i18n.t("errors.assetDeleted") : i18n.t("errors.chooseImage"));
+    if (asset.saveState !== "saved") throw new Error(i18n.t("errors.imageNotSaved"));
     assertSession();
     let width = asset.width, height = asset.height;
     if (!width || !height) {
@@ -50,10 +51,10 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     const url = await resolveImageUrl(image.storageKey, image.dataUrl || image.url || "");
     if (!url || url.startsWith("data:")) return url;
     const response = await fetch(url, { signal: options?.signal });
-    if (!response.ok) throw new Error(response.status === 410 ? "资产已删除" : "图片读取失败");
+    if (!response.ok) throw new Error(response.status === 410 ? i18n.t("errors.assetDeleted") : i18n.t("errors.imageReadFailed"));
     const blob = await response.blob();
     assertSession();
-    const result = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("图片读取失败")); reader.readAsDataURL(blob); });
+    const result = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error(i18n.t("errors.imageReadFailed"))); reader.readAsDataURL(blob); });
     assertSession();
     return result;
 }

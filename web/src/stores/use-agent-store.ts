@@ -131,17 +131,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     pendingApprovals: [],
     setAgentState: (patch) => set(patch),
     openPanel: () => set({ panelOpen: true, panelMounted: true, panelClosing: false }),
-    closePanel: () => {
-        if (!get().panelMounted || get().panelClosing) return;
-        set({ panelOpen: false, panelClosing: true });
-        setTimeout(() => {
-            if (get().panelClosing) set({ panelClosing: false });
-        }, CANVAS_AGENT_PANEL_MOTION_MS);
-    },
+    closePanel: () => set({ panelOpen: false, panelClosing: false }),
     togglePanel: () => (get().panelOpen ? get().closePanel() : get().openPanel()),
     setCanvasContext: (canvasContext) => set({ canvasContext }),
     connectAgent: () => set({ connected: true, enabled: true, connectError: "" }),
-    disconnectAgent: (patch = {}) => set({ connected: false, enabled: false, sending: false, waiting: false, model: "", tokenUsage: null, eventLogs: [], canvasContext: null, activity: "等待业务服务", ...patch }),
+    disconnectAgent: (patch = {}) => set({ connected: false, enabled: false, sending: false, waiting: false, model: "", tokenUsage: null, eventLogs: [], canvasContext: null, activity: i18n.t("workspace.waitingForService"), ...patch }),
     addMessage: (item) => set((state) => ({ messages: [...state.messages, item] })),
     addEventLog: (item) => set((state) => ({ eventLogs: [...state.eventLogs, item] })),
     clearEventLogs: () => set({ eventLogs: [] }),

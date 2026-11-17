@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Segmented, Tooltip } from "antd";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
 import copyToClipboard from "copy-to-clipboard";
 import { CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Trash2, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -124,7 +126,7 @@ export function AgentLogView({
 
                 <div className="border-y py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex items-start gap-2.5">
-                        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${context.connected ? "bg-emerald-500" : context.enabled ? "bg-amber-500" : "bg-current opacity-30"}`} />
+                        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${context.connected ? "bg-success" : context.enabled ? "bg-warning" : "bg-current opacity-30"}`} />
                         <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2 text-sm">
                                 <span className="font-medium">{connectionLabel}</span>
@@ -132,11 +134,11 @@ export function AgentLogView({
                                     {context.activity}
                                 </span>
                             </div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] leading-4" style={{ color: theme.node.faint }} title={context.endpoint}>
+                            <div className="mt-0.5 truncate font-mono text-xs leading-4" style={{ color: theme.node.faint }} title={context.endpoint}>
                                 {context.endpoint}
                             </div>
                         </div>
-                        <div className="shrink-0 text-right text-[11px] leading-4" style={{ color: theme.node.muted }}>
+                        <div className="shrink-0 text-right text-xs leading-4" style={{ color: theme.node.muted }}>
                             <div>{t("agent.logs.messages", { count: context.messages })}</div>
                             <div>{context.pendingTool ? t("agent.logs.tool", { tool: context.pendingTool }) : t("agent.logs.noPendingTool")}</div>
                         </div>
@@ -209,13 +211,13 @@ function LogActions({ logs, lastError, context, onClear, onCopy }: { logs: Agent
     return (
         <div className="flex shrink-0 items-center gap-0.5">
             <Tooltip title={t("agent.logs.copyAll")}>
-                <Button type="text" size="small" shape="circle" aria-label={t("agent.logs.copyAll")} icon={<Copy className="size-3.5" />} onClick={() => onCopy()} />
+                <Button variant="ghost" size="sm"  aria-label={t("agent.logs.copyAll")} icon={<Copy className="size-3.5" />} onClick={() => onCopy()} />
             </Tooltip>
             <Tooltip title={t("agent.logs.copyLastError")}>
-                <Button type="text" size="small" shape="circle" aria-label={t("agent.logs.copyLastError")} disabled={!lastError} icon={<CircleAlert className="size-3.5" />} onClick={() => lastError && onCopy(formatLogText([lastError], context), t("agent.logs.lastErrorCopied"))} />
+                <Button variant="ghost" size="sm"  aria-label={t("agent.logs.copyLastError")} disabled={!lastError} icon={<CircleAlert className="size-3.5" />} onClick={() => lastError && onCopy(formatLogText([lastError], context), t("agent.logs.lastErrorCopied"))} />
             </Tooltip>
             <Tooltip title={t("agent.logs.clear")}>
-                <Button danger type="text" size="small" shape="circle" aria-label={t("agent.logs.clear")} disabled={!logs.length} icon={<Trash2 className="size-3.5" />} onClick={onClear} />
+                <Button variant="ghost" data-destructive size="sm"  aria-label={t("agent.logs.clear")} disabled={!logs.length} icon={<Trash2 className="size-3.5" />} onClick={onClear} />
             </Tooltip>
         </div>
     );
@@ -223,7 +225,7 @@ function LogActions({ logs, lastError, context, onClear, onCopy }: { logs: Agent
 
 function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onToggle?: (open: boolean) => void }) {
     const { t } = useTranslation();
-    const tone = item.level === "error" ? "text-red-600 dark:text-red-400" : item.level === "warning" ? "text-amber-600 dark:text-amber-400" : item.success ? "text-emerald-600 dark:text-emerald-400" : "";
+    const tone = item.level === "error" ? "text-destructive" : item.level === "warning" ? "text-warning" : item.success ? "text-success" : "";
     const Icon = item.level === "error" ? CircleAlert : item.level === "warning" ? TriangleAlert : item.success ? CheckCircle2 : CircleDot;
     return (
         <details className="group border-b last:border-b-0" style={{ borderColor: theme.node.stroke }} onToggle={(event) => onToggle?.(event.currentTarget.open)}>
@@ -232,12 +234,12 @@ function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof ca
                     <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} style={tone ? undefined : { color: theme.node.muted }} />
                     <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
-                            <span className="shrink-0 font-mono text-[10px] leading-5" style={{ color: theme.node.faint }}>
+                            <span className="shrink-0 font-mono text-xs leading-5" style={{ color: theme.node.faint }}>
                                 {item.time}
                             </span>
                             <span className="truncate text-sm font-medium leading-5">{item.title}</span>
                             {item.count > 1 ? (
-                                <span className="shrink-0 text-[10px] leading-4" style={{ color: theme.node.muted }}>
+                                <span className="shrink-0 text-xs leading-4" style={{ color: theme.node.muted }}>
                                     {t("agent.logs.repeated", { count: item.count })}
                                 </span>
                             ) : null}
@@ -252,10 +254,10 @@ function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof ca
                 </div>
             </summary>
             <div className="pb-3 pl-[34px] pr-2">
-                <div className="mb-1 text-[10px] font-medium" style={{ color: theme.node.faint }}>
+                <div className="mb-1 text-xs font-medium" style={{ color: theme.node.faint }}>
                     {t("agent.logs.details")}
                 </div>
-                <pre className="thin-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md border p-2.5 font-mono text-[11px] leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.panel, color: theme.node.text }}>
+                <pre className="thin-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md border p-2.5 font-mono text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.panel, color: theme.node.text }}>
                     {item.detail}
                 </pre>
             </div>
@@ -416,7 +418,7 @@ function compactLogText(value: string) {
 function logSignature(value: string) {
     return value
         .replace(/[a-z]:\\[^\r\n]*?skill\.md/gi, "<SKILL.md>")
-        .replace(/file:\/\/\/[^\s"']+/gi, "<路径>")
+        .replace(/file:\/\/\/[^\s"']+/gi, i18n.t("ui.pathHidden"))
         .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "<ID>");
 }
 

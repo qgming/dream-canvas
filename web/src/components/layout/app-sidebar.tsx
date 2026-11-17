@@ -1,78 +1,84 @@
-import { useState } from "react";
-import { App, Dropdown, Grid, Tooltip } from "antd";
-import { Bot, ChevronsUpDown, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, UserRound } from "lucide-react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useContext, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { EditGuardContext } from "@/hooks/use-edit-guard";
+import { useDiscardChanges } from "@/hooks/use-discard-changes";
+import { Menu } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/display";
+import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { Tooltip } from "@/components/ui/popover";
+import { LogOut, PanelLeftClose, PanelLeftOpen, Settings2, UserRound } from "lucide-react";
+import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
-import { useAgentStore } from "@/stores/use-agent-store";
+import { sidePanelTransition } from "@/lib/side-panel-motion";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 
 const itemClass = "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring";
+const collapsedItemClass = "mx-auto size-10 shrink-0 justify-center gap-0 p-0";
 
 export function AppSidebar() {
     const { t } = useTranslation();
-    const { message } = App.useApp();
-    const navigate = useNavigate();
-    const screens = Grid.useBreakpoint();
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [compactExpanded, setCompactExpanded] = useState(false);
+    const edits = useContext(EditGuardContext);
+    const signOut = useDiscardChanges(Boolean(edits?.dirty), () => useAuthStore.getState().signOut());
     const sidebarCollapsed = useAppUiStore((state) => state.sidebarCollapsed);
     const toggleSidebar = useAppUiStore((state) => state.toggleSidebar);
     const user = useAuthStore((state) => state.user);
-    const panelOpen = useAgentStore((state) => state.panelOpen);
-    const togglePanel = useAgentStore((state) => state.togglePanel);
-    const mobile = !screens.md;
-    const collapsed = mobile ? !mobileOpen : sidebarCollapsed;
+    const reducedMotion = useReducedMotion();
+    const transition = { ...sidePanelTransition, duration: reducedMotion ? 0 : sidePanelTransition.duration };
+    const mobile = useMediaQuery("(max-width: 767px)");
+    const compact = useMediaQuery("(max-width: 1199px)");
+    const collapsed = mobile ? !mobileOpen : compact ? !compactExpanded : sidebarCollapsed;
+    const navigationItemClass = cn(itemClass, "text-muted-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground", collapsed && collapsedItemClass);
     const toggleLabel = t(collapsed ? "sidebar.expand" : "sidebar.collapse");
-    const closeMobile = () => setMobileOpen(false);
+    const closeMobile = () => { setMobileOpen(false); setCompactExpanded(false); };
 
     return (
-        <div className={cn("h-full shrink-0", mobile ? "w-16" : collapsed ? "w-16" : "w-56")}>
-            {mobile && mobileOpen ? <button type="button" aria-label={t("sidebar.collapse")} className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" onClick={closeMobile} /> : null}
-            <aside aria-label={t("topNav.navigation")} data-canvas-shortcuts-ignore className={cn("flex h-full flex-col border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground", mobile && "z-[90]", mobile && mobileOpen ? "fixed inset-y-0 left-0 w-56" : "relative w-full")}>
-                <div className={cn("mb-6 flex h-12 shrink-0 items-center", collapsed ? "flex-col justify-center gap-1" : "gap-2 px-2")}>
-                    <Link to="/canvas" onClick={closeMobile} aria-label={t("meta.title")} className="flex min-w-0 flex-1 items-center gap-2.5 text-foreground">
-                        <span className="size-6 shrink-0 bg-current" style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }} />
-                        {!collapsed ? <span className="truncate text-sm font-semibold tracking-tight">{t("meta.title")}</span> : null}
+        <motion.div className="relative h-full shrink-0" initial={false} animate={{ width: compact || collapsed ? 56 : 208 }} transition={transition}>
+            {(mobile && mobileOpen || compact && compactExpanded) ? <button type="button" aria-label={t("sidebar.collapse")} className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" onClick={() => { closeMobile(); setCompactExpanded(false); }} /> : null}
+            <AnimatedSidePanel open={!collapsed} width={208} collapsedWidth={56} aria-label={t("topNav.navigation")} data-canvas-shortcuts-ignore className={cn(compact && "absolute inset-y-0 left-0 z-[90]")} panelClassName={cn("flex flex-col border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground", collapsed && "px-0")}>
+                <motion.div layout="position" initial={false} animate={{ height: collapsed ? 88 : 48, marginBottom: collapsed ? 8 : 24 }} transition={transition} className={cn("flex shrink-0 items-center gap-2", collapsed ? "w-[55px] flex-col" : "px-2")}>
+                    <Link to="/canvas" onClick={closeMobile} aria-label={t("meta.title")} className={cn("flex min-w-0 items-center text-foreground", collapsed ? collapsedItemClass : "flex-1 gap-2.5")}>
+                        <motion.span layout="position" transition={transition} className={cn("shrink-0 bg-current", collapsed ? "size-[18px]" : "size-6")} style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }} />
+                        <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate text-sm font-semibold tracking-tight">{t("meta.title")}</motion.span> : null}</AnimatePresence>
                     </Link>
-                    <button type="button" onClick={() => mobile ? setMobileOpen(!mobileOpen) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("grid shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", collapsed ? "h-5 w-8" : "size-7")}>
-                        {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-                    </button>
-                </div>
-                <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label={t("sidebar.workspace")}>
-                    {navigationTools.map(({ slug, icon: Icon }) => (
+                    <motion.button layout="position" transition={transition} type="button" onClick={() => mobile ? setMobileOpen(!mobileOpen) : compact ? setCompactExpanded(!compactExpanded) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("grid shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", collapsed ? collapsedItemClass : "size-7")}>
+                        {collapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-4" />}
+                    </motion.button>
+                </motion.div>
+                <nav className={cn("min-h-0 flex-1 overflow-y-auto", collapsed ? "hide-scrollbar w-[55px] space-y-2" : "space-y-1")} aria-label={t("sidebar.workspace")}>
+                    {navigationTools.map(({ slug, icon: Icon }, index) => (
+                        <motion.div key={slug} initial={false} animate={{ paddingTop: !collapsed && (index === 3 || index === 5) ? 20 : 0 }} transition={transition}>
+                        {index === 0 || index === 3 || index === 5 ? <motion.p initial={false} animate={{ height: collapsed ? 0 : "auto", marginBottom: collapsed ? 0 : 8, opacity: collapsed ? 0 : 1 }} transition={transition} aria-hidden={collapsed} className="overflow-hidden whitespace-nowrap px-3 text-xs text-muted-foreground">{t(index === 0 ? "ui.creation" : index === 3 ? "ui.resources" : "navigation.tasks")}</motion.p> : null}
                         <Tooltip key={slug} title={collapsed ? t(`navigation.${slug}`) : undefined} placement="right">
-                            <NavLink to={`/${slug}`} onClick={closeMobile} aria-label={t(`navigation.${slug}`)} className={({ isActive }) => cn(itemClass, collapsed && "justify-center !px-0", isActive ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground" : "text-muted-foreground")}>
-                                <Icon className="size-[18px] shrink-0" />{!collapsed ? <span className="truncate">{t(`navigation.${slug}`)}</span> : null}
+                            <NavLink to={`/${slug}`} onClick={closeMobile} aria-label={t(`navigation.${slug}`)} className={navigationItemClass}>
+                                <Icon className="size-[18px] shrink-0" /><AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate">{t(`navigation.${slug}`)}</motion.span> : null}</AnimatePresence>
                             </NavLink>
                         </Tooltip>
+                        </motion.div>
                     ))}
                 </nav>
-                <div className="mt-4 space-y-1">
-                    <Tooltip title={collapsed ? t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent") : undefined} placement="right">
-                        <button type="button" aria-label={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")} aria-pressed={panelOpen} onClick={() => { togglePanel(); closeMobile(); }} className={cn(itemClass, collapsed && "justify-center !px-0", panelOpen ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground")}>
-                            <Bot className="size-[18px] shrink-0" />{!collapsed ? <span>{t("sidebar.assistant")}</span> : null}
-                        </button>
-                    </Tooltip>
+                <div className={cn("shrink-0", collapsed ? "mt-2 w-[55px] space-y-2" : "mt-4 space-y-1")}>
                     <Tooltip title={collapsed ? t("navigation.settings") : undefined} placement="right">
-                        <NavLink to="/settings" onClick={closeMobile} aria-label={t("navigation.settings")} className={({ isActive }) => cn(itemClass, collapsed && "justify-center !px-0", isActive ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground" : "text-muted-foreground")}>
-                            <Settings2 className="size-[18px] shrink-0" />{!collapsed ? <span>{t("navigation.settings")}</span> : null}
+                        <NavLink to="/settings" onClick={closeMobile} aria-label={t("navigation.settings")} className={navigationItemClass}>
+                            <Settings2 className="size-[18px] shrink-0" /><AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate">{t("navigation.settings")}</motion.span> : null}</AnimatePresence>
                         </NavLink>
                     </Tooltip>
-                    <Dropdown trigger={["click"]} placement="topLeft" menu={{ items: [
-                        { key: "account", icon: <UserRound className="size-4" />, label: t("settings.account"), onClick: () => { navigate("/settings/account"); closeMobile(); } },
-                        { type: "divider" },
-                        { key: "logout", icon: <LogOut className="size-4" />, label: t("sidebar.signOut"), onClick: () => { void useAuthStore.getState().signOut().catch((error: unknown) => message.error(error instanceof Error ? error.message : "退出失败")); } },
-                    ] }}>
-                        <button type="button" aria-label={t("sidebar.accountMenu")} className={cn("mt-2 flex h-14 w-full items-center gap-3 rounded-lg border-t border-sidebar-border px-3 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", collapsed && "justify-center !px-0")}>
+                    <Menu placement="topLeft" items={ [
+                        { key: "logout", icon: <LogOut className="size-4" />, label: t("sidebar.signOut"), onClick: signOut },
+                    ] }>
+                        <button type="button" aria-label={t("sidebar.accountMenu")} className={cn(itemClass, "text-left text-muted-foreground", collapsed && collapsedItemClass)}>
                             <UserRound className="size-[18px] shrink-0" />
-                            {!collapsed ? <><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{user?.username}</span><span className="text-[11px] text-muted-foreground">{t(user?.role === "admin" ? "sidebar.admin" : "sidebar.user")}</span></span><ChevronsUpDown className="size-3.5 text-muted-foreground" /></> : null}
+                            <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden"><span className="truncate font-medium">{user?.username}</span>{user?.role === "admin" ? <Badge className="shrink-0">{t("sidebar.admin")}</Badge> : null}</motion.span> : null}</AnimatePresence>
                         </button>
-                    </Dropdown>
+                    </Menu>
                 </div>
-            </aside>
-        </div>
+            </AnimatedSidePanel>
+        </motion.div>
     );
 }

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { App, Modal, Segmented, Tooltip } from "antd";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Dialog } from "@/components/ui/dialog";
+import { Segmented } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -83,7 +86,7 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(false);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
-    const { message } = App.useApp();
+    const { notify } = useFeedback();
     const { t } = useTranslation();
     const copyText = useCopyText();
 
@@ -123,7 +126,7 @@ export function CanvasNodeHoverToolbar({
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = target.metadata?.prompt?.trim();
         if (!prompt) {
-            message.warning(t("canvas.nodeToolbar.noPrompt"));
+            notify.warning(t("canvas.nodeToolbar.noPrompt"));
             return;
         }
         copyText(prompt, t("common.promptCopied"));
@@ -185,7 +188,7 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
+                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-xl border border-border bg-popover text-sm text-popover-foreground shadow-lg"
                 data-node-toolbar={node.id}
                 style={{ left, top }}
                 onMouseEnter={() => onKeep(node.id)}
@@ -256,7 +259,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 
     return (
-        <Modal className="canvas-node-info-modal" title={title} open={open && Boolean(node)} centered footer={null} onCancel={onClose}>
+        <Dialog className="canvas-node-info-modal" title={title} open={open && Boolean(node)} footer={null} onClose={onClose}>
             {node ? (
                 <div className="h-[56vh] min-h-[360px] select-text text-sm" data-canvas-shortcuts-ignore>
                     {view === "info" ? (
@@ -272,7 +275,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             {node.metadata?.videoTaskId ? <InfoRow label={t("canvas.nodeToolbar.videoTaskId")} value={node.metadata.videoTaskId} /> : null}
                             {imageBytes ? <InfoRow label={t("canvas.nodeToolbar.imageSize")} value={formatBytes(imageBytes)} /> : null}
                             {node.metadata?.errorDetails ? (
-                                <div className="rounded-lg border p-3 text-red-400" style={{ borderColor: theme.node.stroke }}>
+                                <div className="rounded-lg border p-3 text-destructive" style={{ borderColor: theme.node.stroke }}>
                                     {node.metadata.errorDetails}
                                 </div>
                             ) : null}
@@ -284,16 +287,16 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                     )}
                 </div>
             ) : null}
-        </Modal>
+        </Dialog>
     );
 }
 
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
+        <Tooltip title={title} placement="top">
+            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-destructive" : ""}`} onClick={onClick} aria-label={title}>
+                <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-accent ${active ? "bg-accent" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

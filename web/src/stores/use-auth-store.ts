@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import appI18n from "@/i18n";
 
 import { getSession, login, logout, type Session, type User } from "@/services/api/auth";
 import { ApiError, setCsrfToken } from "@/services/api/client";
@@ -28,7 +29,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         const request = ++revision;
         try { const session = await getSession(); if (request === revision) acceptSession(session); }
         catch (error) {
-            if (request === revision) { setCsrfToken(""); set({ user: null, ready: true, error: error instanceof ApiError && error.status === 401 ? "" : error instanceof Error ? error.message : "无法连接业务服务" }); }
+            if (request === revision) { setCsrfToken(""); set({ user: null, ready: true, error: error instanceof ApiError && error.status === 401 ? "" : error instanceof Error ? error.message : appI18n.t("workspace.serviceUnavailable") }); }
         }
     },
     signIn: async (username, password) => { const request = ++revision; const session = await login(username, password); if (request === revision) acceptSession(session); },

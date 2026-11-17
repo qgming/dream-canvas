@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { Button, Input, Modal, Slider, Tooltip } from "antd";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
 import { Brush, Eraser, ImagePlus, Redo2, RotateCcw, Undo2, WandSparkles, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -22,7 +26,7 @@ const defaultBrushSize = 100;
 const maskOverlayColor = "#2563eb";
 const maskOverlayAlpha = 0.4;
 
-export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void }) {
+export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void | Promise<unknown> }) {
     const { t } = useTranslation();
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,6 +40,9 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    const [readError, setReadError] = useState("");
+    const [saving, setSaving] = useState(false);
+    const submitting = useRef(false);
     const [historySize, setHistorySize] = useState(0);
     const [redoSize, setRedoSize] = useState(0);
     const [brushPreview, setBrushPreview] = useState<BrushPreview | null>(null);
@@ -43,6 +50,9 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
 
     useEffect(() => {
         if (!open) return;
+        let active = true;
+        setImage(null);
+        setReadError("");
         setPrompt("");
         setBrushSize(defaultBrushSize);
         setMode("paint");
@@ -54,7 +64,8 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         redoRef.current = [];
         brushAdjustRef.current = null;
         drawingRef.current = { active: false, stroke: null };
-        void readImageMeta(dataUrl).then(setImage);
+        void readImageMeta(dataUrl).then((value) => { if (active) setImage(value); }).catch((error: unknown) => { if (active) setReadError(error instanceof Error ? error.message : t("errors.imageReadFailed")); });
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -203,23 +214,28 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         return () => window.removeEventListener("keydown", handleKeyDown, true);
     }, [open, redoMask, undoMask]);
 
-    const submit = (generate: boolean) => {
+    const submit = async (generate: boolean) => {
+        if (submitting.current) return;
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
         const element = imageRef.current;
         if (!nextPrompt) return setError(t("canvas.editors.maskPromptRequired"));
         if (!canvas || !element) return;
         if (!canvasHasPaint(canvas)) return setError(t("canvas.editors.maskRequired"));
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildMaskOverlay(element, canvas), generate });
+        submitting.current = true; setSaving(true); setError("");
+        try { await onConfirm({ prompt: nextPrompt, maskDataUrl: buildMaskOverlay(element, canvas), generate }); }
+        catch (error) { setError(error instanceof Error ? error.message : t("ui.operationFailed")); }
+        finally { submitting.current = false; setSaving(false); }
     };
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={980} centered destroyOnHidden transitionName="" maskTransitionName="">
+        <Dialog title={t("canvas.editors.maskTitle")} open={open && Boolean(dataUrl)} onClose={onClose} busy={saving} dirty={Boolean(prompt || historySize)} footer={null} width={980}>
+            {readError ? <p role="alert" className="mb-4 text-sm text-destructive">{readError}</p> : null}
             <div className="grid gap-5 lg:grid-cols-[minmax(360px,1fr)_320px]" data-canvas-no-zoom>
                 <div
                     ref={viewport.viewportRef}
                     {...viewport.panHandlers}
-                    className={`relative h-[min(68vh,720px)] min-h-[360px] rounded-xl border border-black/10 bg-transparent dark:border-white/10 ${viewport.scrollClassName} ${viewport.isPanning ? "cursor-grabbing" : viewport.spacePressed ? "cursor-grab" : ""}`}
+                    className={`relative h-[min(68vh,720px)] min-h-[360px] rounded-xl border border-border bg-transparent ${viewport.scrollClassName} ${viewport.isPanning ? "cursor-grabbing" : viewport.spacePressed ? "cursor-grab" : ""}`}
                 >
                     <div className="relative" style={viewport.contentStyle}>
                         <div ref={viewport.stageRef} className="absolute isolate overflow-hidden rounded-lg bg-transparent select-none [backface-visibility:hidden] [contain:layout_paint] [transform:translateZ(0)]" style={viewport.stageStyle}>
@@ -253,7 +269,7 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                 {brushPreview
                     ? createPortal(
                           <div
-                              className={`pointer-events-none fixed z-[1100] rounded-full border-2 ${brushPreview.adjusting ? "border-[#fbbf24] bg-black/10" : "border-white/90 bg-black/5"} shadow-[0_0_0_1px_rgba(0,0,0,.8)]`}
+                              className={`pointer-events-none fixed z-[1450] rounded-full border-2 ${brushPreview.adjusting ? "border-warning bg-muted" : "border-white/90 bg-black/5"} shadow-[0_0_0_1px_rgba(0,0,0,.8)]`}
                               style={{ left: brushPreview.x, top: brushPreview.y, width: Math.max(4, brushPreview.size * viewport.imageScale), aspectRatio: 1, transform: "translate(-50%, -50%)" }}
                           >
                               {brushPreview.adjusting ? <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white">{brushSize}px</span> : null}
@@ -264,36 +280,36 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
 
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div>
-                        <h2 className="text-xl font-semibold">{t("canvas.editors.maskTitle")}</h2>
+                        
                         <div className="mt-2 text-sm opacity-60">{image ? `${image.width} x ${image.height}px` : t("canvas.editors.loading")}</div>
                         <div className="mt-2 text-xs leading-5 opacity-55">{t("canvas.editors.maskHint")}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                        <Button type={mode === "paint" ? "primary" : "default"} icon={<Brush className="size-4" />} onClick={() => setMode("paint")}>
+                        <Button variant={mode === "paint" ? "default" : "outline"} icon={<Brush className="size-4" />} onClick={() => setMode("paint")}>
                             {t("canvas.editors.brush")}
                         </Button>
-                        <Button type={mode === "erase" ? "primary" : "default"} icon={<Eraser className="size-4" />} onClick={() => setMode("erase")}>
+                        <Button variant={mode === "erase" ? "default" : "outline"} icon={<Eraser className="size-4" />} onClick={() => setMode("erase")}>
                             {t("canvas.editors.erase")}
                         </Button>
                     </div>
 
-                    <div className="flex items-center justify-between rounded-lg border border-black/10 px-2 py-1 dark:border-white/10">
+                    <div className="flex items-center justify-between rounded-lg border border-border px-2 py-1">
                         <Tooltip title={t("canvas.editors.undoMaskTitle")}>
-                            <Button type="text" icon={<Undo2 className="size-4" />} disabled={!historySize} aria-label={t("canvas.editors.undoMask")} onClick={undoMask} />
+                            <Button variant="ghost" icon={<Undo2 className="size-4" />} disabled={!historySize} aria-label={t("canvas.editors.undoMask")} onClick={undoMask} />
                         </Tooltip>
                         <Tooltip title={t("canvas.editors.redoMaskTitle")}>
-                            <Button type="text" icon={<Redo2 className="size-4" />} disabled={!redoSize} aria-label={t("canvas.editors.redoMask")} onClick={redoMask} />
+                            <Button variant="ghost" icon={<Redo2 className="size-4" />} disabled={!redoSize} aria-label={t("canvas.editors.redoMask")} onClick={redoMask} />
                         </Tooltip>
                         <div className="flex items-center gap-1">
                             <Tooltip title={t("canvas.editors.zoomOut")}>
-                                <Button type="text" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
+                                <Button variant="ghost" icon={<ZoomOut className="size-4" />} disabled={!viewport.canZoomOut} aria-label={t("canvas.editors.zoomOut")} onClick={viewport.zoomOut} />
                             </Tooltip>
                             <button type="button" className="min-w-14 text-center text-xs font-semibold tabular-nums opacity-70" onClick={viewport.resetZoom}>
                                 {Math.round(viewport.zoom * 100)}%
                             </button>
                             <Tooltip title={t("canvas.editors.zoomIn")}>
-                                <Button type="text" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
+                                <Button variant="ghost" icon={<ZoomIn className="size-4" />} disabled={!viewport.canZoomIn} aria-label={t("canvas.editors.zoomIn")} onClick={viewport.zoomIn} />
                             </Tooltip>
                         </div>
                     </div>
@@ -303,12 +319,13 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                             <span className="font-medium opacity-75">{t("canvas.editors.brushSize")}</span>
                             <span className="font-semibold">{brushSize}px</span>
                         </div>
-                        <Slider min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
+                        <Slider aria-label={t("canvas.editors.brushSize")} min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
                     </div>
 
                     <div className="space-y-2">
                         <div className="text-sm font-medium opacity-75">{t("canvas.editors.editInstructions")}</div>
-                        <Input.TextArea
+                        <Textarea
+                            aria-label={t("canvas.editors.editInstructions")}
                             rows={6}
                             value={prompt}
                             status={error && !prompt.trim() ? "error" : undefined}
@@ -318,7 +335,7 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                                 setError("");
                             }}
                         />
-                        {error ? <div className="text-xs font-medium text-[#ef4444]">{error}</div> : null}
+                        {error ? <div role="alert" className="text-xs font-medium text-destructive">{error}</div> : null}
                     </div>
 
                     <div className="mt-auto flex items-center justify-between gap-2">
@@ -326,17 +343,17 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                             {t("canvas.editors.reset")}
                         </Button>
                         <div className="flex items-center gap-2">
-                            <Button icon={<ImagePlus className="size-4" />} onClick={() => submit(false)}>
+                            <Button disabled={saving || !image} icon={<ImagePlus className="size-4" />} onClick={() => void submit(false)}>
                                 {t("canvas.editors.maskExport")}
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={() => submit(true)}>
+                            <Button variant="default" disabled={!image} loading={saving} icon={<WandSparkles className="size-4" />} onClick={() => void submit(true)}>
                                 {t("canvas.editors.maskGenerate")}
                             </Button>
                         </div>
                     </div>
                 </div>
             </div>
-        </Modal>
+        </Dialog>
     );
 }
 

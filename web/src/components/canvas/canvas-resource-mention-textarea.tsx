@@ -202,7 +202,7 @@ function MentionHighlightText({ value, labels, placeholder }: { value: string; l
         <>
             {value.split(pattern).map((part, index) =>
                 labels.includes(part) ? (
-                    <span key={`${part}-${index}`} className="rounded-md bg-[#2f80ff]/16 px-1 py-0.5 font-medium text-[#2f80ff] ring-1 ring-[#2f80ff]/24">
+                    <span key={`${part}-${index}`} className="rounded-md bg-info/10 px-1 py-0.5 font-medium text-info ring-1 ring-info/25">
                         {part}
                     </span>
                 ) : (
@@ -216,7 +216,7 @@ function MentionHighlightText({ value, labels, placeholder }: { value: string; l
 function MentionMenu({ textarea, caretIndex, references, activeIndex, theme, onSelect }: { textarea: HTMLTextAreaElement; caretIndex: number; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void }) {
     const selectedRef = useRef(false);
     const rect = textarea.getBoundingClientRect();
-    const boundary = textarea.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
+    const boundary = textarea.closest('[data-slot="dialog-content"]')?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
     const menuWidth = 256;
     const maxMenuHeight = 224;
     const gap = 6;
@@ -284,7 +284,7 @@ function ReferencePreview({ reference }: { reference: CanvasResourceReference })
     if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
             <Icon className="size-4" />
         </span>
     );

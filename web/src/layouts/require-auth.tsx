@@ -1,6 +1,10 @@
+import { useTranslation } from "react-i18next";
+import appI18n from "@/i18n";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Spin } from "antd";
+import { Notice as Alert } from "@/components/ui/display";
+import { Button } from "@/components/ui/button";
+import { Spinner as Spin } from "@/components/ui/display";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -17,6 +21,7 @@ import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
 export default function RequireAuth() {
+    useTranslation();
     const { pathname, search } = useLocation();
     const user = useAuthStore((state) => state.user);
     const ready = useAuthStore((state) => state.ready);
@@ -75,14 +80,15 @@ export default function RequireAuth() {
         return () => { source?.close(); source = undefined; window.removeEventListener("focus", focused); };
     }, [user?.id, scope, queryClient]);
 
-    if (!ready) return <div className="flex h-dvh items-center justify-center bg-background"><Spin tip="正在读取登录状态" /></div>;
-    if (error) return <div className="flex h-dvh items-center justify-center bg-background p-6"><Alert type="error" title="无法连接业务服务" description={error} action={<Button onClick={() => void refresh()}>重试</Button>} /></div>;
+    if (!ready) return <div className="flex h-dvh items-center justify-center bg-background"><Spin label={appI18n.t("workspace.readingSession")} /></div>;
+    if (error) return <div className="flex h-dvh items-center justify-center bg-background p-6"><Alert type="error" title={appI18n.t("workspace.serviceUnavailable")} description={error} action={<Button onClick={() => void refresh()}>{appI18n.t("workspace.retry")}</Button>} /></div>;
     if (!user) return <Navigate to="/login" state={{ from: `${pathname}${search}` }} replace />;
     if (scope !== user.id) return <div className="flex h-dvh items-center justify-center bg-background"><Spin /></div>;
     return <Outlet key={user.id} />;
 }
 
 export function RequireAdmin() {
+    useTranslation();
     const user = useAuthStore((state) => state.user);
     return user?.role === "admin" ? <Outlet /> : <Navigate to="/settings" replace />;
 }

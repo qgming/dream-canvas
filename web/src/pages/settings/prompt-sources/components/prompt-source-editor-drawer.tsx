@@ -1,68 +1,50 @@
-import { App, Button, Drawer, Input, Space, Switch } from "antd";
-import { useEffect, useState } from "react";
+import { EditorForm, Field, useEditorForm } from "@/components/ui/form";
+import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/controls";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { PromptSource } from "@/services/api/prompt-source-presets";
 
-export function PromptSourceEditorDrawer({ open, source, onSave, onClose }: { open: boolean; source: PromptSource | null; onSave: (source: PromptSource) => void; onClose: () => void }) {
-    const { message } = App.useApp();
+export function PromptSourceEditorDrawer({ open, source, onSave, onClose }: { open: boolean; source: PromptSource | null; onSave: (source: PromptSource) => void | Promise<unknown>; onClose: () => void }) {
     const { t } = useTranslation();
-    const [draft, setDraft] = useState<PromptSource | null>(source);
-
-    useEffect(() => {
-        if (open && source) setDraft(source);
-    }, [open, source]);
-
-    if (!draft) return null;
-
-    const patch = (value: Partial<PromptSource>) => setDraft((current) => (current ? { ...current, ...value } : current));
-
-    const save = () => {
-        const name = draft.name.trim();
-        const url = draft.url.trim();
-        if (!name) return message.warning(t("config.promptSources.editor.nameRequired"));
-        if (!isHttpUrl(url)) return message.warning(t("config.promptSources.editor.invalidUrl"));
-        if (draft.homepage.trim() && !isHttpUrl(draft.homepage.trim())) return message.warning(t("config.promptSources.editor.invalidHomepage"));
-        onSave({ ...draft, name, url, homepage: draft.homepage.trim(), builtIn: false });
+    const form = useEditorForm<PromptSource>();
+    useEffect(() => { if (open && source) form.reset(source); }, [open, source, form]);
+    const urlSchema = z.string().trim().url(t("config.promptSources.editor.invalidUrl")).refine(isHttpUrl, t("config.promptSources.editor.invalidUrl"));
+    const save = async (draft: PromptSource) => {
+        await onSave({ ...draft, name: draft.name.trim(), url: draft.url.trim(), homepage: draft.homepage?.trim() || "", builtIn: false });
+        form.reset(draft);
         onClose();
     };
 
     return (
-        <Drawer
+        <Dialog
             open={open}
             width={560}
             title={t(source?.name ? "config.promptSources.editor.editTitle" : "config.promptSources.editor.addTitle")}
             onClose={onClose}
-            styles={{ body: { paddingTop: 16 } }}
-            extra={
-                <Space>
-                    <Button onClick={onClose}>{t("common.cancel")}</Button>
-                    <Button type="primary" onClick={save}>
-                        {t("common.save")}
-                    </Button>
-                </Space>
-            }
+            bodyClassName="@container/settings"
+            footer={<Button variant="default" type="submit" form="settings-prompt-source">{t("common.save")}</Button>}
         >
-            <div className="space-y-5">
-                <label className="block">
-                    <span className="mb-1.5 block text-sm font-medium">{t("config.promptSources.editor.name")}</span>
-                    <Input value={draft.name} onChange={(event) => patch({ name: event.target.value })} placeholder={t("config.promptSources.editor.namePlaceholder")} />
-                </label>
-                <label className="block">
-                    <span className="mb-1.5 block text-sm font-medium">JSON URL</span>
-                    <Input value={draft.url} onChange={(event) => patch({ url: event.target.value })} placeholder="https://example.com/prompts.json" />
-                </label>
-                <label className="block">
-                    <span className="mb-1.5 block text-sm font-medium">{t("config.promptSources.editor.homepage")}</span>
-                    <Input value={draft.homepage} onChange={(event) => patch({ homepage: event.target.value })} placeholder="https://example.com" />
-                </label>
-                <div className="flex items-center justify-between border-y border-stone-200 py-3 dark:border-stone-800">
-                    <span className="text-sm font-medium">{t("config.promptSources.editor.enabled")}</span>
-                    <Switch checked={draft.enabled} onChange={(enabled) => patch({ enabled })} />
+            <EditorForm id="settings-prompt-source" form={form} className="space-y-6" onSubmit={save}>
+                <div>
+                    <Field layout="horizontal" name="name" label={t("config.promptSources.editor.name")} schema={z.string().trim().min(1, t("config.promptSources.editor.nameRequired"))}>
+                        <Input placeholder={t("config.promptSources.editor.namePlaceholder")} />
+                    </Field>
+                    <Field layout="horizontal" name="url" label="JSON URL" schema={urlSchema}>
+                        <Input placeholder="https://example.com/prompts.json" />
+                    </Field>
+                    <Field layout="horizontal" name="homepage" label={t("config.promptSources.editor.homepage")} schema={z.string().refine((value) => !value.trim() || isHttpUrl(value.trim()), t("config.promptSources.editor.invalidHomepage")).optional()}>
+                        <Input placeholder="https://example.com" />
+                    </Field>
+                    <Field layout="horizontal" name="enabled" checked label={t("config.promptSources.editor.enabled")}><Switch /></Field>
                 </div>
                 <div>
                     <div className="mb-2 text-sm font-medium">{t("config.promptSources.editor.jsonFormat")}</div>
-                    <pre className="overflow-x-auto rounded-md bg-stone-100 p-3 text-xs leading-5 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{`[
+                    <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground  ">{`[
   {
     "id": "product-photo-1",
     "title": "Product photo",
@@ -74,8 +56,8 @@ export function PromptSourceEditorDrawer({ open, source, onSave, onClose }: { op
   }
 ]`}</pre>
                 </div>
-            </div>
-        </Drawer>
+            </EditorForm>
+        </Dialog>
     );
 }
 

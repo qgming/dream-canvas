@@ -1,5 +1,10 @@
+import { useTranslation } from "react-i18next";
+import appI18n from "@/i18n";
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Select } from "antd";
+import { Notice as Alert, Spinner } from "@/components/ui/display";
+import { useFeedback } from "@/hooks/use-feedback";
+import { Button } from "@/components/ui/button";
+import { Choice } from "@/components/ui/choice";
 import { History, MessageSquare, Plus, RefreshCw, Sparkles, X } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
@@ -23,7 +28,8 @@ import { captureSession } from "@/services/api/client";
 import { nanoid } from "nanoid";
 
 export function AssistantPanelContent() {
-    const { message, modal } = App.useApp();
+    useTranslation();
+    const { notify, confirm } = useFeedback();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useAuthStore((state) => state.user);
     const config = useEffectiveConfig();
@@ -40,6 +46,9 @@ export function AssistantPanelContent() {
     const [creating, setCreating] = useState(false);
     const creatingRef = useRef(false);
     const [submitting, setSubmitting] = useState(false);
+    const submittingRef = useRef(false);
+    const [stopping, setStopping] = useState(false);
+    const stoppingRef = useRef(false);
     const sequence = useRef(0);
     const activeId = useAgentStore((state) => state.activeThreadId);
     const requestedThread = useRef(activeId);
@@ -53,17 +62,18 @@ export function AssistantPanelContent() {
     useEffect(() => { useAgentStore.setState({ sending: submitting, waiting: Boolean(running) }); }, [submitting, running?.id]);
     useEffect(() => { if (user) void useAgentSkillStore.getState().loadSkills("/api", ""); }, [user?.id]);
     useEffect(() => { setTarget(routeProject); }, [routeProject]);
-    const showError = (error: unknown) => { const text = error instanceof Error ? error.message : "操作失败"; setError(text); };
+    const showError = (error: unknown) => { const text = error instanceof Error ? error.message : appI18n.t("workspace.operationFailed"); setError(text); useAgentStore.setState({ connectError: text }); };
     const refreshThreads = async () => {
         const owner = user?.id;
         const records = await api.listThreads();
         if (useAuthStore.getState().user?.id !== owner) return;
-        useAgentStore.setState({ threads: records.map((thread) => ({ id: thread.id, name: thread.title, preview: "", createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt) })), connected: true, enabled: true, activity: "业务服务已连接" });
+        useAgentStore.setState({ threads: records.map((thread) => ({ id: thread.id, name: thread.title, preview: "", createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt) })), connected: true, enabled: true, activity: appI18n.t("workspace.serviceConnected") });
     };
     const openThread = async (id: string, activate = true) => {
         if (!activate && requestedThread.current !== id) return;
+        const switching = requestedThread.current !== id;
         requestedThread.current = id;
-        if (activate) { setSnapshot(null); useAgentStore.setState({ activeThreadId: id, activeTurnId: "", messages: [] }); }
+        if (activate && switching) { setSnapshot(null); useAgentStore.setState({ activeThreadId: id, activeTurnId: "", messages: [] }); }
         const request = ++sequence.current;
         const assertSession = captureSession();
         setLoading(true);
@@ -72,7 +82,7 @@ export function AssistantPanelContent() {
             assertSession();
             if (request !== sequence.current || useAuthStore.getState().user?.id !== user?.id) return;
             setSnapshot(record); setError("");
-            useAgentStore.setState({ activeThreadId: id, messages: record.items.map((item) => ({ ...item, itemId: item.id })), activeTurnId: record.turns.find((turn) => ["queued", "running", "waiting_approval"].includes(turn.status))?.id || "" });
+            useAgentStore.setState({ activeThreadId: id, connectError: "", messages: record.items.map((item) => ({ ...item, itemId: item.id })), activeTurnId: record.turns.find((turn) => ["queued", "running", "waiting_approval"].includes(turn.status))?.id || "" });
             if (activate) setTab("chat");
         } catch (error) { if (request === sequence.current) showError(error); }
         finally { if (request === sequence.current) setLoading(false); }
@@ -97,17 +107,18 @@ export function AssistantPanelContent() {
         return () => window.removeEventListener("server-changed", refresh);
     }, [user?.id]);
     const send = async () => {
+        if (submittingRef.current) return;
         const selected = decodeChannelModel(model || config.textModel);
         const entry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text");
-        if (!selected || !entry) { message.warning("请选择助手的文本渠道与模型"); return; }
+        if (!selected || !entry) { notify.warning(appI18n.t("workspace.selectAssistantModel")); return; }
         const destination = target;
         const text = prompt;
         const owner = user?.id;
         const assertSession = captureSession();
         if (!text.trim() || busy || loading) return;
         const references = useAgentStore.getState().canvasReferences;
-        if (references.length && useAgentStore.getState().canvasContext?.snapshot.projectId !== destination) { message.warning("引用节点属于当前画布，请选择对应目标项目后发送"); return; }
-        setSubmitting(true);
+        if (references.length && useAgentStore.getState().canvasContext?.snapshot.projectId !== destination) { notify.warning(appI18n.t("workspace.referencesProject")); return; }
+        submittingRef.current = true; setSubmitting(true);
         try {
             const thread = snapshot?.thread || await api.createThread();
             assertSession();
@@ -118,30 +129,41 @@ export function AssistantPanelContent() {
             useAgentStore.setState({ prompt: "", attachments: [], canvasReferences: [] });
             await openThread(thread.id);
         } catch (error) { showError(error); }
-        finally { setSubmitting(false); }
+        finally { submittingRef.current = false; setSubmitting(false); }
+    };
+    const stop = async () => {
+        if (!running || stoppingRef.current) return;
+        stoppingRef.current = true; setStopping(true);
+        const assertSession = captureSession();
+        try { await api.cancelTurn(running.id); assertSession(); await openThread(activeId); }
+        catch (error) { showError(error); }
+        finally { stoppingRef.current = false; setStopping(false); }
     };
     return (
         <>
-            <AgentPanelTabs value={tab} theme={theme} onChange={setTab} items={[{ value: "chat", label: "对话", icon: <MessageSquare className="size-4" /> }, { value: "history", label: "历史", icon: <History className="size-4" /> }, { value: "skills", label: "Skill", icon: <Sparkles className="size-4" /> }]} right={<><Button type="text" shape="circle" icon={<Plus className="size-4" />} disabled={loading || busy} onClick={() => void newThread()} aria-label="新建对话" /><Button type="text" shape="circle" icon={<X className="size-4" />} onClick={() => useAgentStore.getState().closePanel()} aria-label="关闭助手" /></>} />
-            {error ? <Alert type="error" title={error} closable className="mx-3 mt-3" onClose={() => setError("")} /> : null}
-            {tab === "history" ? <AgentHistoryView theme={theme} threads={threads} activeThreadId={activeId} workspacePath="此账号的全部对话" loading={loading} busy={busy} connected onRefresh={() => void refreshThreads().catch(showError)} onNewThread={() => void newThread()} onResumeThread={(id) => void openThread(id)} onDeleteThreads={(ids) => {
+            <AgentPanelTabs value={tab} theme={theme} onChange={setTab} items={[{ value: "chat", label: appI18n.t("workspace.chat"), icon: <MessageSquare className="size-4" /> }, { value: "history", label: appI18n.t("workspace.history"), icon: <History className="size-4" /> }, { value: "skills", label: "Skill", icon: <Sparkles className="size-4" /> }]} right={<><Button variant="ghost"  icon={<Plus className="size-4" />} disabled={loading || busy} onClick={() => void newThread()} aria-label={appI18n.t("workspace.newConversation")} /><Button variant="ghost"  icon={<X className="size-4" />} onClick={() => useAgentStore.getState().closePanel()} aria-label={appI18n.t("workspace.collapseAssistant")} /></>} />
+            {error ? <Alert type="error" title={error} className="mx-3 mt-3" action={<Button size="sm" disabled={loading} onClick={() => { void refreshThreads().then(() => { setError(""); useAgentStore.setState({ connectError: "" }); if (activeId) return openThread(activeId, false); }).catch(showError); }}>{appI18n.t("workspace.retry")}</Button>} onClose={() => setError("")} /> : null}
+            <div hidden={tab !== "history"} inert={tab !== "history"} className={tab === "history" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><AgentHistoryView theme={theme} threads={threads} activeThreadId={activeId} workspacePath={appI18n.t("workspace.allConversations")} loading={loading} busy={busy} connected onRefresh={() => void refreshThreads().catch(showError)} onNewThread={() => void newThread()} onResumeThread={(id) => void openThread(id)} onDeleteThreads={(ids) => {
                 const assertSession = captureSession();
-                modal.confirm({ title: `删除 ${ids.length} 个对话？`, content: "对话消息与轮次将删除，已生成资产和用量账本保留。", okText: "删除对话", cancelText: "取消", okButtonProps: { danger: true }, onOk: async () => {
+                confirm({ title: appI18n.t("workspace.deleteConversations", { count: ids.length }), content: appI18n.t("workspace.deleteConversationDescription"), confirmText: appI18n.t("workspace.deleteConversation"), cancelText: appI18n.t("workspace.cancel"), destructive: true, onConfirm: async () => {
                     for (const id of ids) { assertSession(); await api.deleteThread(id); }
                     assertSession();
                     if (ids.includes(requestedThread.current)) { sequence.current++; requestedThread.current = ""; setSnapshot(null); setLoading(false); useAgentStore.setState({ activeThreadId: "", activeTurnId: "", messages: [] }); }
                     await refreshThreads();
                 } });
-            }} /> : tab === "skills" ? <AgentSkillsView clientId={user?.id || ""} /> : <>
-                <div className="flex shrink-0 items-center gap-2 px-4 pt-3 text-xs" style={{ color: theme.node.muted }}><span>目标项目</span><Select size="small" variant="borderless" className="min-w-0 flex-1" value={running?.projectId || target} disabled={busy} onChange={setTarget} options={[{ value: "", label: "不指定项目" }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} /><Button type="text" size="small" icon={<RefreshCw className="size-3.5" />} onClick={() => activeId ? void openThread(activeId) : void refreshThreads().catch(showError)} aria-label="重新读取对话" /></div>
-                {!snapshot && !loading ? <p className="px-5 pt-8 text-sm leading-6" style={{ color: theme.node.muted }}>在这里继续跨页面的创作对话。助手执行正在迁入服务端，模型调用尚未启用；会话与 Skill 可先配置。</p> : null}
-                <AgentChatTimeline theme={theme} pendingTool={null} pendingApprovals={[]} sending={submitting} waiting={Boolean(running)} onRejectTool={() => {}} onApproveTool={() => {}} onApprovalDecision={() => {}} />
-                <AgentChatComposer theme={theme} prompt={prompt} attachments={attachments} sending={busy} disabled={loading} placeholder="描述想完成的创作或操作…" onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => { const assertSession = captureSession(); void api.cancelTurn(running.id).then(() => { assertSession(); return openThread(activeId); }).catch(showError); } : undefined} onAddFiles={async (files) => {
+            }} /></div>
+            <div hidden={tab !== "skills"} inert={tab !== "skills"} className={tab === "skills" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><AgentSkillsView clientId={user?.id || ""} /></div>
+            <div hidden={tab !== "chat"} inert={tab !== "chat"} className={tab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                <div className="flex shrink-0 items-center gap-2 px-4 pt-3 text-xs" style={{ color: theme.node.muted }}><span>{appI18n.t("workspace.targetProject")}</span><Choice compact borderless aria-label={appI18n.t("workspace.targetProject")} className="min-w-0 flex-1" value={running ? running.projectId || "" : target} disabled={busy} onChange={setTarget} options={[{ value: "", label: appI18n.t("workspace.noProject") }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} /><Button variant="ghost" size="sm" icon={<RefreshCw className="size-3.5" />} disabled={loading} onClick={() => activeId ? void openThread(activeId) : void refreshThreads().catch(showError)} aria-label={appI18n.t("workspace.reloadConversation")} /></div>
+                {loading ? <div className="flex justify-center px-4 pt-3"><Spinner size="small" /></div> : null}
+                {!snapshot && !loading ? <p className="px-5 pt-8 text-sm leading-6" style={{ color: theme.node.muted }}>{appI18n.t("workspace.assistantBoundary")}</p> : null}
+                <AgentChatTimeline visible={tab === "chat"} theme={theme} pendingTool={null} pendingApprovals={[]} sending={submitting} waiting={Boolean(running)} onRejectTool={() => {}} onApproveTool={() => {}} onApprovalDecision={() => {}} />
+                <AgentChatComposer theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={loading} placeholder={appI18n.t("workspace.assistantPrompt")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined} onAddFiles={async (files) => {
                     const assertSession = captureSession();
                     try { for (const file of Array.from(files || [])) { assertSession(); const image = await uploadImage(file); assertSession(); useAgentStore.setState((state) => ({ attachments: [...state.attachments, { id: nanoid(), name: file.name, type: image.mimeType, size: image.bytes, width: image.width, height: image.height, url: image.url, dataUrl: image.url }] })); } }
                     catch (error) { showError(error); }
                 }} onRemoveAttachment={(id) => useAgentStore.setState((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) }))} left={<ModelPicker config={config} value={model || config.textModel} capability="text" onChange={(model) => useAgentStore.setState({ model })} />} />
-            </>}
+            </div>
         </>
     );
 }

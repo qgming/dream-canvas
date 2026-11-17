@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Tooltip } from "@/components/ui/popover";
 import { useTranslation } from "react-i18next";
 
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
@@ -75,7 +77,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     return (
         <div
             data-canvas-no-zoom
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            className="rounded-xl border p-3 shadow-lg backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -96,7 +98,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                     <Tooltip title={t("canvas.promptPanel.expandEditor")}>
-                        <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
+                        <Button variant="ghost" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-md !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
                     </Tooltip>
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
@@ -105,7 +107,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
-                                buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
+                                buttonClassName="!h-8 !max-w-[170px] !justify-start !rounded-md !px-3"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={openModelSettings}
                                 onOpenChange={onImageSettingsOpenChange}
@@ -114,12 +116,12 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     ) : mode === "video" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={openModelSettings} className="max-w-[190px]" />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !max-w-[220px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-8 !max-w-[220px] !justify-start !rounded-md !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={openModelSettings} className="max-w-[190px]" />
-                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-8 !max-w-[170px] !justify-start !rounded-md !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <>
@@ -128,10 +130,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         </>
                     )}
                 </div>
-                <Button
-                    type="primary"
-                    className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    danger={isRunning}
+                <Button variant={isRunning ? "destructive" : "default"}
+                    className="!h-8 !min-w-16 shrink-0 !rounded-md !px-3" aria-busy={isRunning}
                     disabled={!isRunning && !prompt.trim()}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={t(isRunning ? "canvas.promptPanel.stopGeneration" : "canvas.promptPanel.generate")}
@@ -149,19 +149,19 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     </span>
                 </Button>
             </div>
-            <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
+            <Dialog title={t("canvas.promptPanel.editorTitle")} open={expanded} width={760} footer={null} onClose={() => setExpanded(false)}>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
                     <CanvasPromptChipInput
                         value={prompt}
                         references={mentionReferences}
                         onChange={updatePrompt}
-                        className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-[15px] leading-6 outline-none"
+                        className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-sm leading-6 outline-none"
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
                         placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
                     />
                 </div>
-            </Modal>
+            </Dialog>
         </div>
     );
 }

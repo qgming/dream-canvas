@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Checkbox } from "antd";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/controls";
 import { FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -60,14 +61,14 @@ export function AgentHistoryView({
                     </div>
                     <div className="flex items-center gap-2">
                         {selectedThreads.length ? (
-                            <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} disabled={loading || busy} onClick={() => onDeleteThreads(selectedThreads.map((thread) => thread.id))}>
+                            <Button size="sm" variant="ghost" data-destructive icon={<Trash2 className="size-3.5" />} disabled={loading || busy} onClick={() => onDeleteThreads(selectedThreads.map((thread) => thread.id))}>
                                 {t("agent.history.deleteCount", { count: selectedThreads.length })}
                             </Button>
                         ) : null}
-                        <Button size="small" icon={<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />} disabled={!connected || loading} onClick={onRefresh}>
+                        <Button size="sm" icon={<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />} disabled={!connected || loading} onClick={onRefresh}>
                             {t("agent.history.refresh")}
                         </Button>
-                        <Button size="small" type="primary" icon={<Plus className="size-3.5" />} disabled={!connected || loading || busy} onClick={onNewThread}>
+                        <Button size="sm" variant="default" icon={<Plus className="size-3.5" />} disabled={!connected || loading || busy} onClick={onNewThread}>
                             {t("agent.history.newThread")}
                         </Button>
                     </div>
@@ -104,15 +105,15 @@ export function AgentHistoryView({
                                     <div className="min-w-0 flex-1">
                                         <div className="flex min-w-0 items-center gap-1.5">
                                             {active ? (
-                                                <span className="shrink-0 text-[10px] font-medium" style={{ color: theme.node.text }}>
+                                                <span className="shrink-0 text-xs font-medium" style={{ color: theme.node.text }}>
                                                     {t("agent.history.current")}
                                                 </span>
                                             ) : null}
                                             <div className="truncate text-sm font-medium leading-5">{thread.name || thread.preview || t("agent.history.untitled")}</div>
                                         </div>
-                                        <div className="truncate text-[11px] leading-4 opacity-65">{thread.preview || thread.id}</div>
+                                        <div className="truncate text-xs leading-4 opacity-65">{thread.preview || thread.id}</div>
                                     </div>
-                                    <span className="shrink-0 text-[10px] opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt, i18n.language)}</span>
+                                    <span className="shrink-0 text-xs opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt, i18n.language)}</span>
                                 </div>
                             </div>
                         );

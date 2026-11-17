@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { Button, Image } from "antd";
+import { Button } from "@/components/ui/button";
+import { MediaPreview } from "@/components/ui/media-preview";
 import { FileText, Group, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -117,7 +118,7 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
     return (
         <div
             data-canvas-no-zoom
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            className="rounded-xl border p-3 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={stopCanvasInteraction}
             onPointerDown={stopCanvasInteraction}
@@ -126,9 +127,9 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
             <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
                     <div className="shrink-0 text-xs font-semibold">{t("canvas.composer.title")}</div>
-                    <div className="truncate text-[11px] opacity-55">{t("canvas.composer.description")}</div>
+                    <div className="truncate text-xs opacity-55">{t("canvas.composer.description")}</div>
                 </div>
-                <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                <Button size="sm" variant="ghost" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
             </div>
             <CanvasNodeReferenceBar nodeId={nodeId} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
             <div className="relative rounded-xl">
@@ -184,7 +185,7 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
                 />
                 {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
             </div>
-            {imagePreview ? <Image src={imagePreview} alt={t("canvas.composer.imagePreview")} style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
+            {imagePreview ? <MediaPreview src={imagePreview} alt={t("canvas.composer.imagePreview")} style={{ display: "none" }} open onOpenChange={(visible) => !visible && setImagePreview(null)} /> : null}
         </div>
     );
 
@@ -236,7 +237,7 @@ function ResourcePreview({ input }: { input: NodeGenerationInput }) {
     if (input.type === "video" && input.video) return <video src={input.video.url} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;
     return (
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
             <Icon className="size-4" />
         </span>
     );

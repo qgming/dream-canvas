@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { create } from "zustand";
 import localforage from "localforage";
 import { getPreference, savePreference } from "@/services/api/preferences";
@@ -49,7 +50,7 @@ function persistDraft() {
     const { sources, schedule, version } = usePromptSourceStore.getState();
     if (!owner) return;
     pendingWrite = pendingWrite.catch(() => undefined).then(async () => { await drafts.setItem(owner, { value: { sources, schedule }, version }); });
-    void pendingWrite.catch((error: unknown) => { if (useAuthStore.getState().user?.id === owner) usePromptSourceStore.setState({ error: error instanceof Error ? error.message : "来源配置暂存失败" }); });
+    void pendingWrite.catch((error: unknown) => { if (useAuthStore.getState().user?.id === owner) usePromptSourceStore.setState({ error: error instanceof Error ? error.message : i18n.t("errors.sourceDraftFailed") }); });
 }
 
 export const usePromptSourceStore = create<PromptSourceStore>((set, get) => ({
@@ -67,17 +68,17 @@ export const usePromptSourceStore = create<PromptSourceStore>((set, get) => ({
                     const record = await getPreference<SourcePreference>("prompt-sources");
                     await pendingWrite.catch(() => undefined);
                     if (revision !== scope || useAuthStore.getState().user?.id !== owner) return;
-                    if (changed !== edits) throw new Error("读取期间来源配置又发生修改，当前编辑仍保留");
+                    if (changed !== edits) throw new Error(i18n.t("errors.sourceChangedDuringRead"));
                     if (discardDraft) {
-                        pendingWrite = pendingWrite.catch(() => undefined).then(async () => { assertSession(); if (changed !== edits) throw new Error("读取期间来源配置又发生修改，当前编辑仍保留"); await drafts.removeItem(owner); });
+                        pendingWrite = pendingWrite.catch(() => undefined).then(async () => { assertSession(); if (changed !== edits) throw new Error(i18n.t("errors.sourceChangedDuringRead")); await drafts.removeItem(owner); });
                         await pendingWrite;
                     }
                     const draft = discardDraft ? null : await drafts.getItem<SourceDraft>(owner);
                     assertSession();
                     if (revision !== scope) return;
-                    if (changed !== edits) throw new Error("读取期间来源配置又发生修改，当前编辑仍保留");
-                    set({ sources: draft?.value.sources || record.value?.sources || DEFAULT_PROMPT_SOURCES, schedule: draft?.value.schedule || record.value?.schedule || defaultSchedule, hydrated: true, version: draft?.version ?? record.version, dirty: Boolean(draft), error: draft ? "已恢复未保存的来源配置；版本冲突时请先保留需要的内容再重新读取。" : "" });
-                } catch (error) { if (revision === scope) set({ error: error instanceof Error ? error.message : "读取提示词配置失败" }); }
+                    if (changed !== edits) throw new Error(i18n.t("errors.sourceChangedDuringRead"));
+                    set({ sources: draft?.value.sources || record.value?.sources || DEFAULT_PROMPT_SOURCES, schedule: draft?.value.schedule || record.value?.schedule || defaultSchedule, hydrated: true, version: draft?.version ?? record.version, dirty: Boolean(draft), error: draft ? i18n.t("errors.sourceDraftRestored") : "" });
+                } catch (error) { if (revision === scope) set({ error: error instanceof Error ? error.message : i18n.t("errors.sourceReadFailed") }); }
             },
             save: () => {
                 if (running) return running;
@@ -101,7 +102,7 @@ export const usePromptSourceStore = create<PromptSourceStore>((set, get) => ({
                         const dirty = get().dirty;
                         pendingWrite = pendingWrite.catch(() => undefined).then(async () => { if (dirty) await drafts.setItem(owner, latest); else await drafts.removeItem(owner); });
                         await pendingWrite;
-                    } catch (error) { if (revision === scope) set({ error: error instanceof Error ? error.message : "保存失败，当前编辑仍保留" }); }
+                    } catch (error) { if (revision === scope) set({ error: error instanceof Error ? error.message : i18n.t("errors.editedSaveFailed") }); }
                     finally { if (revision === scope) set({ saving: false }); }
                 })();
                 running = operation;
