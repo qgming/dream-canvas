@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { nanoid } from "nanoid";
+import i18n from "@/i18n";
 
 import { captureSession } from "@/services/api/client";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { GenerationOptions } from "@/services/api/tasks";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
-type Target = Required<Pick<GenerationOptions, "projectId" | "projectVersion" | "nodeId">>;
+type Target = Required<Pick<GenerationOptions, "projectId" | "projectVersion" | "nodeId" | "batchId">>;
 type Preparation = { nodeId: string; signal?: AbortSignal; assertSession: () => void; resolve: (target: Target) => void; reject: (error: unknown) => void; stop: () => void };
-const interrupted = () => new DOMException("已停止提交生成任务", "AbortError");
+const interrupted = () => new DOMException(i18n.t("errors.waitStopped"), "AbortError");
 
 export function useGenerationTarget(projectId: string, nodes: MutableRefObject<CanvasNodeData[]>, connections: MutableRefObject<CanvasConnection[]>) {
     const [revision, setRevision] = useState(0);
@@ -37,8 +39,8 @@ export function useGenerationTarget(projectId: string, nodes: MutableRefObject<C
                 try {
                     request.assertSession();
                     if (!mounted.current || request.signal?.aborted) throw interrupted();
-                    if (!project.nodes.some((node) => node.id === request.nodeId)) throw new Error("目标节点已移除，未提交生成任务");
-                    request.resolve({ projectId, projectVersion: project.version, nodeId: request.nodeId });
+                    if (!project.nodes.some((node) => node.id === request.nodeId)) throw new Error(i18n.t("errors.projectTargetRemoved"));
+                    request.resolve({ projectId, projectVersion: project.version, nodeId: request.nodeId, batchId: nanoid() });
                 } catch (error) { request.reject(error); }
                 finally { pending.current.delete(request); request.stop(); }
             }
@@ -53,5 +55,5 @@ export function useGenerationTarget(projectId: string, nodes: MutableRefObject<C
         pending.current.add(request);
         signal?.addEventListener("abort", abort, { once: true });
         setRevision((value) => value + 1);
-    }), []);
+    }), [projectId]);
 }

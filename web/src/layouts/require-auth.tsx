@@ -16,7 +16,6 @@ import { cleanupUnusedImages } from "@/services/image-storage";
 import { useConfigStore } from "@/stores/use-config-store";
 import { modelCatalog } from "@/services/api/channels";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
@@ -30,7 +29,6 @@ export default function RequireAuth() {
     const queryClient = useQueryClient();
     const [scope, setScope] = useState<string | null>(null);
     const catalog = useQuery({ queryKey: ["model-catalog", user?.id], queryFn: modelCatalog, enabled: Boolean(user && scope === user.id) });
-    usePromptSourceScheduler();
 
     useEffect(() => { void refresh(); }, [refresh]);
     useEffect(() => {
@@ -46,7 +44,7 @@ export default function RequireAuth() {
         usePromptSourceStore.getState().reset();
         useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, editingProjectTitle: "", selectedProjectIds: [], deleteProjectIds: [] });
         useWorkbenchAgentStore.setState({ imageCommand: null, videoCommand: null, tasks: [] });
-        useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", pendingApprovals: [], pendingTool: null, prompt: "" });
+        useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", pendingApprovals: [], pendingTool: null, prompt: "", modelParameters: {} });
         useAgentSkillStore.getState().reset();
         void cleanupUnusedImages(null);
         setScope(user?.id || null);
@@ -62,17 +60,20 @@ export default function RequireAuth() {
         if (!user || scope !== user.id) return;
         let source: EventSource | undefined;
         let refreshing = false;
+        let pending = false;
         const refresh = () => {
-            if (refreshing || useAuthStore.getState().user?.id !== user.id) return;
+            if (useAuthStore.getState().user?.id !== user.id) return;
+            if (refreshing) { pending = true; return; }
             refreshing = true;
-            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] })]).finally(() => { refreshing = false; });
+            pending = false;
+            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
             window.dispatchEvent(new Event("server-changed"));
         };
         const connect = () => {
             if (source || useAuthStore.getState().user?.id !== user.id) return;
             source = new EventSource("/api/events");
-            source.addEventListener("changed", refresh);
-            source.onerror = () => { source?.close(); source = undefined; };
+            source.addEventListener("changed", (event) => { const { topic } = JSON.parse((event as MessageEvent<string>).data) as { topic?: string }; if (!topic || topic === "all") refresh(); else { if (topic === "prompts") for (const key of ["prompts", "side-panel-prompts", "prompt-source-statuses"]) void queryClient.invalidateQueries({ queryKey: [key] }); window.dispatchEvent(new CustomEvent("server-changed", { detail: topic })); } });
+            source.onerror = () => { if (source?.readyState === EventSource.CLOSED) { source.close(); source = undefined; } };
         };
         const focused = () => { connect(); refresh(); };
         connect();

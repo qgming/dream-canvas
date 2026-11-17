@@ -36,16 +36,13 @@ func (a *App) getAsset(c *gin.Context) {
 
 // A raw upload streams directly to its final persistent path. It is never a multipart temp file.
 func (a *App) uploadAsset(c *gin.Context) {
-	select {
-	case a.transfers <- struct{}{}:
-		defer func() { <-a.transfers }()
-	case <-c.Request.Context().Done():
-		return
-	}
+	release, err := a.acquireFile(c.Request.Context(), false, false); if err != nil { return }; defer release()
+	a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
 	mimeType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || (!strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") && !strings.HasPrefix(mimeType, "audio/")) {
 		respondError(c, problem(400, "invalid_media", "只支持图片、视频和音频原件")); return
 	}
+	if policy, err := a.executionPolicy(); err == nil { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.mediaLimit(strings.Split(mimeType, "/")[0])) }
 	id := identifier()
 	name, err := a.assetPath(id)
 	if err != nil { respondError(c, err); return }
@@ -67,6 +64,8 @@ func (a *App) uploadAsset(c *gin.Context) {
 	}
 	if err == nil && asset.Bytes == 0 { err = errors.New("empty media") }
 	if err != nil {
+		var limit *http.MaxBytesError
+		if errors.As(err, &limit) { fail(413, "media_too_large", "原件超过管理员配置的大小限制，未修改原件，请重新选择"); return }
 		fail(500, "save_failed", "文件未能完整写入持久目录，尚未可靠保留，请重新上传"); return
 	}
 	file, err = os.Open(name)
@@ -86,12 +85,23 @@ func (a *App) uploadAsset(c *gin.Context) {
 			if decodeErr == nil { asset.Width, asset.Height = config.Width, config.Height }
 		}
 	}
-	result := a.db.Model(&Asset{}).Where("id = ? AND delete_state = ? AND save_state = ?", asset.ID, "", "saving").Updates(map[string]any{"save_state": "saved", "mime_type": asset.MimeType, "bytes": asset.Bytes, "width": asset.Width, "height": asset.Height, "error": ""})
+	if policy, err := a.executionPolicy(); err == nil { a.probeMedia(c.Request.Context(), &asset, policy) }
+	result := a.db.Model(&Asset{}).Where("id = ? AND delete_state = ? AND save_state = ?", asset.ID, "", "saving").Updates(map[string]any{"save_state": "saved", "mime_type": asset.MimeType, "bytes": asset.Bytes, "width": asset.Width, "height": asset.Height, "duration_ms": asset.DurationMS, "fps": asset.FPS, "video_codec": asset.VideoCodec, "audio_codec": asset.AudioCodec, "probe_error": asset.ProbeError, "error": ""})
 	if result.Error != nil { respondError(c, problem(500, "metadata_failed", "原件已写入，但资产记录保存失败，请检查服务器")); return }
 	if result.RowsAffected == 0 { respondError(c, problem(410, "asset_deleted", "上传期间资产已被删除，文件将按删除流程清理")); return }
 	if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { respondError(c, err); return }
 	if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "上传期间资产已被删除，文件将按删除流程清理")); return }
+	if err := a.queueAssetSync(asset.ID); err != nil { respondError(c, problem(500, "sync_record_failed", "原件已保存，但云同步记录写入失败，请检查数据库")); return }
+	if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { respondError(c, err); return }
 	c.JSON(201, asset)
+}
+
+func (a *App) retryAssetSync(c *gin.Context) {
+	var asset Asset
+	if err := a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ? AND save_state = ?", c.Param("id"), currentUser(c).ID, "", "saved").Error; err != nil { respondError(c, err); return }
+	if err := a.queueAssetSync(asset.ID); err != nil { respondError(c, err); return }
+	if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "sync").Update("next_run_at", nil).Error; err != nil { respondError(c, err); return }
+	a.signalWork(); a.notify(asset.UserID); c.Status(204)
 }
 
 func (a *App) assetFile(c *gin.Context) {
@@ -99,12 +109,8 @@ func (a *App) assetFile(c *gin.Context) {
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { respondError(c, err); return }
 	if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
 	if asset.SaveState != "saved" { respondError(c, problem(409, "asset_not_saved", "文件尚未可靠保存")); return }
-	select {
-	case a.transfers <- struct{}{}:
-		defer func() { <-a.transfers }()
-	case <-c.Request.Context().Done():
-		return
-	}
+	release, err := a.acquireFile(c.Request.Context(), false, false); if err != nil { return }; defer release()
+	a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", asset.ID, currentUser(c).ID).Error; err != nil { respondError(c, err); return }
 	if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
 	name, err := a.assetPath(asset.Path)
@@ -123,31 +129,36 @@ func (a *App) assetFile(c *gin.Context) {
 func (a *App) updateAsset(c *gin.Context) {
 	var input struct { Title string `json:"title"`; Metadata JSON `json:"metadata"` }
 	if !bind(c, &input) { return }
-	if err := validTitle(input.Title); err != nil { respondError(c, err); return }
-	if len(input.Metadata) == 0 { input.Metadata = JSON(`{}`) }
+	if err := a.UpdateAsset(currentUser(c).ID, c.Param("id"), input.Title, input.Metadata); err != nil { respondError(c, err); return }; c.Status(204)
+}
+
+func (a *App) UpdateAsset(userID, id, title string, metadata JSON) error {
+	if err := validTitle(title); err != nil { return err }
+	if len(metadata) == 0 { metadata = JSON(`{}`) }
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var asset Asset
-		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", c.Param("id"), currentUser(c).ID, "").Error; err != nil { return err }
-		if err := validateAssetMetadata(tx, currentUser(c).ID, input.Metadata); err != nil { return err }
-		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(input.Title), "metadata": input.Metadata}).Error
+		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "").Error; err != nil { return err }
+		if err := validateAssetMetadata(tx, userID, metadata); err != nil { return err }
+		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(title), "metadata": metadata}).Error
 	})
-	if err != nil { respondError(c, err); return }
-	a.notify(currentUser(c).ID)
-	c.Status(204)
+	if err == nil { a.notify(userID) }; return err
 }
 
 func (a *App) createTextAsset(c *gin.Context) {
 	var input struct { Title string `json:"title"`; Metadata JSON `json:"metadata"` }
 	if !bind(c, &input) { return }
-	if err := validTitle(input.Title); err != nil { respondError(c, err); return }
-	asset := Asset{ID: identifier(), UserID: currentUser(c).ID, Kind: "text", Title: strings.TrimSpace(input.Title), Metadata: input.Metadata, SaveState: "saved", SyncState: "local"}
+	asset, err := a.CreateTextAsset(currentUser(c).ID, input.Title, input.Metadata)
+	if err != nil { respondError(c, err); return }; c.JSON(201, asset)
+}
+
+func (a *App) CreateTextAsset(userID, title string, metadata JSON) (Asset, error) {
+	if err := validTitle(title); err != nil { return Asset{}, err }
+	asset := Asset{ID: identifier(), UserID: userID, Kind: "text", Title: strings.TrimSpace(title), Metadata: metadata, SaveState: "saved", SyncState: "local"}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if err := validateAssetMetadata(tx, asset.UserID, asset.Metadata); err != nil { return err }
 		return tx.Create(&asset).Error
 	})
-	if err != nil { respondError(c, err); return }
-	a.notify(asset.UserID)
-	c.JSON(201, asset)
+	if err == nil { a.notify(asset.UserID) }; return asset, err
 }
 
 func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) error {
@@ -168,6 +179,7 @@ func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) error {
 func (a *App) retryAssetCleanup(c *gin.Context) {
 	var asset Asset
 	if err := a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", c.Param("id"), currentUser(c).ID, "pending").Error; err != nil { respondError(c, err); return }
-	if err := a.cleanAsset(asset.ID); err != nil { respondError(c, problem(409, "cleanup_pending", "文件仍待清理，请检查服务器磁盘和目录权限")); return }
-	c.Status(204)
+	if err := a.db.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { respondError(c, err); return }
+	if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error; err != nil { respondError(c, err); return }
+	a.signalWork(); c.JSON(202, gin.H{"deleteState": "pending"})
 }

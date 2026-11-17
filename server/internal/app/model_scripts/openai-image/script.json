@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "OpenAI Images",
+  "capability": "image",
+  "description": "内置接口脚本，仅可查看和选择使用 / Builtin script: view and use only",
+  "entry": "adapter.js",
+  "inputs": "inputs.json",
+  "phases": [
+    "submit",
+    "result"
+  ],
+  "features": {
+    "tools": false,
+    "streaming": false
+  },
+  "auth": {
+    "type": "bearer"
+  }
+}

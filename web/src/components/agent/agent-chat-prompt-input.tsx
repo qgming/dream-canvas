@@ -90,7 +90,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
         if (type === "skill") {
             const agent = useAgentStore.getState();
             const skillState = useAgentSkillStore.getState();
-            if (agent.connected && !skillState.loaded && !skillState.loading) void skillState.loadSkills(agent.url.trim().replace(/\/$/, ""), agent.token);
+            if (agent.connected && !skillState.loaded && !skillState.loading) void skillState.loadSkills();
             return;
         }
         const snapshot = useAgentStore.getState().canvasContext?.snapshot;

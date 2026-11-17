@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -44,6 +45,13 @@ type Asset struct {
 	Bytes int64 `json:"bytes"`
 	Width int `json:"width"`
 	Height int `json:"height"`
+	DurationMS int64 `json:"durationMs"`
+	FPS string `json:"fps,omitempty"`
+	VideoCodec string `json:"videoCodec,omitempty"`
+	AudioCodec string `json:"audioCodec,omitempty"`
+	ProbeError string `json:"probeError,omitempty"`
+	PreviewState string `json:"previewState,omitempty"`
+	PreviewError string `json:"previewError,omitempty"`
 	Path string `json:"-"`
 	PreviewPath string `json:"-"`
 	SaveState string `json:"saveState"`
@@ -76,6 +84,7 @@ type Channel struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	Name string `json:"name"`
 	BaseURL string `json:"baseUrl"`
+	Protocol string `json:"protocol"`
 	Secret string `json:"-"`
 	Enabled bool `json:"enabled"`
 	Version uint64 `json:"version"`
@@ -89,36 +98,50 @@ type ChannelModel struct {
 	Model string `json:"model" gorm:"uniqueIndex:channel_model;not null"`
 	Name string `json:"name"`
 	Capability string `json:"capability"`
-	Protocol string `json:"protocol"`
+	AdapterID string `json:"adapterId"`
 	Enabled bool `json:"enabled"`
 	Version uint64 `json:"version"`
-	Parameters JSON `json:"parameters" gorm:"type:blob"`
+	ParameterOverrides JSON `json:"parameterOverrides" gorm:"type:blob"`
+	Parameters JSON `json:"parameters" gorm:"-"`
 	Pricing JSON `json:"pricing" gorm:"type:blob"`
-	PublishedVersionID string `json:"publishedVersionId,omitempty"`
+	AdapterVersionID string `json:"adapterVersionId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-type InterfaceDraft struct {
+type ScriptDraft struct {
 	ID string `json:"id" gorm:"primaryKey"`
-	ModelID string `json:"modelId" gorm:"uniqueIndex;not null"`
+	AdapterID string `json:"adapterId" gorm:"uniqueIndex;not null"`
 	Revision uint64 `json:"revision"`
-	Scripts JSON `json:"scripts" gorm:"type:blob"`
+	Files JSON `json:"files" gorm:"type:blob"`
 	Parameters JSON `json:"parameters" gorm:"type:blob"`
 	UpdatedBy string `json:"updatedBy"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-type InterfaceVersion struct {
+type ScriptVersion struct {
 	ID string `json:"id" gorm:"primaryKey"`
-	ModelID string `json:"modelId" gorm:"index;not null"`
+	AdapterID string `json:"adapterId" gorm:"index"`
 	DraftRevision uint64 `json:"draftRevision"`
-	Scripts JSON `json:"scripts" gorm:"type:blob"`
+	Files JSON `json:"files" gorm:"type:blob"`
+	Scripts JSON `json:"compiled" gorm:"type:blob"`
 	Parameters JSON `json:"parameters" gorm:"type:blob"`
-	Verified bool `json:"verified"`
+	Features JSON `json:"features" gorm:"type:blob"`
 	PublishedBy string `json:"publishedBy"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type ModelScript struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	Name string `json:"name"`
+	Capability string `json:"capability"`
+	Description string `json:"description"`
+	Builtin bool `json:"builtin"`
+	AdapterVersionID string `json:"adapterVersionId"`
+	Version uint64 `json:"version"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type AccessToken struct {
@@ -160,6 +183,7 @@ type GenerationTask struct {
 	ModelID string `json:"modelId"`
 	Capability string `json:"capability"`
 	Snapshot JSON `json:"-" gorm:"type:blob"`
+	TargetNode JSON `json:"-" gorm:"type:blob"`
 	Input JSON `json:"input" gorm:"type:blob"`
 	Status string `json:"status" gorm:"index"`
 	UpstreamID string `json:"upstreamId,omitempty"`
@@ -168,6 +192,22 @@ type GenerationTask struct {
 	SaveState string `json:"saveState"`
 	SyncState string `json:"syncState"`
 	CancelRequested bool `json:"cancelRequested"`
+	Result JSON `json:"-" gorm:"type:blob"`
+	RawResponseFile string `json:"-"`
+	ResponseCleanupPending bool `json:"responseCleanupPending"`
+	ResponseCleanupError string `json:"responseCleanupError,omitempty"`
+	ResponseCleanupAttempts int `json:"-"`
+	NextRunAt *time.Time `json:"nextRunAt,omitempty" gorm:"index"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	QueryFailures int `json:"queryFailures"`
+	TransferAttempts int `json:"transferAttempts"`
+	Applied bool `json:"applied"`
+	AppliedVersion uint64 `json:"appliedVersion" gorm:"index"`
+	ApplyError string `json:"applyError,omitempty"`
+	UsageState string `json:"usageState"`
+	DebugRevision uint64 `json:"debugRevision,omitempty"`
+	CancelSent bool `json:"cancelSent"`
+	CancelError string `json:"cancelError,omitempty"`
 	Error string `json:"error,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -177,6 +217,15 @@ type TaskAsset struct {
 	TaskID string `gorm:"primaryKey"`
 	AssetID string `gorm:"primaryKey"`
 	Released bool `gorm:"index"`
+}
+
+type AssetVoice struct {
+	AssetID string `json:"assetId" gorm:"primaryKey"`
+	ChannelID string `json:"channelId" gorm:"primaryKey"`
+	UserID string `json:"-" gorm:"index"`
+	VoiceID string `json:"voiceId"`
+	Version uint64 `json:"version"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type AssistantThread struct {
@@ -198,11 +247,14 @@ type AssistantTurn struct {
 	Status string `json:"status"`
 	Error string `json:"error,omitempty"`
 	Snapshot JSON `json:"-" gorm:"type:blob"`
+	CancelRequested bool `json:"cancelRequested"`
+	Step int `json:"step"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type AssistantItem struct {
+	Sequence uint64 `json:"sequence" gorm:"index"`
 	ThreadID string `json:"threadId" gorm:"primaryKey"`
 	TurnID string `json:"turnId" gorm:"primaryKey"`
 	ID string `json:"id" gorm:"primaryKey"`
@@ -223,4 +275,78 @@ type AssistantSkill struct {
 	Version uint64 `json:"version"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type RuntimeSettings struct {
+	ID uint `json:"-" gorm:"primaryKey"`
+	Version uint64 `json:"version"`
+	Policy JSON `json:"policy" gorm:"type:blob"`
+	UpdatedBy string `json:"updatedBy"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type ObjectStorage struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	Provider string `json:"provider"`
+	Region string `json:"region"`
+	PathStyle bool `json:"pathStyle"`
+	Name string `json:"name"`
+	Endpoint string `json:"endpoint"`
+	Bucket string `json:"bucket"`
+	AccessKeyID string `json:"-"`
+	Secret string `json:"-"`
+	Default bool `json:"default"`
+	Version uint64 `json:"version"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type FileOperation struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	AssetID string `json:"assetId" gorm:"uniqueIndex:file_operation"`
+	Kind string `json:"kind" gorm:"uniqueIndex:file_operation"`
+	Attempts int `json:"attempts"`
+	NextRunAt *time.Time `json:"nextRunAt,omitempty" gorm:"index"`
+	Error string `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type UsageEntry struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	UserID string `json:"userId" gorm:"index"`
+	ProjectID string `json:"projectId,omitempty" gorm:"index"`
+	TaskID string `json:"taskId,omitempty"`
+	TurnID string `json:"turnId,omitempty"`
+	ChannelID string `json:"channelId" gorm:"index"`
+	ModelID string `json:"modelId" gorm:"index"`
+	Capability string `json:"capability"`
+	State string `json:"state"`
+	Corrected bool `json:"corrected"`
+	Usage JSON `json:"usage" gorm:"type:blob"`
+	Pricing JSON `json:"pricing" gorm:"type:blob"`
+	CostMicros *int64 `json:"costMicros"`
+	OriginalCostMicros *int64 `json:"originalCostMicros"`
+	Currency string `json:"currency"`
+	CostState string `json:"costState"`
+	PointsMilli *int64 `json:"pointsMilli"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type UsageCorrection struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	EntryID string `json:"entryId" gorm:"index"`
+	AdminID string `json:"adminId"`
+	Before JSON `json:"before" gorm:"type:blob"`
+	After JSON `json:"after" gorm:"type:blob"`
+	Reason string `json:"reason"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Integer minor units travel as strings so browser JSON parsing cannot lose precision.
+func (entry UsageEntry) MarshalJSON() ([]byte, error) {
+	type plain UsageEntry
+	integer := func(value *int64) *string { if value == nil { return nil }; encoded := strconv.FormatInt(*value, 10); return &encoded }
+	return json.Marshal(struct { plain; CostMicros *string `json:"costMicros"`; OriginalCostMicros *string `json:"originalCostMicros"`; PointsMilli *string `json:"pointsMilli"` }{plain(entry), integer(entry.CostMicros), integer(entry.OriginalCostMicros), integer(entry.PointsMilli)})
 }

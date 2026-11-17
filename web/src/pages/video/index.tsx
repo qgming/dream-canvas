@@ -28,13 +28,14 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { clampVideoSeconds } from "@/lib/media-size";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
+import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { AssetMedia } from "@/components/canvas/asset-media";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, waitForVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { captureSession } from "@/services/api/client";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, modelHasParameters, modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import type { ReferenceImage } from "@/types/image";
@@ -147,18 +148,17 @@ export default function VideoPage() {
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
+        try {
         assertSession();
         const selectedFiles = Array.from(files || []);
-        const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/"));
+        const unsupported = selectedFiles.filter((file) => !/^(image|video|audio)\//.test(file.type));
         if (unsupported.length) notify.warning(t("videoWorkbench.unsupportedFiles"));
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/")).slice(0, 7 - references.length);
-        const nextReferences = await Promise.all(
-            imageFiles.map(async (file) => {
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
-            }),
-        );
-        setReferences((value) => [...value, ...nextReferences].slice(0, 7));
+        const uploads = await Promise.allSettled(selectedFiles.filter((file) => /^(image|video|audio)\//.test(file.type)).map((file) => uploadReference(file, file.name)));
+        assertSession();
+        const nextReferences = uploads.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        setReferences((value) => [...value, ...nextReferences]);
+        for (const result of uploads) if (result.status === "rejected") notify.error(result.reason instanceof Error ? result.reason.message : t("errors.mediaNotSaved"));
+        } catch (error) { notify.error(error instanceof Error ? error.message : t("errors.mediaNotSaved")); }
     };
 
     const handleReferenceDragEnter = (event: DragEvent<HTMLDivElement>) => {
@@ -190,13 +190,14 @@ export default function VideoPage() {
                 return;
             }
             const nextReferences = await Promise.all(
-                blobs.slice(0, 7 - references.length).map(async (blob, index) => {
+                blobs.map(async (blob, index) => {
                     assertSession();
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, 7));
+            assertSession();
+            setReferences((value) => [...value, ...nextReferences]);
             notify.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
         } catch {
             notify.error(t("videoWorkbench.clipboardEmpty"));
@@ -276,7 +277,7 @@ export default function VideoPage() {
             openModelSettings();
             return null;
         }
-        return { text, config: buildVideoConfig({ ...effectiveConfig, modelParameters: parameters[model] }, model), references: [...references] };
+        return { text, config: buildVideoConfig({ ...effectiveConfig, modelParameters: resolveModelParameters(effectiveConfig, model, parameters[model]) }, model), references: [...references] };
     };
 
     const retryResult = () => {
@@ -301,13 +302,21 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        try {
+        assertSession();
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, 7));
+            assertSession();
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        } else {
+            const reference = await uploadReference(payload.storageKey || payload.url, payload.title, payload.kind);
+            assertSession();
+            setReferences((value) => [...value, reference]);
         }
         setAssetPickerOpen(false);
+        } catch (error) { notify.error(error instanceof Error ? error.message : t("errors.mediaNotSaved")); }
     };
 
     const draftDirty = JSON.stringify({ prompt, references, parameters }) !== savedDraft;
@@ -374,10 +383,10 @@ export default function VideoPage() {
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
             const stored = await storeGeneratedVideo(await waitForVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal }));
-            const nextVideo: GeneratedVideo = { id: nanoid(), url: stored.url, storageKey: stored.storageKey, durationMs: Date.now() - log.createdAt, width: stored.width || 1280, height: stored.height || 720, bytes: stored.bytes, mimeType: stored.mimeType };
+            const nextVideo: GeneratedVideo = { id: nanoid(), url: stored.url, storageKey: stored.storageKey, durationMs: stored.durationMs || 0, width: stored.width || 0, height: stored.height || 0, bytes: stored.bytes, mimeType: stored.mimeType };
             setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
-            await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+            await saveLog({ ...log, status: "success", durationMs: Date.now() - log.createdAt, video: nextVideo, error: undefined });
             notify.success(t("videoWorkbench.generated"));
         } catch (error) {
             if (controller.signal.aborted) return;
@@ -478,7 +487,7 @@ export default function VideoPage() {
                                 >
                                     {references.map((item, index) => (
                                         <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border ">
-                                            <img src={previewUrlFor(item.storageKey) || item.dataUrl} alt={item.name} className="size-full object-cover" />
+                                            <AssetMedia kind={item.type.startsWith("video/") ? "video" : item.type.startsWith("audio/") ? "audio" : "image"} src={item.type.startsWith("image/") ? previewUrlFor(item.storageKey) || item.dataUrl : item.dataUrl} alt={item.name} controls={item.type.startsWith("audio/")} className="size-full object-cover" />
                                             <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{index + 1}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label={t("videoWorkbench.removeImage")}>
@@ -492,7 +501,7 @@ export default function VideoPage() {
 
                             <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
                                 <span className="truncate text-muted-foreground ">
-                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(effectiveConfig.vquality)}p · {videoSizeLabel(effectiveConfig.size)} · {normalizeVideoSeconds(effectiveConfig.videoSeconds)}s · {videoModeLabel(effectiveConfig.videoMode)}
+                                    {modelOptionLabel(effectiveConfig, model)}{!modelHasParameters(effectiveConfig, model) ? ` · ${normalizeResolution(effectiveConfig.vquality)}p · ${videoSizeLabel(effectiveConfig.size)} · ${normalizeVideoSeconds(effectiveConfig.videoSeconds)}s · ${videoModeLabel(effectiveConfig.videoMode)}` : ""}
                                 </span>
                                 <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -533,7 +542,7 @@ export default function VideoPage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*,audio/*"
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -548,6 +557,7 @@ export default function VideoPage() {
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
                 </div>
+                <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
             </Dialog>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
@@ -569,9 +579,9 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={openModelSettings} />
             </label>
-            <div className="col-span-2">
+            {!modelHasParameters(config, model) ? <div className="col-span-2">
                 <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
-            </div>
+            </div> : null}
         </>
     );
 }
@@ -692,9 +702,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                 <div className="min-w-0">
                     <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
+                        {Object.entries(log.config.modelParameters || {}).filter(([, value]) => value != null && value !== "").map(([key, value]) => <Tag key={key} title={`${key}: ${String(value)}`} className="m-0 max-w-full truncate rounded-md px-1.5 py-1 text-xs">{key}: {String(value)}</Tag>)}
                     </div>
                 </div>
                 <div className="col-span-2 flex flex-wrap items-center justify-end gap-2">
@@ -719,8 +727,8 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
     const references = await Promise.all(
         (log.references || []).map(async (item) => {
-            void ensureImagePreview(item.storageKey);
-            return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
+            if (item.type.startsWith("image/")) { void ensureImagePreview(item.storageKey); return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }; }
+            return { ...item, dataUrl: await resolveMediaUrl(item.storageKey, item.dataUrl) };
         }),
     );
     const config = normalizeLogConfig(log);
@@ -751,6 +759,12 @@ function serializeLog(log: GenerationLog): GenerationLog {
         references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
         video: log.video?.storageKey ? { ...log.video, url: "" } : log.video,
     };
+}
+
+async function uploadReference(input: string | Blob, name: string, kind?: "video" | "audio"): Promise<ReferenceImage> {
+    if (input instanceof Blob && input.type.startsWith("image/")) { const stored = await uploadImage(input); return { id: nanoid(), name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }; }
+    const stored = await uploadMediaFile(input, kind);
+    return { id: nanoid(), name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey };
 }
 
 function moveListItem<T>(items: T[], index: number, offset: number) {

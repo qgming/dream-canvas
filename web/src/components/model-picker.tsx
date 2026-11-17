@@ -5,13 +5,14 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { modelOptionLabel, modelOptionName, modelSupportsTools, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
     value?: string;
     onChange: (model: string) => void;
     capability?: ModelCapability;
+    toolsOnly?: boolean;
     className?: string;
     fullWidth?: boolean;
     placeholder?: string;
@@ -21,11 +22,11 @@ type ModelPickerProps = {
     "aria-describedby"?: string;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder, onMissingConfig, id, "aria-label": ariaLabel, "aria-describedby": ariaDescription }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, toolsOnly = false, className, fullWidth = false, placeholder, onMissingConfig, id, "aria-label": ariaLabel, "aria-describedby": ariaDescription }: ModelPickerProps) {
     const { t } = useTranslation();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => selectableModelsByCapability(config, capability), [capability, config]);
+    const options = useMemo(() => selectableModelsByCapability(config, capability).filter((model) => !toolsOnly || modelSupportsTools(config, model)), [capability, config, toolsOnly]);
     const current = value || "";
     const pickerPlaceholder = placeholder || t("settingsPanels.model.select");
 

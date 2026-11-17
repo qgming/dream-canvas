@@ -19,13 +19,15 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { createToken, listTokens, revokeToken, type AccessToken } from "@/services/api/tokens";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { captureSession } from "@/services/api/client";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 
 export default function AccessTokensPage() {
     useTranslation();
     const { notify, confirm } = useFeedback();
 
-    const scopes = [{ value: "read", label: appI18n.t("workspace.read") }, { value: "edit", label: appI18n.t("workspace.edit") }, { value: "delete", label: appI18n.t("workspace.deleteScope") }];
+    const admin = useAuthStore((state) => state.user?.role === "admin");
+    const scopes = [{ value: "read", label: appI18n.t("workspace.read") }, { value: "edit", label: appI18n.t("workspace.edit") }, { value: "generate", label: appI18n.t("execution.generateScope") }, { value: "delete", label: appI18n.t("workspace.deleteScope") }, { value: "assistant", label: appI18n.t("execution.assistantScope") }, { value: "account", label: appI18n.t("execution.accountScope") }, ...(admin ? [{ value: "admin", label: appI18n.t("execution.adminScope") }] : [])];
     const queryClient = useQueryClient();
     const copy = useCopyText();
     const query = useQuery({ queryKey: ["access-tokens"], queryFn: listTokens });
@@ -62,7 +64,7 @@ export default function AccessTokensPage() {
                     finally { setBusy(false); }
                 }}>
                     <Field layout="horizontal" name="name" label={appI18n.t("workspace.name")} schema={z.string().trim().min(1, appI18n.t("workspace.nameRequired"))}><Input placeholder={appI18n.t("workspace.tokenNamePlaceholder")} /></Field>
-                    <Field layout="horizontal" name="scopes" label={appI18n.t("workspace.operationPermissions")} schema={z.array(z.string()).min(1, appI18n.t("workspace.selectPermission"))}><Checkbox.Group className="w-full" options={scopes} /></Field>
+                    <Field layout="horizontal" name="scopes" label={appI18n.t("workspace.operationPermissions")} description={appI18n.t("execution.globalScopeHint")} schema={z.array(z.string()).min(1, appI18n.t("workspace.selectPermission"))}><Checkbox.Group className="w-full" options={scopes} /></Field>
                     <Field layout="horizontal" name="projects" label={appI18n.t("workspace.projectScope")} description={appI18n.t("workspace.projectScopeDescription")}><Choice multiple options={projects.map((project) => ({ value: project.id, label: project.title }))} placeholder={appI18n.t("workspace.allProjects")} /></Field>
                 </EditorForm>
             </Dialog>

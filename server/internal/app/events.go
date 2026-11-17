@@ -8,10 +8,10 @@ import (
 )
 
 // Notifications only wake a reader; authoritative snapshots always come from SQLite.
-func (a *App) subscribe(userID string) (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
+func (a *App) subscribe(userID string) (<-chan string, func()) {
+	ch := make(chan string, 1)
 	a.eventsMu.Lock()
-	if a.events[userID] == nil { a.events[userID] = map[chan struct{}]bool{} }
+	if a.events[userID] == nil { a.events[userID] = map[chan string]bool{} }
 	a.events[userID][ch] = true
 	a.eventsMu.Unlock()
 	return ch, func() {
@@ -23,15 +23,21 @@ func (a *App) subscribe(userID string) (<-chan struct{}, func()) {
 }
 
 func (a *App) notify(userID string) {
+	a.notifyTopic(userID, "all")
+}
+
+func (a *App) notifyTopic(userID, topic string) {
 	a.eventsMu.Lock()
 	defer a.eventsMu.Unlock()
-	for ch := range a.events[userID] { select { case ch <- struct{}{}: default: } }
+	for ch := range a.events[userID] {
+		select { case ch <- topic: default: select { case previous := <-ch: if previous != topic { topic = "all" }; default: }; select { case ch <- topic: default: } }
+	}
 }
 
 func (a *App) notifyCatalog() {
 	a.eventsMu.Lock()
 	defer a.eventsMu.Unlock()
-	for _, subscribers := range a.events { for ch := range subscribers { select { case ch <- struct{}{}: default: } } }
+	for _, subscribers := range a.events { for ch := range subscribers { select { case <-ch: default: }; select { case ch <- "all": default: } } }
 }
 
 func writeEvent(c *gin.Context, name string, value any) error {
@@ -56,9 +62,9 @@ func (a *App) userEvents(c *gin.Context) {
 	for {
 		select {
 		case <-c.Request.Context().Done(): return
-		case <-updates:
+		case topic := <-updates:
 			if !a.sessionValid(c) { return }
-			if writeEvent(c, "changed", map[string]bool{"refresh": true}) != nil { return }
+			if writeEvent(c, "changed", map[string]any{"refresh": true, "topic": topic}) != nil { return }
 		}
 	}
 }

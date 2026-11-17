@@ -1,0 +1,71 @@
+[
+  {
+    "key": "voice",
+    "label": "音色编号",
+    "type": "text",
+    "required": true,
+    "default": "coral",
+    "labelEn": "Voice ID"
+  },
+  {
+    "key": "response_format",
+    "label": "音频格式",
+    "type": "select",
+    "default": "mp3",
+    "required": true,
+    "options": [
+      {
+        "label": "mp3",
+        "value": "mp3"
+      },
+      {
+        "label": "opus",
+        "value": "opus"
+      },
+      {
+        "label": "aac",
+        "value": "aac"
+      },
+      {
+        "label": "flac",
+        "value": "flac"
+      },
+      {
+        "label": "wav",
+        "value": "wav"
+      },
+      {
+        "label": "pcm",
+        "value": "pcm"
+      }
+    ],
+    "labelEn": "Audio format"
+  },
+  {
+    "key": "speed",
+    "label": "语速",
+    "type": "number",
+    "default": 1,
+    "min": 0.25,
+    "max": 4,
+    "labelEn": "Speed"
+  },
+  {
+    "key": "instructions",
+    "label": "语音指令",
+    "type": "textarea",
+    "maxLength": 4096,
+    "labelEn": "Instructions"
+  },
+  {
+    "key": "references_audio",
+    "label": "参考音频",
+    "type": "reference",
+    "role": "audio",
+    "transport": "file",
+    "maxCount": 1,
+    "description": "使用资产已关联的渠道音色编号；不上传原音频",
+    "labelEn": "Audio",
+    "descriptionEn": "Uses the registered channel voice ID"
+  }
+]

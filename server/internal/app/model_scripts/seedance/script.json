@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "Seedance Video",
+  "capability": "video",
+  "description": "Seedance 1.0 文生与首尾帧模板；内置只读，其他模型按官方要求配置 / Seedance 1.0 text and keyframe template; view and use only",
+  "entry": "adapter.js",
+  "inputs": "inputs.json",
+  "phases": [
+    "validate",
+    "submit",
+    "query",
+    "result"
+  ],
+  "features": {
+    "tools": false,
+    "streaming": false
+  },
+  "auth": {
+    "type": "bearer"
+  }
+}

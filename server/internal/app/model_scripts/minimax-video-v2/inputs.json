@@ -1,0 +1,222 @@
+[
+  {
+    "key": "mode",
+    "label": "生成模式",
+    "type": "select",
+    "default": "text",
+    "required": true,
+    "options": [
+      {
+        "label": "文生视频",
+        "value": "text",
+        "labelEn": "Text to video"
+      },
+      {
+        "label": "首尾帧",
+        "value": "keyframe",
+        "labelEn": "Keyframes"
+      },
+      {
+        "label": "多模态参考",
+        "value": "reference",
+        "labelEn": "References"
+      }
+    ],
+    "labelEn": "Mode"
+  },
+  {
+    "key": "resolution",
+    "label": "分辨率",
+    "type": "select",
+    "default": "768P",
+    "required": true,
+    "options": [
+      {
+        "label": "768P",
+        "value": "768P"
+      },
+      {
+        "label": "2K",
+        "value": "2K"
+      }
+    ],
+    "labelEn": "Resolution"
+  },
+  {
+    "key": "ratio",
+    "label": "比例",
+    "type": "select",
+    "default": "16:9",
+    "required": true,
+    "options": [
+      {
+        "label": "16:9",
+        "value": "16:9"
+      },
+      {
+        "label": "9:16",
+        "value": "9:16"
+      },
+      {
+        "label": "1:1",
+        "value": "1:1"
+      },
+      {
+        "label": "4:3",
+        "value": "4:3"
+      },
+      {
+        "label": "3:4",
+        "value": "3:4"
+      },
+      {
+        "label": "21:9",
+        "value": "21:9"
+      },
+      {
+        "label": "adaptive",
+        "value": "adaptive"
+      }
+    ],
+    "labelEn": "Ratio"
+  },
+  {
+    "key": "duration",
+    "label": "时长（秒）",
+    "type": "number",
+    "default": 6,
+    "min": 4,
+    "max": 15,
+    "step": 1,
+    "labelEn": "Duration (seconds)"
+  },
+  {
+    "key": "references_image",
+    "label": "参考图片",
+    "type": "reference",
+    "role": "image",
+    "transport": "https",
+    "maxCount": 9,
+    "mimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif"
+    ],
+    "maxBytes": 30000000,
+    "minWidth": 256,
+    "maxWidth": 5760,
+    "minHeight": 256,
+    "maxHeight": 5760,
+    "labelEn": "Images",
+    "when": {
+      "key": "mode",
+      "values": [
+        "reference"
+      ]
+    }
+  },
+  {
+    "key": "references_video",
+    "label": "参考视频",
+    "type": "reference",
+    "role": "video",
+    "transport": "https",
+    "maxCount": 3,
+    "mimeTypes": [
+      "video/mp4",
+      "video/quicktime"
+    ],
+    "maxBytes": 50000000,
+    "minWidth": 256,
+    "maxWidth": 5760,
+    "minHeight": 256,
+    "maxHeight": 5760,
+    "minDurationMs": 2000,
+    "maxDurationMs": 15000,
+    "labelEn": "Videos",
+    "when": {
+      "key": "mode",
+      "values": [
+        "reference"
+      ]
+    }
+  },
+  {
+    "key": "references_audio",
+    "label": "参考音频",
+    "type": "reference",
+    "role": "audio",
+    "transport": "https",
+    "maxCount": 3,
+    "mimeTypes": [
+      "audio/mpeg",
+      "audio/wav",
+      "audio/x-wav"
+    ],
+    "maxBytes": 15000000,
+    "minDurationMs": 2000,
+    "maxDurationMs": 15000,
+    "labelEn": "Audio",
+    "when": {
+      "key": "mode",
+      "values": [
+        "reference"
+      ]
+    }
+  },
+  {
+    "key": "first_frame",
+    "label": "首帧",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "mimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif"
+    ],
+    "maxBytes": 30000000,
+    "minWidth": 256,
+    "maxWidth": 5760,
+    "minHeight": 256,
+    "maxHeight": 5760,
+    "labelEn": "First frame",
+    "when": {
+      "key": "mode",
+      "values": [
+        "keyframe"
+      ]
+    },
+    "required": true
+  },
+  {
+    "key": "last_frame",
+    "label": "尾帧",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "mimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif"
+    ],
+    "maxBytes": 30000000,
+    "minWidth": 256,
+    "maxWidth": 5760,
+    "minHeight": 256,
+    "maxHeight": 5760,
+    "labelEn": "Last frame",
+    "when": {
+      "key": "mode",
+      "values": [
+        "keyframe"
+      ]
+    }
+  }
+]

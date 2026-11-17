@@ -1,6 +1,7 @@
 import appI18n from "@/i18n";
 import { Copy, Download, PencilLine, Trash2, Upload, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
 import { Checkbox } from "@/components/ui/controls";
 import { useFeedback } from "@/hooks/use-feedback";
@@ -21,14 +22,16 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { useDiscardChanges } from "@/hooks/use-discard-changes";
 import { formatBytes } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
-import { retryAssetCleanup } from "@/services/api/assets";
+import { retryAssetCleanup, retryAssetSync, listAssetVoices, saveAssetVoice } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
+import { useConfigStore } from "@/stores/use-config-store";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -489,6 +492,8 @@ function AssetCard({ asset, selected, selectionDisabled, onSelect, onOpen, onEdi
 
 function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void }) {
     const { t } = useTranslation();
+    const { notify } = useFeedback();
+    const [syncing, setSyncing] = useState(false);
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     return (
@@ -512,6 +517,8 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         </div>
                     </div>
                     <p className="text-sm text-muted-foreground">{t("workspace.fileSave")}：{asset.saveState === "saved" ? appI18n.t("workspace.saved") : asset.saveState === "saving" ? appI18n.t("workspace.savingFile") : appI18n.t("workspace.saveFileFailed")} · {t("workspace.cloudSync")}：{asset.syncState === "synced" ? appI18n.t("workspace.synced") : asset.syncState === "syncing" ? appI18n.t("workspace.syncing") : asset.syncState === "failed" ? appI18n.t("workspace.syncFailed") : appI18n.t("workspace.local")}{asset.error ? ` · ${asset.error}` : ""}</p>
+                    {asset.kind !== "text" && asset.saveState === "saved" && asset.syncState !== "synced" ? <Button variant="ghost" loading={syncing} onClick={async () => { setSyncing(true); try { await retryAssetSync(asset.id); await useAssetStore.getState().loadAssets(); notify.success(t("storage.syncQueued")); } catch (error) { notify.error(error instanceof Error ? error.message : t("workspace.operationFailed")); } finally { setSyncing(false); } }}>{t("storage.retrySync")}</Button> : null}
+                    {asset.kind === "audio" ? <AssetVoiceForm key={asset.id} assetId={asset.id} /> : null}
                     <div className="rounded-lg border border-border p-4 ">
                         <span data-secondary className="block text-xs">
                             {asset.kind === "text" ? t("assets.fields.textContent") : t(`assets.kinds.${asset.kind}`)}
@@ -550,6 +557,26 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
             ) : null}
         </Sheet>
     );
+}
+
+function AssetVoiceForm({ assetId }: { assetId: string }) {
+    const { t } = useTranslation();
+    const channels = useConfigStore((state) => state.config.channels);
+    const query = useQuery({ queryKey: ["asset-voices", assetId], queryFn: () => listAssetVoices(assetId) });
+    const [channelId, setChannelId] = useState("");
+    const form = useEditorForm();
+    const changeChannel = useDiscardChanges(form.formState.isDirty, (id: string) => { setChannelId(id); const row = query.data?.find((voice) => voice.channelId === id); form.reset({ voiceId: row?.voiceId || "" }); });
+    const row = query.data?.find((voice) => voice.channelId === channelId);
+    return <section className="space-y-3">
+        <h3 className="text-sm font-medium">{t("execution.voiceAssociation")}</h3>
+        <p className="text-xs text-muted-foreground">{t("execution.voiceAssociationHint")}</p>
+        {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
+        <Choice aria-label={t("workspace.channelModel")} disabled={form.formState.isSubmitting} value={channelId || undefined} options={channels.filter((channel) => channel.models.some((model) => model.capability === "audio")).map((channel) => ({ value: channel.id, label: channel.name }))} onChange={changeChannel} />
+        {channelId && query.data ? <EditorForm form={form} onSubmit={async (values) => { const assertSession = captureSession(); await saveAssetVoice(assetId, channelId, values.voiceId, row?.version || 0); assertSession(); form.reset(values); await query.refetch(); }}>
+            <Field name="voiceId" label={t("execution.voiceId")} schema={z.string().trim().min(1)}><Input /></Field>
+            <Button type="submit">{t("workspace.save")}</Button>
+        </EditorForm> : null}
+    </section>;
 }
 
 async function readAssetMediaBlob(asset: Exclude<Asset, { kind: "text" }>) {

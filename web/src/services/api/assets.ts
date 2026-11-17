@@ -3,7 +3,7 @@ import { apiRequest, captureSession, jsonRequest } from "./client";
 
 export type ServerAsset = {
     id: string; kind: "text" | "image" | "video" | "audio"; title: string; mimeType: string; bytes: number; width: number; height: number;
-    saveState: string; syncState: string; deleteState: string; error?: string; storageId?: string; metadata: Record<string, unknown>;
+    saveState: string; syncState: string; deleteState: string; error?: string; storageId?: string; metadata: Record<string, unknown>; durationMs: number; probeError?: string; previewError?: string;
     createdAt: string; updatedAt: string;
 };
 export const assetUrl = (id: string) => `/api/assets/${encodeURIComponent(id)}/file`;
@@ -11,10 +11,14 @@ export const assetId = (key = "") => key.startsWith("asset:") ? key.slice(6) : /
 export const listAssets = () => apiRequest<ServerAsset[]>("/assets");
 export const listDeletingAssets = () => apiRequest<ServerAsset[]>("/assets?deleting=true");
 export const retryAssetCleanup = (id: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/cleanup`, { method: "POST" });
+export const retryAssetSync = (id: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/sync`, { method: "POST" });
 export const getAsset = (id: string) => apiRequest<ServerAsset>(`/assets/${encodeURIComponent(id)}`);
 export const uploadAsset = (blob: Blob, title = i18n.t("errors.untitledAsset"), signal?: AbortSignal) => apiRequest<ServerAsset>("/assets", { method: "POST", body: blob, signal, headers: { "Content-Type": blob.type || "application/octet-stream", "X-File-Name": encodeURIComponent(title) } });
 export const updateAsset = (id: string, title: string, metadata: Record<string, unknown>) => apiRequest<void>(`/assets/${encodeURIComponent(id)}`, jsonRequest("PATCH", { title, metadata }));
 export const createTextAsset = (title: string, metadata: Record<string, unknown>) => apiRequest<ServerAsset>("/assets/text", jsonRequest("POST", { title, metadata }));
+export type AssetVoice = { assetId: string; channelId: string; voiceId: string; version: number };
+export const listAssetVoices = (id: string) => apiRequest<AssetVoice[]>(`/assets/${encodeURIComponent(id)}/voices`);
+export const saveAssetVoice = (id: string, channelId: string, voiceId: string, version: number) => apiRequest<AssetVoice>(`/assets/${encodeURIComponent(id)}/voices/${encodeURIComponent(channelId)}`, jsonRequest("PUT", { voiceId, version }));
 
 export async function assetBlob(id: string, signal?: AbortSignal) {
     const assertSession = captureSession();

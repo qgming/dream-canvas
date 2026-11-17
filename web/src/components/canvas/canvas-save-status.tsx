@@ -16,6 +16,7 @@ export function CanvasSaveStatus() {
     if ((!state || state.status === "saved") && !remote) return null;
     if ((!state || state.status === "saved") && remote) return <div role="status" className="absolute inset-x-4 bottom-40 z-50 mx-auto flex w-fit max-w-[calc(100%-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 text-sm text-popover-foreground shadow-sm" data-canvas-shortcuts-ignore><span>{remote < 0 ? appI18n.t("workspace.remoteProjectDeleted") : appI18n.t("workspace.remoteProjectUpdated")}</span><Button variant="ghost" size="sm" onClick={() => window.location.reload()}>{appI18n.t("workspace.reload")}</Button></div>;
     if (!state) return null;
+    if (state.status === "draft") return <span className="pointer-events-none absolute right-6 top-14 z-30 text-xs text-muted-foreground">{state.message}</span>;
     if (state.status === "saving") return <span className="pointer-events-none absolute right-6 top-14 z-30 text-xs text-muted-foreground">{appI18n.t("workspace.saving")}</span>;
     const act = async (action: () => Promise<unknown>) => { try { await action(); } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.operationFailed")); } };
     return (

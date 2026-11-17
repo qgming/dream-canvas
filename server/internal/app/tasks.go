@@ -2,11 +2,15 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+type assetInput struct { AssetID string `json:"assetId"`; Role string `json:"role"`; VoiceID string `json:"voiceId,omitempty"` }
 
 type generationInput struct {
 	ChannelID string `json:"channelId"`
@@ -15,26 +19,63 @@ type generationInput struct {
 	ProjectID string `json:"projectId"`
 	NodeID string `json:"nodeId"`
 	ProjectVersion uint64 `json:"projectVersion"`
+	ResultSlotID string `json:"resultSlotId,omitempty"`
+	BatchID string `json:"batchId,omitempty"`
 	Prompt string `json:"prompt"`
 	Messages JSON `json:"messages"`
 	Parameters JSON `json:"parameters"`
-	References []struct { AssetID string `json:"assetId"`; Role string `json:"role"` } `json:"references"`
+	References []assetInput `json:"references"`
 }
-
-func executionUnavailable() error { return problem(503, "execution_not_configured", "服务端生成执行尚未启用：运行超时、查询与重试边界待确认，供应商适配和调度尚待完成；本次未提交上游，也未产生供应商费用") }
 
 func (a *App) createTask(c *gin.Context) {
 	var input generationInput
 	if !bind(c, &input) { return }
-	if _, err := a.generationSnapshot(currentUser(c).ID, &input); err != nil { respondError(c, err); return }
-	// Never accept a paid task until the execution policy and adapter are available.
-	respondError(c, executionUnavailable())
+	task, err := a.CreateTask(currentUser(c).ID, input)
+	if err != nil { respondError(c, err); return }
+	c.JSON(202, task)
+}
+
+func (a *App) CreateTask(userID string, input generationInput) (GenerationTask, error) {
+	if input.BatchID == "" { input.BatchID = identifier() }
+	policy, err := a.requireExecution()
+	if err != nil { return GenerationTask{}, err }
+	snapshot, err := a.generationSnapshot(userID, &input)
+	if err != nil { return GenerationTask{}, err }
+	var selected executionSnapshot
+	if err := json.Unmarshal(snapshot, &selected); err != nil { return GenerationTask{}, err }
+	selected.Policy = policy
+	
+	if err := a.validateReferenceMedia(selected, input, userID); err != nil { return GenerationTask{}, err }
+	if err := a.validateScriptInput(userID, selected, input); err != nil { return GenerationTask{}, err }
+	task := GenerationTask{ID: identifier(), UserID: userID, ProjectID: input.ProjectID, NodeID: input.NodeID, ProjectVersion: input.ProjectVersion, ChannelID: input.ChannelID, ModelID: input.ModelID, Capability: input.Capability, Snapshot: encode(selected), Input: encode(input), Status: "queued", AssetIDs: JSON(`[]`), UsageState: "unknown"}
+	err = a.db.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.First(&user, "id = ? AND disabled = ?", userID, false).Error; err != nil { return err }
+		if input.ProjectID != "" {
+			var project Project; if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
+			if !onlyTaskUpdates(tx, project.ID, input.BatchID, input.ProjectVersion, project.Version) { return problem(409, "version_conflict", "项目已更新，请重新读取后提交") }
+			if input.NodeID != "" {
+				var document struct { Nodes []json.RawMessage `json:"nodes"` }; if err := json.Unmarshal(project.Document, &document); err != nil { return err }
+				for _, raw := range document.Nodes { var node struct { ID string `json:"id"` }; if err := json.Unmarshal(raw, &node); err != nil { return err }; if node.ID == input.NodeID { task.TargetNode = raw; break } }
+				if len(task.TargetNode) == 0 { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
+			}
+		}
+		for _, reference := range input.References {
+			var asset Asset
+			if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(400, "invalid_asset", "素材已删除或尚未可靠保存") }
+			if err := tx.FirstOrCreate(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err }
+		}
+		return tx.Create(&task).Error
+	})
+	if err != nil { return task, err }
+	a.notify(userID); a.signalWork()
+	return task, nil
 }
 
 func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, error) {
 	var channel Channel
 	var model ChannelModel
-	var script *InterfaceVersion
+	var script *ScriptVersion
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&channel, "id = ? AND enabled = ?", input.ChannelID, true).Error; err != nil { return err }
 		if err := tx.First(&model, "id = ? AND channel_id = ? AND enabled = ?", input.ModelID, channel.ID, true).Error; err != nil { return err }
@@ -42,13 +83,20 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		if input.ProjectID != "" {
 			var project Project
 			if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
-			if project.Version != input.ProjectVersion { return problem(409, "version_conflict", "目标项目已更新，请重新读取后提交") }
+			if !onlyTaskUpdates(tx, project.ID, input.BatchID, input.ProjectVersion, project.Version) { return problem(409, "version_conflict", "目标项目已更新，请重新读取后提交") }
 			if input.NodeID != "" {
 				var document struct { Nodes []struct { ID string `json:"id"` } `json:"nodes"` }
 				if json.Unmarshal(project.Document, &document) != nil { return problem(409, "invalid_document", "目标项目内容无法读取") }
 				found := false
 				for _, node := range document.Nodes { if node.ID == input.NodeID { found = true; break } }
 				if !found { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
+				if input.ResultSlotID != "" {
+					var value map[string]any; _ = json.Unmarshal(project.Document, &value)
+					key := "images"; if input.Capability == "text" { key = "texts" } else if input.Capability != "image" { return problem(400, "invalid_slot", "仅图片和文本支持结果位置") }
+					found := false
+					for _, raw := range array(value["nodes"]) { node := object(raw); if node["id"] == input.NodeID { for _, slot := range array(object(node["metadata"])[key]) { if object(slot)["id"] == input.ResultSlotID { found = true } } } }
+					if !found { return problem(409, "result_slot_missing", "结果位置尚未保存，请先完成项目保存") }
+				}
 			}
 		}
 		if input.NodeID != "" && input.ProjectID == "" { return problem(400, "project_required", "节点任务需要明确目标项目") }
@@ -58,32 +106,23 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		if len(input.Messages) > 0 {
 			if err := validateGenerationMessages(*input); err != nil { return err }
 		}
-		for _, reference := range input.References {
-			var asset Asset
-			if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(400, "invalid_asset", "参考素材不存在、已删除或尚未保存") }
-			if asset.Kind != reference.Role { return problem(400, "invalid_asset_role", "参考素材类型不匹配") }
-		}
-		if model.Protocol == "custom" {
-			if model.PublishedVersionID == "" { return problem(400, "interface_unpublished", "自定义接口尚未发布") }
-			script = &InterfaceVersion{}
-			if err := tx.First(script, "id = ? AND model_id = ?", model.PublishedVersionID, model.ID).Error; err != nil { return err }
-		}
+		if model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "接口脚本尚未发布") }
+		script = &ScriptVersion{}
+		if err := tx.First(script, "id = ? AND adapter_id = ?", model.AdapterVersionID, model.AdapterID).Error; err != nil { return err }
+		if err := hydrateModel(tx, &model); err != nil { return err }
 		definitions := model.Parameters
-		if script != nil { definitions = script.Parameters }
 		var controls []parameterControl
 		if json.Unmarshal(definitions, &controls) != nil { return problem(409, "invalid_parameters", "模型参数定义无法读取，请联系管理员") }
+		resolved, err := savedModelParameters(tx, userID, model, parameters); if err != nil { return err }; parameters = resolved
 		for _, control := range controls {
-			value, exists := parameters[control.Key]
-			if !exists && control.Default != nil { value, exists = control.Default, true; parameters[control.Key] = value }
-			if !exists || value == nil { if control.Required { return problem(400, "parameter_required", "请填写参数「"+control.Label+"」") }; continue }
-			if err := validateParameterValue(control, value); err != nil { return err }
-			if text, ok := value.(string); ok && strings.TrimSpace(text) == "" { if control.Required { return problem(400, "parameter_required", "请填写参数「"+control.Label+"」") }; continue }
-			if control.Type == "asset" {
+			value := parameters[control.Key]
+			if control.Type == "asset" && value != nil && value != "" {
 				found := false
 				for _, reference := range input.References { if reference.AssetID == value && reference.Role == control.Role { found = true; break } }
-				if !found { return problem(400, "invalid_parameter_asset", "参数「"+control.Label+"」需要已保存且类型正确的参考素材") }
+				if !found { input.References = append(input.References, assetInput{AssetID: text(value), Role: control.Role}) }
 			}
 		}
+		if err := snapshotAssetInputs(tx, userID, channel.ID, input.References); err != nil { return err }
 		encoded, err := json.Marshal(parameters)
 		if err != nil { return err }
 		input.Parameters = encoded
@@ -91,6 +130,17 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 	})
 	if err != nil { return nil, err }
 	return json.Marshal(map[string]any{"channelId": channel.ID, "channelVersion": channel.Version, "baseUrl": channel.BaseURL, "credential": channel.Secret, "model": model, "script": script})
+}
+
+func snapshotAssetInputs(tx *gorm.DB, userID, channelID string, references []assetInput) error {
+	for index, reference := range references {
+		var asset Asset
+		if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(400, "invalid_asset", "参考素材不存在、已删除或尚未保存") }
+		if asset.Kind != reference.Role { return problem(400, "invalid_asset_role", "参考素材类型不匹配") }
+		references[index].VoiceID = ""
+		if asset.Kind == "audio" { var voice AssetVoice; err := tx.First(&voice, "asset_id = ? AND channel_id = ? AND user_id = ?", asset.ID, channelID, userID).Error; if err == nil { references[index].VoiceID = voice.VoiceID } else if !errors.Is(err, gorm.ErrRecordNotFound) { return err } }
+	}
+	return nil
 }
 
 func validateGenerationMessages(input generationInput) error {
@@ -136,18 +186,51 @@ func (a *App) getTask(c *gin.Context) {
 func terminalTask(status string) bool { return includes([]string{"succeeded", "failed", "cancelled", "interrupted"}, status) }
 
 func (a *App) cancelTask(c *gin.Context) {
+	task, err := a.CancelTask(currentUser(c).ID, c.Param("id"))
+	if err != nil { respondError(c, err); return }
+	c.JSON(200, task)
+}
+
+func (a *App) CancelTask(userID, id string) (GenerationTask, error) {
 	var task GenerationTask
 	err := a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&task, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { return err }
+		if err := tx.First(&task, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
 		if terminalTask(task.Status) { return nil }
-		if task.Status != "queued" && task.Status != "waiting_assets" { return problem(409, "cancellation_unavailable", "任务已提交或结果不确定，供应商取消与结果核对尚未接入，不能宣称取消成功") }
-		if err := tx.Model(&task).Updates(map[string]any{"status": "cancelled", "cancel_requested": true}).Error; err != nil { return err }
+		if task.Status != "queued" && task.Status != "waiting_assets" {
+			message := "已记录取消意愿；供应商未确认取消，仍会核对实际结果与用量，并保存最终成品"
+			return tx.Model(&task).Updates(map[string]any{"cancel_requested": true, "cancel_error": message}).Error
+		}
+		task.Status, task.Error = "cancelled", "任务已在提交供应商前取消"
+		if err := tx.Transaction(func(inner *gorm.DB) error { return a.applyTaskResultTx(inner, task, nil, task.Text) }); err != nil {
+			var p *Problem; if !errors.As(err, &p) { return err }
+			if err := tx.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("apply_error", p.Message).Error; err != nil { return err }
+		}
+		if err := tx.Model(&task).Updates(map[string]any{"status": "cancelled", "cancel_requested": true, "error": task.Error, "response_cleanup_pending": true}).Error; err != nil { return err }
 		if err := tx.Model(&TaskAsset{}).Where("task_id = ?", task.ID).Update("released", true).Error; err != nil { return err }
 		return tx.First(&task, "id = ?", task.ID).Error
 	})
-	if err != nil { respondError(c, err); return }
-	a.notify(currentUser(c).ID)
-	c.JSON(200, task)
+	if err == nil { a.notify(userID); a.signalWork() }
+	if err == nil { err = a.db.First(&task, "id = ?", task.ID).Error }
+	return task, err
+}
+
+func (a *App) resumeTask(c *gin.Context) {
+	task, err := a.ResumeTask(currentUser(c).ID, c.Param("id"))
+	if err != nil { respondError(c, err); return }; c.JSON(202, task)
+}
+
+func (a *App) ResumeTask(userID, id string) (GenerationTask, error) {
+	var task GenerationTask
+	if err := a.db.First(&task, "id = ? AND user_id = ?", id, userID).Error; err != nil { return task, err }
+	if task.Status != "confirmation_required" { return task, problem(409, "resume_unavailable", "仅待确认任务可继续核对") }
+	if err := a.recoverTaskResponse(&task); err != nil { return task, err }
+	status := "running"
+	var result providerResult
+	if json.Unmarshal(task.Result, &result) == nil && (includes([]string{"completed", "incomplete", "failed", "cancelled"}, result.Status) || result.URL != "" || result.ResponseFile != "") { status = "saving" } else if task.UpstreamID == "" && task.RawResponseFile == "" { return task, problem(409, "no_recovery_basis", "没有可查询的上游编号或已保存结果，不能重新提交；请核对供应商账单") }
+	update := a.db.Model(&GenerationTask{}).Where("id = ? AND status = ?", task.ID, "confirmation_required").Updates(map[string]any{"status": status, "query_failures": 0, "transfer_attempts": 0, "started_at": time.Now(), "next_run_at": time.Now(), "error": ""})
+	if update.Error != nil { return task, update.Error }; if update.RowsAffected != 1 { return task, problem(409, "task_changed", "任务状态已改变，请重新读取") }
+	if err := a.db.First(&task, "id = ?", task.ID).Error; err != nil { return task, err }
+	a.notify(task.UserID); a.signalWork(); return task, nil
 }
 
 func (a *App) taskEvents(c *gin.Context) {

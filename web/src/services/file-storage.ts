@@ -21,9 +21,11 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     if ((prefix === "video" || prefix === "audio") && asset.kind !== prefix) throw new Error(i18n.t("errors.mediaTypeMismatch"));
     assertSession();
     const url = assetUrl(asset.id);
+    let meta: { width?: number; height?: number; durationMs?: number } = { width: asset.width || undefined, height: asset.height || undefined, durationMs: asset.durationMs || undefined };
+    if (asset.mimeType !== "audio/pcm" && (!asset.durationMs || asset.kind === "video" && (!asset.width || !asset.height))) {
     const element = document.createElement(asset.kind === "audio" ? "audio" : "video");
     element.preload = "metadata";
-    const meta = await new Promise<{ width?: number; height?: number; durationMs?: number }>((resolve) => {
+    const fallback = await new Promise<typeof meta>((resolve) => {
         const finish = () => {
             resolve({ ...(element instanceof HTMLVideoElement ? { width: element.videoWidth, height: element.videoHeight } : {}), durationMs: Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : undefined });
             element.onloadedmetadata = null;
@@ -35,6 +37,8 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
         element.onerror = finish;
         element.src = url;
     });
+    meta = { width: meta.width || fallback.width, height: meta.height || fallback.height, durationMs: meta.durationMs || fallback.durationMs };
+    }
     assertSession();
     window.dispatchEvent(new Event("assets-changed"));
     return { url, storageKey: `asset:${asset.id}`, bytes: asset.bytes, mimeType: asset.mimeType, ...meta };

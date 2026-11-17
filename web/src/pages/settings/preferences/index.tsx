@@ -1,21 +1,19 @@
 import appI18n from "@/i18n";
 import { PageHeader } from "@/components/layout/page-header";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 import { Notice as Alert } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { EditorForm, Field } from "@/components/ui/form";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
-import { videoResolutionOptions } from "@/components/video-settings-panel";
-import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaScaleOptions, parseVideoResolution } from "@/lib/media-size";
-import { useConfigStore } from "@/stores/use-config-store";
+import { ModelParameters } from "@/components/model-parameters";
+import { channelModelId, useConfigStore } from "@/stores/use-config-store";
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { captureSession } from "@/services/api/client";
 
@@ -39,7 +37,9 @@ export default function PreferencesPage() {
     const discard = useCallback(() => { void useConfigStore.getState().load(true); }, []);
     useEditGuard(dirty, discard);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const imageResolutionOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value.toUpperCase() }));
+    const [parameterModel, setParameterModel] = useState("");
+    const selectedModel = parameterModel || config.imageModel || config.textModel || config.videoModel || config.audioModel;
+    const selectedId = channelModelId(config, selectedModel);
     const reload = () => {
         const assertSession = captureSession();
         const read = async () => { try { assertSession(); await useConfigStore.getState().load(true); } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.readFailed")); } };
@@ -62,6 +62,17 @@ export default function PreferencesPage() {
                     </div>
                 </section>
                 <section>
+                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.modelParameters")}</h2>
+                    <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("config.preferences.modelParametersDescription")}</p>
+                    <Field layout="horizontal" label={t("workspace.channelModel")}>
+                        <ModelPicker config={config} value={selectedModel} onChange={setParameterModel} onMissingConfig={openModelSettings} fullWidth />
+                    </Field>
+                    {selectedId ? <div className="mt-3 max-w-xl space-y-3">
+                        <ModelParameters config={config} model={selectedModel} value={config.parameterDefaults[selectedId]} disabled={!hydrated || saving} defaultsOnly onChange={(value) => updateConfig("parameterDefaults", { ...config.parameterDefaults, [selectedId]: value })} />
+                        <Button variant="ghost" disabled={!Object.keys(config.parameterDefaults[selectedId] || {}).length} onClick={() => { const next = { ...config.parameterDefaults }; delete next[selectedId]; updateConfig("parameterDefaults", next); }}>{t("config.preferences.resetParameters")}</Button>
+                    </div> : null}
+                </section>
+                <section>
                     <h2 className="mb-2 text-base font-semibold">{t("config.preferences.generation")}</h2>
                     <div>
                         <Field layout="horizontal" label={t("config.preferences.canvasImageCount")} description={t("config.preferences.canvasImageCountDescription")}>
@@ -75,38 +86,6 @@ export default function PreferencesPage() {
                                 onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
                             />
                         </Field>
-                        <Field layout="horizontal" label={t("config.preferences.imageResolution")}>
-                            <Choice value={inferMediaScale(config.size)} options={imageResolutionOptions} onChange={(scale) => updateConfig("size", computeMediaSize(scale, inferMediaRatio(config.size)))} />
-                        </Field>
-                        <Field layout="horizontal" label={t("config.preferences.videoResolution")}>
-                            <Choice value={parseVideoResolution(config.vquality)} options={videoResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
-                        </Field>
-                    </div>
-                </section>
-                <section>
-                    <h2 className="mb-2 text-base font-semibold">{t("settings.audioDefaults")}</h2>
-                    <div>
-                        <Field layout="horizontal" label={t("config.preferences.audioVoice")}>
-                            <Choice value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
-                        </Field>
-                        <Field layout="horizontal" label={t("config.preferences.audioFormat")}>
-                            <Choice value={config.audioFormat} options={audioFormatOptions} onChange={(value) => updateConfig("audioFormat", value)} />
-                        </Field>
-                        <Field layout="horizontal" label={t("config.preferences.audioSpeed")}>
-                            <Input
-                                className="w-24 text-right tabular-nums"
-                                type="number"
-                                min={0.25}
-                                max={4}
-                                step={0.05}
-                                value={config.audioSpeed}
-                                onChange={(event) => updateConfig("audioSpeed", event.target.value)}
-                                onBlur={(event) => updateConfig("audioSpeed", normalizeAudioSpeedValue(event.target.value))}
-                            />
-                        </Field>
-                        <Field layout="horizontal" className="@md/settings:items-start" label={t("config.preferences.audioInstructions")}>
-                            <Textarea rows={3} value={config.audioInstructions} placeholder={t("config.preferences.audioInstructionsPlaceholder")} onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
-                        </Field>
                     </div>
                 </section>
                 <section>
@@ -117,14 +96,6 @@ export default function PreferencesPage() {
                         </Field>
                         <Field layout="horizontal" label={t("config.preferences.autoFocusOnSelect")}>
                             <Switch checked={config.autoFocusOnSelect} onChange={(checked) => updateConfig("autoFocusOnSelect", checked)} />
-                        </Field>
-                    </div>
-                </section>
-                <section>
-                    <h2 className="mb-2 text-base font-semibold">{t("settings.promptDefaults")}</h2>
-                    <div className="pt-3">
-                        <Field label={t("config.preferences.systemPrompt")}>
-                            <Textarea rows={5} value={config.systemPrompt} placeholder={t("config.preferences.systemPromptPlaceholder")} onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
                         </Field>
                     </div>
                 </section>

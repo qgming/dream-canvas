@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "Agnes Image 2.5 Flash（自建示例 / Custom example）",
+  "capability": "image",
+  "description": "按 Agnes 图片协议适配尺寸、比例与 extra_body；仅供导入为自建脚本，未完成项目端到端验收。 / Custom Agnes image example; project end-to-end acceptance is pending.",
+  "entry": "adapter.js",
+  "inputs": "inputs.json",
+  "phases": [
+    "submit",
+    "result"
+  ],
+  "features": {
+    "tools": false,
+    "streaming": false
+  },
+  "auth": {
+    "type": "bearer"
+  }
+}

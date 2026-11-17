@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { CheckCheck, Cpu, Globe2, KeyRound, Radio, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
+import { ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Radio, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -18,10 +18,14 @@ export default function SettingsLayout() {
             { path: "/prompt-sources", label: "promptSources", icon: Radio },
             { path: "/access-tokens", label: "accessTokens", icon: KeyRound },
             { path: "/approvals", label: "approvals", icon: CheckCheck },
+            { path: "/usage", label: "usage", icon: ChartNoAxesCombined },
         ] },
         ...(admin ? [{ label: "settings.administration", items: [
             { path: "/users", label: "users", icon: UsersRound },
             { path: "/channels", label: "channels", icon: Cpu },
+            { path: "/model-scripts", label: "modelScripts", icon: Code2 },
+            { path: "/runtime", label: "runtime", icon: SlidersHorizontal },
+            { path: "/storage", label: "storage", icon: Database },
         ] }] : []),
     ];
 

@@ -152,20 +152,14 @@ export type GenerateOptions = {
     parameters?: Record<string, unknown>; // 渠道模型定义的参数值；资产值使用 asset:<id>
 };
 
-export type GenerateImageOptions = GenerateOptions & {
-    count?: number; // 期望生成张数，不符合模型要求时明确报错
-    size?: string; // 形如 "1024x1024" / "auto";缺省用宿主当前配置
-};
+export type GenerateImageOptions = GenerateOptions;
 
 export type GenerateImageResult = {
     // 当前账号可访问的稳定资产地址，可用于预览、纹理和节点保存。
     images: string[];
 };
 
-export type GenerateVideoOptions = GenerateOptions & {
-    size?: string;
-    seconds?: string;
-};
+export type GenerateVideoOptions = GenerateOptions;
 
 export type GenerateVideoResult = {
     url: string; // 视频可访问 URL
@@ -175,11 +169,8 @@ export type GenerateVideoResult = {
     durationMs?: number;
 };
 
-export type GenerateTextOptions = {
-    signal?: AbortSignal;
-    model?: string;
-    parameters?: Record<string, unknown>;
-    system?: string; // 附加系统提示词(拼在宿主系统提示之后)
+export type GenerateTextOptions = Omit<GenerateOptions, "references"> & {
+    system?: string; // 本次消息中的系统提示词
     onDelta?: (text: string) => void; // 流式增量回调
 };
 

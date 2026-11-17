@@ -12,19 +12,9 @@ export type AgentSkillReference = { name: string; path: string; displayName?: st
 export type AgentChatItem = { id: string; itemId?: string; clientMessageId?: string; threadId?: string; turnId?: string; role: AgentChatRole; title?: string; text: string; meta?: string; detail?: unknown; attachments?: AgentMessageAttachment[]; canvasReferences?: AgentCanvasReference[]; skill?: AgentSkillReference; streamId?: string; activityItems?: Record<string, string> };
 export type AgentEventLog = { id: string; time: string; title: string; text: string; raw?: unknown };
 export type AgentPendingToolCall = { requestId: string; name: string; input?: { ops?: CanvasAgentOp[]; path?: string } & Record<string, unknown> };
-export type AgentPermissionMode = "request" | "automatic" | "full";
-export type AgentReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-export type AgentModel = {
-    id: string;
-    model: string;
-    displayName: string;
-    defaultReasoningEffort: AgentReasoningEffort;
-    supportedReasoningEfforts: Array<{ reasoningEffort: AgentReasoningEffort; description?: string }>;
-    isDefault?: boolean;
-};
 export type AgentApprovalDecision = "accept" | "acceptForSession" | "decline";
 export type AgentPendingApproval = { requestId: string; method: string; threadId?: string; turnId?: string; itemId?: string; reason?: string; command?: unknown; cwd?: string; grantRoot?: string; networkApprovalContext?: unknown; permissions?: unknown; deciding?: AgentApprovalDecision };
-export type AgentCanvasContext = { snapshot: CanvasAgentSnapshot; applyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot; undoOps: () => CanvasAgentSnapshot | null; canUndo: boolean };
+export type AgentCanvasContext = { clientId: string; snapshot: CanvasAgentSnapshot; applyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot; undoOps: () => CanvasAgentSnapshot | null; canUndo: boolean };
 export type AgentThreadSummary = { id: string; preview: string; name?: string | null; cwd?: string; status?: string; source?: unknown; createdAt?: number; updatedAt?: number };
 export type AgentTokenUsage = { input: number; cached: number; output: number };
 export type AgentBootstrapStatus = { key: string; text: string; detail: string; status: "running" | "ready" | "error" };
@@ -45,12 +35,8 @@ type AgentStore = {
     panelMounted: boolean;
     panelClosing: boolean;
     canvasContext: AgentCanvasContext | null;
-    url: string;
-    token: string;
     connected: boolean;
     enabled: boolean;
-    silentConnect: boolean;
-    fragmentBootstrap: boolean;
     prompt: string;
     attachments: AgentAttachment[];
     canvasReferences: CanvasResourceReference[];
@@ -65,11 +51,8 @@ type AgentStore = {
     workspacePath: string;
     loadingThreads: boolean;
     activeTab: AgentPanelTab;
-    confirmTools: boolean;
-    permissionMode: AgentPermissionMode;
-    models: AgentModel[];
     model: string;
-    reasoningEffort: AgentReasoningEffort | "";
+    modelParameters: Record<string, Record<string, unknown>>;
     activity: string;
     conversation: AgentConversationState;
     bootstrapStatus: AgentBootstrapStatus | null;
@@ -97,12 +80,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     panelMounted: true,
     panelClosing: false,
     canvasContext: null,
-    url: "/api",
-    token: "",
     connected: false,
     enabled: false,
-    silentConnect: false,
-    fragmentBootstrap: false,
     prompt: "",
     attachments: [],
     canvasReferences: [],
@@ -117,11 +96,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     workspacePath: "",
     loadingThreads: false,
     activeTab: "chat",
-    confirmTools: false,
-    permissionMode: "request",
-    models: [],
     model: "",
-    reasoningEffort: "",
+    modelParameters: {},
     activity: i18n.t("agent.state.ready"),
     conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} },
     bootstrapStatus: null,

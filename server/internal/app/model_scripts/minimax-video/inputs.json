@@ -1,0 +1,76 @@
+[
+  {
+    "key": "mode",
+    "label": "生成模式",
+    "labelEn": "Mode",
+    "type": "select",
+    "default": "text",
+    "required": true,
+    "options": [
+      { "label": "文生视频", "labelEn": "Text to video", "value": "text" },
+      { "label": "首尾帧", "labelEn": "Keyframes", "value": "keyframe" }
+    ]
+  },
+  {
+    "key": "duration",
+    "label": "时长（秒）",
+    "type": "number",
+    "default": 6,
+    "min": 6,
+    "max": 10,
+    "step": 4,
+    "labelEn": "Duration (seconds)"
+  },
+  {
+    "key": "resolution",
+    "label": "分辨率",
+    "type": "select",
+    "default": "768P",
+    "required": true,
+    "options": [
+      {
+        "label": "768P",
+        "value": "768P"
+      },
+      {
+        "label": "1080P",
+        "value": "1080P"
+      }
+    ],
+    "labelEn": "Resolution"
+  },
+  {
+    "key": "first_frame",
+    "label": "首帧",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "required": true,
+    "when": { "key": "mode", "values": ["keyframe"] },
+    "mimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ],
+    "maxBytes": 20000000,
+    "labelEn": "First frame"
+  },
+  {
+    "key": "last_frame",
+    "label": "尾帧",
+    "labelEn": "Last frame",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "when": { "key": "mode", "values": ["keyframe"] },
+    "mimeTypes": ["image/jpeg", "image/png", "image/webp"],
+    "maxBytes": 20000000
+  },
+  {
+    "key": "prompt_optimizer",
+    "label": "优化提示词",
+    "labelEn": "Optimize prompt",
+    "type": "switch",
+    "advanced": true
+  }
+]

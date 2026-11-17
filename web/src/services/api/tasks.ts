@@ -1,18 +1,27 @@
 import i18n from "@/i18n";
 import { apiRequest, captureSession, jsonRequest } from "./client";
 import { assetId } from "./assets";
-import { decodeChannelModel, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { decodeChannelModel, resolveModelParameters, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import type { AiTextMessage } from "./image";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { inputLabel, inputVisible } from "@/lib/model-inputs";
 
-export type GenerationTask = { id: string; projectId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; error?: string; text: string; assetIds: string[]; upstreamId?: string; saveState: string; syncState: string; cancelRequested: boolean; createdAt: string; updatedAt: string };
+export type GenerationTask = { id: string; projectId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; error?: string; text: string; assetIds: string[]; upstreamId?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
 export class GenerationStateError extends Error {
     constructor(readonly status: string, message: string) { super(message); this.name = "GenerationStateError"; }
 }
-export type GenerationOptions = { signal?: AbortSignal; projectId?: string; nodeId?: string; projectVersion?: number };
+export type GenerationOptions = { signal?: AbortSignal; projectId?: string; nodeId?: string; projectVersion?: number; resultSlotId?: string; batchId?: string };
 type GenerationInput = { prompt?: string; messages?: AiTextMessage[]; references?: ReferenceImage[]; videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
+const submittedTasks = new WeakMap<AbortSignal, Set<string>>();
+const cancelledSignals = new WeakSet<AbortSignal>();
+export async function cancelGenerationsForSignal(signal: AbortSignal) {
+    cancelledSignals.add(signal);
+    await Promise.all([...(submittedTasks.get(signal) || [])].map(cancelGeneration));
+}
 export async function createGeneration(config: AiConfig, capability: ModelCapability, input: GenerationInput, options?: GenerationOptions) {
+    if (options?.signal?.aborted) throw new DOMException(i18n.t("errors.waitStopped"), "AbortError");
     const selected = config.model || (capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel);
     const decoded = decodeChannelModel(selected);
     const model = config.channels.find((channel) => channel.id === decoded?.channelId)?.models.find((model) => model.name === decoded?.model);
@@ -30,10 +39,14 @@ export async function createGeneration(config: AiConfig, capability: ModelCapabi
         if (!references.some((reference) => reference.assetId === id)) references.push({ assetId: id, role: "image" });
         return { type: "image_asset" as const, assetId: id };
     }) }));
-    const parameters: Record<string, unknown> = { quality: config.quality, size: config.size, count: config.count, background: config.background, reasoningEffort: config.reasoningEffort, seconds: config.videoSeconds, resolution: config.vquality, generateAudio: config.videoGenerateAudio, watermark: config.videoWatermark, mode: config.videoMode, voice: config.audioVoice, format: config.audioFormat, speed: config.audioSpeed, instructions: config.audioInstructions, systemPrompt: config.systemPrompt };
+    for (const key of Object.keys(config.modelParameters || {})) {
+        if (!model.parameters.some((control) => control.type !== "reference" && control.key === key)) throw new Error(i18n.t("errors.undeclaredParameter", { name: key }));
+    }
+    const parameters = resolveModelParameters(config, selected, config.modelParameters);
     for (const control of model.parameters) {
-        const value = config.modelParameters && Object.prototype.hasOwnProperty.call(config.modelParameters, control.key) ? config.modelParameters[control.key] : control.default;
-        if (value === undefined || value === null || (typeof value === "string" && !value.trim())) { if (control.required) throw new Error(i18n.t("errors.parameterRequired", { name: control.label })); parameters[control.key] = null; continue; }
+        if (control.type === "reference" || !inputVisible(control, parameters)) continue;
+        const value = parameters[control.key];
+        if (value === undefined || value === null || (typeof value === "string" && !value.trim())) { if (control.required) throw new Error(i18n.t("errors.parameterRequired", { name: inputLabel(control) })); parameters[control.key] = null; continue; }
         parameters[control.key] = value;
         if (control.type === "asset") {
             if (typeof value === "string" && value.startsWith("deleted-asset:")) throw new Error(i18n.t("errors.parameterAssetDeleted", { name: control.label }));
@@ -43,23 +56,44 @@ export async function createGeneration(config: AiConfig, capability: ModelCapabi
             if (!references.some((reference) => reference.assetId === id && reference.role === control.role)) references.push({ assetId: id, role: control.role });
         }
     }
-    return apiRequest<GenerationTask>("/tasks", { ...jsonRequest("POST", { channelId: decoded.channelId, modelId: model.id, capability, prompt: input.prompt, messages, references, parameters, projectId: options?.projectId, nodeId: options?.nodeId, projectVersion: options?.projectVersion }), signal: options?.signal });
+    // Complete the acceptance request even if the page leaves, so a returned task ID is retained.
+    const task = await apiRequest<GenerationTask>("/tasks", jsonRequest("POST", { channelId: decoded.channelId, modelId: model.id, capability, prompt: input.prompt, messages, references, parameters, projectId: options?.projectId, nodeId: options?.nodeId, projectVersion: options?.projectVersion, resultSlotId: options?.resultSlotId, batchId: options?.batchId }));
+    if (options?.signal) { const ids = submittedTasks.get(options.signal) || new Set<string>(); ids.add(task.id); submittedTasks.set(options.signal, ids); if (cancelledSignals.has(options.signal)) await cancelGeneration(task.id); }
+    return task;
 }
 export const getGeneration = (id: string, signal?: AbortSignal) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal });
 export const listGenerations = () => apiRequest<GenerationTask[]>("/tasks");
 export const cancelGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+export const resumeGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
 export async function waitForGeneration(task: GenerationTask, options?: GenerationOptions & { onText?: (text: string) => void }): Promise<GenerationTask> {
     const assertSession = captureSession();
     return new Promise((resolve, reject) => {
         let text = "";
         let source: EventSource | undefined;
+        let finishing = false;
         const stop = () => { source?.close(); options?.signal?.removeEventListener("abort", abort); };
         const abort = () => { stop(); reject(new DOMException(i18n.t("errors.waitStopped"), "AbortError")); };
         const receive = (record: GenerationTask) => {
             try { assertSession(); } catch (error) { stop(); reject(error); return true; }
             if (record.text !== text) { options?.onText?.(record.text); text = record.text; }
-            if (record.status === "succeeded") { stop(); resolve(record); return true; }
-            if (["failed", "cancelled", "interrupted", "confirmation_required"].includes(record.status)) { stop(); reject(new GenerationStateError(record.status, record.error || i18n.t("errors.taskNotCompleted"))); return true; }
+            if (record.status === "succeeded") {
+                if (finishing) return true;
+                finishing = true; stop();
+                void (async () => {
+                    if (record.projectId && record.nodeId) {
+                        if (!record.applied) throw new GenerationStateError("project_conflict", record.applyError || i18n.t("errors.projectVersionChanged"));
+                        await useCanvasStore.getState().acceptTaskVersion(record.id, record.projectId, record.nodeId);
+                    }
+                    assertSession(); resolve(record);
+                })().catch(reject);
+                return true;
+            }
+            if (["failed", "cancelled", "interrupted", "confirmation_required"].includes(record.status)) {
+                if (finishing) return true;
+                finishing = true; stop();
+                void (async () => { if (record.applied && record.projectId && record.nodeId) await useCanvasStore.getState().acceptTaskVersion(record.id, record.projectId, record.nodeId); throw new GenerationStateError(record.status, record.error || i18n.t("errors.taskNotCompleted")); })().catch(reject);
+                return true;
+            }
             return false;
         };
         if (options?.signal?.aborted) { abort(); return; }
@@ -67,6 +101,6 @@ export async function waitForGeneration(task: GenerationTask, options?: Generati
         options?.signal?.addEventListener("abort", abort, { once: true });
         source = new EventSource(`/api/tasks/${encodeURIComponent(task.id)}/events`);
         source.addEventListener("snapshot", (event) => { try { receive(JSON.parse((event as MessageEvent<string>).data) as GenerationTask); } catch { stop(); reject(new Error(i18n.t("errors.taskStateFailed"))); } });
-        source.onerror = () => { stop(); reject(new Error(i18n.t("errors.taskDisconnected"))); };
+        source.onerror = () => { if (source?.readyState === EventSource.CLOSED) { stop(); reject(new Error(i18n.t("errors.taskDisconnected"))); } };
     });
 }

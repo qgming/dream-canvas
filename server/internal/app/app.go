@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
@@ -23,11 +24,21 @@ import (
 type App struct {
 	db *gorm.DB
 	root string
-	transfers chan struct{}
-	previews chan struct{}
+	transfers *fileGate
+	previews *fileGate
 	credentials cipher.AEAD
 	eventsMu sync.Mutex
-	events map[string]map[chan struct{}]bool
+	events map[string]map[chan string]bool
+	assetFiles sync.RWMutex
+	ctx context.Context
+	stop context.CancelFunc
+	wake chan struct{}
+	workers sync.WaitGroup
+	workMu sync.Mutex
+	active map[string]context.CancelFunc
+	previewMu sync.Mutex
+	promptMu sync.Mutex
+	clients clientRegistry
 }
 
 type Problem struct { Status int; Code, Message string }
@@ -44,23 +55,31 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &InterfaceDraft{}, &InterfaceVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
-		if count > 0 { conn.Close(); return nil, errors.New("凭据加密密钥丢失，请恢复 data/credentials.key；不能生成新密钥覆盖现有配置") }
+		var storageCount, taskCount, turnCount int64
+		for _, check := range []struct{ Model any; Count *int64 }{{&ObjectStorage{}, &storageCount}, {&GenerationTask{}, &taskCount}, {&AssistantTurn{}, &turnCount}} { if err := db.Model(check.Model).Count(check.Count).Error; err != nil { conn.Close(); return nil, err } }
+		if count+storageCount+taskCount+turnCount > 0 { conn.Close(); return nil, errors.New("凭据加密密钥丢失，请恢复 data/credentials.key；不能生成新密钥覆盖现有配置和任务快照") }
 	}
 	credentials, err := openKey(root)
 	if err != nil { conn.Close(); return nil, err }
-	service := &App{db: db, root: root, transfers: make(chan struct{}, 1), previews: make(chan struct{}, 1), credentials: credentials, events: map[string]map[chan struct{}]bool{}}
+	ctx, stop := context.WithCancel(context.Background())
+	service := &App{db: db, root: root, transfers: newFileGate(), previews: newFileGate(), credentials: credentials, events: map[string]map[chan string]bool{}, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), active: map[string]context.CancelFunc{}}
+	service.clients.entries = map[string]onlineClient{}
+	if err := service.installBuiltinScripts(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := db.Model(&Asset{}).Where("save_state = ?", "saving").Updates(map[string]any{"save_state": "failed", "error": "服务在文件保存完成前停止，原件尚未可靠保留，请重新上传"}).Error; err != nil { conn.Close(); return nil, err }
 	var pending []Asset
 	if err := db.Where("delete_state = ?", "pending").Find(&pending).Error; err != nil { conn.Close(); return nil, err }
-	for _, asset := range pending { _ = service.cleanAsset(asset.ID) }
+	for _, asset := range pending { if err := db.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { stop(); conn.Close(); return nil, err } }
+	if err := service.recoverExecution(); err != nil { stop(); conn.Close(); return nil, err }
+	service.workers.Add(1)
+	go service.schedule()
 	return service, nil
 }
 
-func (a *App) Close() { if db, err := a.db.DB(); err == nil { db.Close() } }
+func (a *App) Close() { a.stop(); a.workers.Wait(); if db, err := a.db.DB(); err == nil { db.Close() } }
 
 func identifier() string {
 	value := make([]byte, 32)
@@ -80,7 +99,7 @@ func respondError(c *gin.Context, err error) {
 }
 
 func bind(c *gin.Context, target any) bool {
-	if err := c.ShouldBindJSON(target); err != nil { respondError(c, problem(400, "invalid_input", "请求内容不正确")); return false }
+	if err := c.ShouldBindJSON(target); err != nil { var limit *http.MaxBytesError; if errors.As(err, &limit) { respondError(c, problem(413, "request_too_large", "请求超过管理员配置的大小限制")) } else { respondError(c, problem(400, "invalid_input", "请求内容不正确")) }; return false }
 	return true
 }
 
@@ -91,6 +110,7 @@ func (a *App) Router(web string) *gin.Engine {
 	r := gin.New()
 	if err := r.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil { panic(err) }
 	r.Use(gin.Recovery(), func(c *gin.Context) {
+		if policy, err := a.executionPolicy(); err == nil && policy.JSONBytes > 0 && strings.Contains(c.GetHeader("Content-Type"), "application/json") { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.JSONBytes) }
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("Referrer-Policy", "same-origin")
 		c.Header("Cache-Control", "no-store")
@@ -121,6 +141,13 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/auth/password", a.changePassword)
 	authed.GET("/preferences/:name", a.getPreference)
 	authed.PUT("/preferences/:name", a.savePreference)
+	authed.GET("/prompts/sources/statuses", a.promptStatuses)
+	authed.GET("/prompts/sources/:id", a.getSourcePrompts)
+	authed.POST("/prompts/sources/:id/refresh", a.getSourcePrompts)
+	authed.POST("/clients", a.saveClient)
+	authed.DELETE("/clients/:id", a.removeClient)
+	authed.GET("/clients/:id/events", a.clientEvents)
+	authed.POST("/clients/:id/commands/:commandId", a.acknowledgeClient)
 	authed.GET("/workbench/:kind/records", a.listWorkbenchRecords)
 	authed.PUT("/workbench/:kind/records/:id", a.saveWorkbenchRecord)
 	authed.DELETE("/workbench/:kind/records/:id", a.deleteWorkbenchRecord)
@@ -134,13 +161,17 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.GET("/tasks/:id", a.getTask)
 	authed.GET("/tasks/:id/events", a.taskEvents)
 	authed.POST("/tasks/:id/cancel", a.cancelTask)
+	authed.POST("/tasks/:id/resume", a.resumeTask)
+	authed.POST("/tasks/:id/project-version", a.taskProjectVersion)
+	authed.GET("/usage", a.listUsage)
 	authed.GET("/assistant/threads", a.listAssistantThreads)
 	authed.POST("/assistant/threads", a.createAssistantThread)
 	authed.GET("/assistant/threads/:id", a.getAssistantThread)
 	authed.DELETE("/assistant/threads/:id", a.deleteAssistantThread)
 	authed.POST("/assistant/threads/:id/turns", a.startAssistantTurn)
 	authed.POST("/assistant/turns/:id/cancel", a.cancelAssistantTurn)
-	authed.POST("/assistant/skill-drafts", func(c *gin.Context) { respondError(c, executionUnavailable()) })
+	authed.POST("/assistant/skill-drafts", a.createSkillDraft)
+	authed.GET("/assistant/skill-drafts/:id", a.getSkillDraft)
 	authed.GET("/assistant/skills", a.listAssistantSkills)
 	authed.POST("/assistant/skills", a.saveAssistantSkill)
 	authed.GET("/assistant/skills/:name", a.getAssistantSkill)
@@ -154,10 +185,13 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/assets", a.uploadAsset)
 	authed.POST("/assets/text", a.createTextAsset)
 	authed.POST("/assets/:id/cleanup", a.retryAssetCleanup)
+	authed.POST("/assets/:id/sync", a.retryAssetSync)
 	authed.GET("/assets/:id", a.getAsset)
 	authed.GET("/assets/:id/file", a.assetFile)
 	authed.GET("/assets/:id/preview", a.assetPreview)
 	authed.PATCH("/assets/:id", a.updateAsset)
+	authed.GET("/assets/:id/voices", a.listAssetVoices)
+	authed.PUT("/assets/:id/voices/:channelId", a.saveAssetVoice)
 	authed.GET("/approvals", a.listApprovals)
 	authed.POST("/approvals", a.createApproval)
 	authed.POST("/approvals/:id/decision", a.decideApproval)
@@ -170,13 +204,32 @@ func (a *App) Router(web string) *gin.Engine {
 	admin.PATCH("/users/:id", a.updateUser)
 	admin.POST("/users/:id/password", a.resetPassword)
 	admin.GET("/channels", a.listChannels)
+	admin.GET("/channel-templates", a.listChannelTemplates)
+	admin.POST("/channel-templates/:template", a.installChannelTemplate)
+	admin.GET("/runtime", a.getRuntimeSettings)
+	admin.PUT("/runtime", a.saveRuntimeSettings)
+	admin.GET("/storages", a.listStorages)
+	admin.POST("/storages", a.saveStorage)
+	admin.PUT("/storages/:id", a.saveStorage)
+	admin.DELETE("/storages/:id", a.deleteStorage)
+	admin.GET("/usage", a.listUsage)
+	admin.POST("/usage/:id/corrections", a.correctUsage)
+	admin.GET("/usage/:id/corrections", a.usageCorrections)
 	admin.POST("/channels", a.saveChannel)
 	admin.PUT("/channels/:channelId", a.saveChannel)
 	admin.POST("/channels/:channelId/models", a.saveChannelModel)
 	admin.PUT("/channels/:channelId/models/:modelId", a.saveChannelModel)
-	admin.GET("/models/:modelId/interface", a.getInterface)
-	admin.PUT("/models/:modelId/interface", a.saveInterface)
-	admin.POST("/models/:modelId/interface/publish", a.publishInterface)
+    admin.POST("/channels/:channelId/models/batch", a.saveChannelModels)
+    admin.GET("/channels/:channelId/models/remote", a.discoverChannelModels)
+    admin.GET("/model-scripts", a.listModelScripts)
+    admin.GET("/model-script-contract", a.getModelScriptContract)
+    admin.POST("/model-scripts/check", a.checkModelScript)
+    admin.POST("/model-scripts", a.createModelScript)
+    admin.GET("/model-scripts/:adapterId", a.getModelScript)
+    admin.PUT("/model-scripts/:adapterId/draft", a.saveScriptDraft)
+    admin.POST("/model-scripts/:adapterId/publish", a.publishModelScript)
+    admin.POST("/model-scripts/:adapterId/test", a.testModelScript)
+    admin.GET("/model-scripts/:adapterId/evidence", a.getModelScriptEvidence)
 	root, err := filepath.Abs(web)
 	if err == nil {
 		r.NoRoute(func(c *gin.Context) {

@@ -22,6 +22,7 @@ export function EditorForm({ form: supplied, initialValues, onSubmit, children, 
     useEffect(() => { form.reset(initialValues || form.getValues()); }, []);
     return <FormProvider {...form}><form id={id} noValidate onSubmit={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         if (submitting.current) return;
         submitting.current = true;
         form.clearErrors("root");

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import i18n from "@/i18n";
 
-import { fetchCodexSkills, type AgentSkillDraft, type AgentSkillSummary } from "@/services/api/canvas-agent";
+import { fetchAssistantSkills, type AgentSkillDraft, type AgentSkillSummary } from "@/services/api/assistant-skills";
 import { useAgentStore } from "@/stores/use-agent-store";
 
 let loadSequence = 0;
@@ -17,7 +17,7 @@ type AgentSkillStore = {
     loading: boolean;
     loaded: boolean;
     errors: string[];
-    loadSkills: (endpoint: string, token: string, forceReload?: boolean) => Promise<void>;
+    loadSkills: () => Promise<void>;
     selectSkill: (skill: AgentSkillSummary | null, prompt?: string) => void;
     clearSelection: (expectedRevision?: number) => void;
     setDraft: (draft: AgentSkillDraft | null) => void;
@@ -36,11 +36,11 @@ export const useAgentSkillStore = create<AgentSkillStore>((set, get) => ({
     loading: false,
     loaded: false,
     errors: [],
-    loadSkills: async (endpoint, token, forceReload = false) => {
+    loadSkills: async () => {
         const sequence = ++loadSequence;
         set({ loading: true });
         try {
-            const response = await fetchCodexSkills(endpoint, token, forceReload);
+            const response = await fetchAssistantSkills();
             if (sequence !== loadSequence) return;
             const skills = response.data || [];
             const current = get();

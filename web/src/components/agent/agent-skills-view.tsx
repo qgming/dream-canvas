@@ -16,10 +16,12 @@ import { Check, ChevronDown, CircleAlert, FilePenLine, LoaderCircle, LockKeyhole
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { createCodexSkill, createCodexSkillDraft, deleteCodexSkill, fetchCodexSkill, setCodexSkillEnabled, updateCodexSkill, type AgentSkillDetail, type AgentSkillDraft, type AgentSkillInterface, type AgentSkillScope, type AgentSkillSummary } from "@/services/api/canvas-agent";
+import { createAssistantSkill, createAssistantSkillDraft, deleteAssistantSkill, fetchAssistantSkill, setAssistantSkillEnabled, updateAssistantSkill, type AgentSkillDetail, type AgentSkillDraft, type AgentSkillInterface, type AgentSkillScope, type AgentSkillSummary } from "@/services/api/assistant-skills";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentChatItem } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { decodeChannelModel, resolveModelParameters, useConfigStore } from "@/stores/use-config-store";
+import { assetId } from "@/services/api/assets";
 
 type ScopeFilter = "all" | AgentSkillScope;
 type SkillDraftSource = "conversation" | "canvas";
@@ -33,8 +35,6 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { notify, confirm } = useFeedback();
     const connected = useAgentStore((state) => state.connected);
-    const url = useAgentStore((state) => state.url);
-    const token = useAgentStore((state) => state.token);
     const activeThreadId = useAgentStore((state) => state.activeThreadId);
     const hasConversation = useAgentStore((state) => hasSettledConversation(state.messages, state.activeThreadId));
     const hasCanvas = useAgentStore((state) => Boolean(state.canvasContext));
@@ -56,6 +56,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     const [query, setQuery] = useState("");
     const [scope, setScope] = useState<ScopeFilter>("all");
     const [editor, setEditor] = useState<SkillEditor | null>(null);
+    const [viewing, setViewing] = useState<AgentSkillDetail | null>(null);
     const [saving, setSaving] = useState(false);
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -63,7 +64,6 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
     const [errorsOpen, setErrorsOpen] = useState(false);
     const confirmRef = useRef<{ destroy: () => void } | null>(null);
     const form = useEditorForm<SkillFormValues>();
-    const endpoint = url.trim().replace(/\/$/, "");
     const filteredSkills = useMemo(() => {
         const keyword = query.trim().toLowerCase();
         return skills.filter((skill) => {
@@ -74,11 +74,11 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
 
     const editorValues = editor?.mode === "edit" ? skillFormValues(editor.detail) : editor?.values;
 
-    const refresh = (forceReload = true) => loadSkills(endpoint, token, forceReload);
+    const refresh = () => loadSkills();
     const connectionIsCurrent = (revision: number) => {
         const agent = useAgentStore.getState();
         const skillsState = useAgentSkillStore.getState();
-        return skillsState.connectionRevision === revision && agent.connected && agent.url.trim().replace(/\/$/, "") === endpoint && agent.token === token;
+        return skillsState.connectionRevision === revision && agent.connected;
     };
     useEffect(() => {
         if (draft) setEditor((current) => current || { mode: "create", values: draftFormValues(draft) });
@@ -88,6 +88,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         confirmRef.current?.destroy();
         confirmRef.current = null;
         setEditor(null);
+        setViewing(null);
         setSaving(false);
         setAdvancedOpen(false);
         setCreateMenuOpen(false);
@@ -109,13 +110,16 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         setGeneratingSource(source);
         try {
             if (!connectionIsCurrent(connectionRevision)) return;
-            const response = await createCodexSkillDraft(endpoint, token, {
+            const config = useConfigStore.getState().config, model = agent.model || config.textModel, selected = decodeChannelModel(model);
+            const entry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text");
+            if (!entry) throw new Error(t("workspace.selectAssistantModel"));
+            const parameters = resolveModelParameters(config, model, agent.modelParameters[model]);
+            for (const control of entry.parameters) if (control.type === "asset" && parameters[control.key]) { const id = assetId(String(parameters[control.key])); if (!id) throw new Error(t("errors.parameterAssetRequired", { name: control.label })); parameters[control.key] = id; }
+            const response = await createAssistantSkillDraft({
                 source,
                 threadId: agent.activeThreadId,
-                clientId,
                 projectId: agent.canvasContext?.snapshot.projectId,
-                ...(agent.model ? { model: agent.model } : {}),
-                ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}),
+                model, parameters,
             });
             if (!connectionIsCurrent(connectionRevision)) return;
             if (!response.data) throw new Error(t("agent.skillManager.noDraft"));
@@ -132,7 +136,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         const connectionRevision = useAgentSkillStore.getState().connectionRevision;
         setBusySkill(skill.path);
         try {
-            const response = await fetchCodexSkill(endpoint, token, skill.name);
+            const response = await fetchAssistantSkill(skill.name);
             if (!connectionIsCurrent(connectionRevision)) return;
             if (!response.data) throw new Error(t("agent.skillManager.contentMissing"));
             setEditor({ mode: "edit", detail: response.data });
@@ -141,6 +145,14 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         } finally {
             if (connectionIsCurrent(connectionRevision)) setBusySkill("");
         }
+    };
+    const viewSkill = async (skill: AgentSkillSummary) => {
+        if (busySkill) return;
+        const connectionRevision = useAgentSkillStore.getState().connectionRevision;
+        setBusySkill(skill.path);
+        try { const response = await fetchAssistantSkill(skill.name); if (!connectionIsCurrent(connectionRevision)) return; if (!response.data) throw new Error(t("agent.skillManager.contentMissing")); setViewing(response.data); }
+        catch (error) { if (connectionIsCurrent(connectionRevision)) notify.error(error instanceof Error ? error.message : t("agent.skillManager.readFailed")); }
+        finally { if (connectionIsCurrent(connectionRevision)) setBusySkill(""); }
     };
     const saveSkill = async () => {
         if (!editor) return;
@@ -166,8 +178,8 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         setSaving(true);
         try {
             const input = { description: values.description.trim(), instructions: values.instructions.trim(), interface: skillInterface || null };
-            if (editor.mode === "create") await createCodexSkill(endpoint, token, { name, ...input });
-            else await updateCodexSkill(endpoint, token, name, { ...input, expectedRevision: editor.detail.revision });
+            if (editor.mode === "create") await createAssistantSkill({ name, ...input });
+            else await updateAssistantSkill(name, { ...input, expectedRevision: editor.detail.revision });
             if (!connectionIsCurrent(connectionRevision)) return;
             setDraft(null);
             setEditor(null);
@@ -194,10 +206,10 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 if (!connectionIsCurrent(connectionRevision)) return;
                 setBusySkill(skill.path);
                 try {
-                    const response = await fetchCodexSkill(endpoint, token, skill.name);
+                    const response = await fetchAssistantSkill(skill.name);
                     if (!connectionIsCurrent(connectionRevision)) return;
                     if (!response.data) throw new Error(t("agent.skillManager.contentMissing"));
-                    await deleteCodexSkill(endpoint, token, skill.name, response.data.revision);
+                    await deleteAssistantSkill(skill.name, response.data.revision);
                     if (!connectionIsCurrent(connectionRevision)) return;
                     if (selectedSkill?.name === skill.name && selectedSkill.path === skill.path) clearSelection();
                     await refresh();
@@ -221,7 +233,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         if (!connectionIsCurrent(connectionRevision)) return;
         setBusySkill(skill.path);
         try {
-            await setCodexSkillEnabled(endpoint, token, skill, enabled);
+            await setAssistantSkillEnabled(skill, enabled);
             if (!connectionIsCurrent(connectionRevision)) return;
             if (!enabled && selectedSkill?.name === skill.name && selectedSkill.path === skill.path) clearSelection();
             await refresh();
@@ -231,18 +243,18 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
             if (connectionIsCurrent(connectionRevision)) setBusySkill("");
         }
     };
-    const codexBusy = sending || waiting;
+    const assistantBusy = sending || waiting;
     const createMenu: { items: MenuItem[] } = {
         items: [
             {
                 key: "conversation",
                 onClick: () => void generateDraft("conversation"),
                 icon: <MessageSquareText className="size-4" />,
-                disabled: codexBusy || !hasConversation,
+                disabled: assistantBusy || !hasConversation,
                 label: (
                     <div className="py-0.5">
                         <div className="text-sm">{t("agent.skillManager.fromConversation")}</div>
-                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t(codexBusy ? "agent.skillManager.availableAfterRun" : hasConversation ? "agent.skillManager.conversationDescription" : activeThreadId ? "agent.skillManager.noCompletedContent" : "agent.skillManager.startConversation")}</div>
+                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t(assistantBusy ? "agent.skillManager.availableAfterRun" : hasConversation ? "agent.skillManager.conversationDescription" : activeThreadId ? "agent.skillManager.noCompletedContent" : "agent.skillManager.startConversation")}</div>
                     </div>
                 ),
             },
@@ -250,11 +262,11 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 key: "canvas",
                 onClick: () => void generateDraft("canvas"),
                 icon: <Workflow className="size-4" />,
-                disabled: codexBusy || !hasCanvas,
+                disabled: assistantBusy || !hasCanvas,
                 label: (
                     <div className="py-0.5">
                         <div className="text-sm">{t("agent.skillManager.fromCanvas")}</div>
-                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t(codexBusy ? "agent.skillManager.availableAfterRun" : hasCanvas ? "agent.skillManager.canvasDescription" : "agent.skillManager.canvasUnavailable")}</div>
+                        <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t(assistantBusy ? "agent.skillManager.availableAfterRun" : hasCanvas ? "agent.skillManager.canvasDescription" : "agent.skillManager.canvasUnavailable")}</div>
                     </div>
                 ),
             },
@@ -335,10 +347,11 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                                     </div>
                                     <div className="mt-2 flex items-center justify-between gap-2 pl-7">
                                         <label className="inline-flex items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
-                                            <Switch size="small" checked={skill.enabled} loading={busy} disabled={!connected || Boolean(busySkill) || Boolean(generatingSource)} onChange={(enabled) => void toggleEnabled(skill, enabled)} />
+                                            <Switch size="small" checked={skill.enabled} loading={busy} disabled={!skill.managed || !connected || Boolean(busySkill) || Boolean(generatingSource)} onChange={(enabled) => void toggleEnabled(skill, enabled)} />
                                             {t(skill.enabled ? "agent.skillManager.enabled" : "agent.skillManager.disabled")}
                                         </label>
                                         <div className="flex items-center gap-0.5">
+                                            {!skill.managed ? <Button variant="ghost" size="sm" disabled={!connected || Boolean(busySkill)} onClick={() => void viewSkill(skill)}>{t("common.details")}</Button> : null}
                                             <Button variant="ghost" size="sm" disabled={!connected || !skill.enabled || Boolean(busySkill)} icon={selected ? <Check className="size-3.5" /> : <Sparkles className="size-3.5" />} onClick={() => useSkill(skill)}>{t(selected ? "agent.skillManager.selected" : "agent.skillManager.use")}</Button>
                                             {skill.managed ? (
                                                 <>
@@ -361,6 +374,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
                 )}
             </div>
 
+            <Dialog title={viewing?.interface?.displayName || viewing?.name || t("common.details")} open={Boolean(viewing)} footer={null} width={720} onClose={() => setViewing(null)}><pre className="whitespace-pre-wrap break-words text-sm leading-6">{viewing?.instructions}</pre></Dialog>
             <Dialog title={t("agent.skillManager.loadErrors", { count: errors.length })} open={errorsOpen} footer={null} width={720} onClose={() => setErrorsOpen(false)}>
                 <div className="thin-scrollbar mt-4 max-h-[60vh] overflow-y-auto rounded-md border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke }}>
                     {errors.map((error, index) => <div key={`${index}:${error}`} className="break-all py-1" style={{ color: theme.node.muted }}>{error}</div>)}

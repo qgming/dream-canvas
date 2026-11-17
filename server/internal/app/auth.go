@@ -41,6 +41,17 @@ func (a *App) Initialize(username, password string) error {
 }
 
 func (a *App) authenticate(c *gin.Context) {
+	if header := c.GetHeader("Authorization"); strings.HasPrefix(header, "Bearer ") {
+		principal, err := a.tokenPrincipal(strings.TrimPrefix(header, "Bearer ")); if err != nil { respondError(c, err); return }
+		scope := "read"; if c.Request.Method != "GET" && c.Request.Method != "HEAD" { scope = "edit" }
+		if !principal.allows(scope, "") { respondError(c, problem(403, "forbidden", "访问令牌不允许此操作")); return }
+		path := c.FullPath()
+		if path == "/api/assets" && c.Request.Method == "POST" { if len(principal.Projects) > 0 { respondError(c, problem(403, "asset_scope", "上传全局资产需要不限项目的令牌")); return }
+		} else if (path == "/api/assets/:id/file" || path == "/api/assets/:id/preview") && scope == "read" {
+			if err := a.checkTokenAsset(principal, c.Param("id")); err != nil { respondError(c, err); return }
+		} else { respondError(c, problem(403, "token_route", "此 HTTP 入口不接受访问令牌，请使用远程 MCP 业务工具")); return }
+		c.Set("user", principal.User); c.Next(); return
+	}
 	token, err := c.Cookie(sessionCookie)
 	if err != nil { respondError(c, problem(401, "unauthorized", "请先登录")); return }
 	var session Session
@@ -88,10 +99,12 @@ func (a *App) logout(c *gin.Context) {
 func (a *App) changePassword(c *gin.Context) {
 	var input struct { Current string `json:"currentPassword"`; Password string `json:"password"` }
 	if !bind(c, &input) { return }
-	user := currentUser(c)
-	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Current)) != nil { respondError(c, problem(400, "wrong_password", "当前密码不正确")); return }
-	if err := a.setPassword(user.ID, input.Password); err != nil { respondError(c, err); return }
+	if err := a.ChangePassword(currentUser(c), input.Current, input.Password); err != nil { respondError(c, err); return }
 	c.Status(204)
+}
+
+func (a *App) ChangePassword(user User, current, password string) error {
+	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(current)) != nil { return problem(400, "wrong_password", "当前密码不正确") }; return a.setPassword(user.ID, password)
 }
 
 func (a *App) setPassword(id, password string) error {
@@ -113,33 +126,38 @@ func (a *App) listUsers(c *gin.Context) {
 	c.JSON(200, users)
 }
 
+type userInput struct { Username string `json:"username"`; Password string `json:"password"`; Role string `json:"role"` }
+
 func (a *App) createUser(c *gin.Context) {
-	var input struct { Username string `json:"username"`; Password string `json:"password"`; Role string `json:"role"` }
-	if !bind(c, &input) { return }
+	var input userInput; if !bind(c, &input) { return }; user, err := a.CreateUser(input); if err != nil { respondError(c, err); return }; c.JSON(201, user)
+}
+
+func (a *App) CreateUser(input userInput) (User, error) {
 	username := strings.TrimSpace(input.Username)
-	if err := validTitle(username); err != nil { respondError(c, err); return }
-	if input.Role != "admin" && input.Role != "user" { respondError(c, problem(400, "invalid_role", "请选择管理员或普通用户")); return }
+	if err := validTitle(username); err != nil { return User{}, err }
+	if input.Role != "admin" && input.Role != "user" { return User{}, problem(400, "invalid_role", "请选择管理员或普通用户") }
 	hash, err := passwordHash(input.Password)
-	if err != nil { respondError(c, err); return }
+	if err != nil { return User{}, err }
 	user := User{ID: identifier(), Username: username, Password: hash, Role: input.Role}
-	if err := a.db.Create(&user).Error; err != nil { respondError(c, err); return }
-	c.JSON(201, user)
+	err = a.db.Create(&user).Error; return user, err
 }
 
 func (a *App) updateUser(c *gin.Context) {
 	var input struct { Disabled bool `json:"disabled"` }
 	if !bind(c, &input) { return }
-	if c.Param("id") == currentUser(c).ID && input.Disabled { respondError(c, problem(400, "self_disable", "不能停用当前管理员")); return }
+	if err := a.SetUserDisabled(currentUser(c).ID, c.Param("id"), input.Disabled); err != nil { respondError(c, err); return }; c.Status(204)
+}
+
+func (a *App) SetUserDisabled(adminID, userID string, disabled bool) error {
+	if userID == adminID && disabled { return problem(400, "self_disable", "不能停用当前管理员") }
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var user User
-		if err := tx.First(&user, "id = ?", c.Param("id")).Error; err != nil { return err }
-		if err := tx.Model(&user).Update("disabled", input.Disabled).Error; err != nil { return err }
-		if input.Disabled { return tx.Delete(&Session{}, "user_id = ?", user.ID).Error }
+		if err := tx.First(&user, "id = ?", userID).Error; err != nil { return err }
+		if err := tx.Model(&user).Update("disabled", disabled).Error; err != nil { return err }
+		if disabled { return tx.Delete(&Session{}, "user_id = ?", user.ID).Error }
 		return nil
 	})
-	if err != nil { respondError(c, err); return }
-	a.notify(c.Param("id"))
-	c.Status(204)
+	if err == nil { a.notify(userID) }; return err
 }
 
 func (a *App) resetPassword(c *gin.Context) {

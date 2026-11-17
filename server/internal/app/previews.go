@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"image"
 	"net/http"
 	"os"
@@ -15,39 +16,35 @@ func (a *App) previewPath(id string) (string, error) {
 }
 
 func (a *App) assetPreview(c *gin.Context) {
+	release, err := a.acquireFile(c.Request.Context(), true, false); if err != nil { return }; defer release()
+	a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
 	var asset Asset
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { respondError(c, err); return }
 	if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
-	if asset.Kind != "image" || asset.SaveState != "saved" { respondError(c, problem(409, "preview_unavailable", "此素材没有可读取的图片缩略图")); return }
+	if !includes([]string{"image", "video"}, asset.Kind) || asset.SaveState != "saved" { respondError(c, problem(409, "preview_unavailable", "此素材没有可读取的缩略图或封面")); return }
 	preview, err := a.previewPath(asset.ID)
 	if err != nil { respondError(c, err); return }
 	if asset.PreviewPath == "" {
-		select {
-		case a.previews <- struct{}{}:
-			defer func() { <-a.previews }()
-		case <-c.Request.Context().Done(): return
-		}
+		a.previewMu.Lock(); defer a.previewMu.Unlock()
 		if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { respondError(c, err); return }
 		if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
 		if asset.PreviewPath == "" {
 			original, err := a.assetPath(asset.ID)
 			if err != nil { respondError(c, err); return }
-			file, err := os.Open(original)
-			if err != nil { respondError(c, problem(500, "original_unavailable", "无法读取原件")); return }
-			decoded, _, err := image.Decode(file)
-			file.Close()
-			if err != nil { respondError(c, problem(409, "preview_unavailable", "暂不支持此图片格式的缩略图，请查看原件")); return }
-			// Preserve the existing frontend preview edge; originals are never modified.
-			thumbnail := imaging.Fit(decoded, 768, 768, imaging.Lanczos)
-			output, err := os.OpenFile(preview, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-			if err == nil {
-				err = imaging.Encode(output, thumbnail, imaging.PNG)
-				if err == nil { err = output.Sync() }
-				closeErr := output.Close()
-				if err == nil { err = closeErr }
+			if asset.Kind == "video" {
+				policy, policyErr := a.executionPolicy(); if policyErr != nil { respondError(c, policyErr); return }
+				ctx, cancel := context.WithTimeout(c.Request.Context(), seconds(policy.QuerySeconds))
+				err = videoPreview(ctx, original, preview); cancel()
+			} else {
+				file, openErr := os.Open(original); if openErr != nil { respondError(c, problem(500, "original_unavailable", "无法读取原件")); return }
+				decoded, _, decodeErr := image.Decode(file); file.Close()
+				if decodeErr != nil { respondError(c, problem(409, "preview_unavailable", "暂不支持此图片格式的缩略图，请查看原件")); return }
+				thumbnail := imaging.Fit(decoded, 768, 768, imaging.Lanczos)
+				var output *os.File; output, err = os.OpenFile(preview, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+				if err == nil { err = imaging.Encode(output, thumbnail, imaging.PNG); if err == nil { err = output.Sync() }; closeErr := output.Close(); if err == nil { err = closeErr } }
 			}
-			if err != nil { _ = os.Remove(preview); respondError(c, problem(500, "preview_save_failed", "缩略图保存失败，原件仍然保留")); return }
-			result := a.db.Model(&Asset{}).Where("id = ? AND delete_state = ?", asset.ID, "").Update("preview_path", asset.ID+".preview.png")
+			if err != nil { _ = os.Remove(preview); a.db.Model(&asset).Updates(map[string]any{"preview_state": "failed", "preview_error": "缩略图或视频封面保存失败，请检查 ffmpeg、原件格式和运行边界；原件仍保留"}); respondError(c, problem(500, "preview_save_failed", "缩略图或视频封面保存失败，原件仍然保留")); return }
+			result := a.db.Model(&Asset{}).Where("id = ? AND delete_state = ?", asset.ID, "").Updates(map[string]any{"preview_path": asset.ID+".preview.png", "preview_state": "saved", "preview_error": ""})
 			if result.Error != nil || result.RowsAffected == 0 { _ = os.Remove(preview); if result.Error != nil { respondError(c, result.Error) } else { respondError(c, problem(410, "asset_deleted", "资产已删除")) }; return }
 		}
 	}

@@ -13,7 +13,7 @@ import i18n from "@/i18n";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useAgentStore, type AgentCanvasReference, type AgentChatItem, type AgentPendingApproval, type AgentSkillReference } from "@/stores/use-agent-store";
-import { resolveAgentMessageAssetUrl } from "@/services/api/canvas-agent";
+import { resolveAgentMessageAssetUrl } from "@/services/api/assistant-skills";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
 
@@ -107,7 +107,7 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
         );
     }
     if (item.role === "tool") {
-        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
+        if (objectField(item.detail, "status") === "pending" && (onRejectTool || onApproveTool)) return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={onRejectTool ? () => onRejectTool(item.id) : undefined} onApprove={onApproveTool ? () => onApproveTool(item.id) : undefined} />;
         return <AgentToolCard title={item.title || tr("toolCall")} text={item.text} detail={item.detail} theme={theme} />;
     }
     return (
@@ -150,9 +150,7 @@ function AgentSkillMention({ skill, theme }: { skill: AgentSkillReference; theme
 function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     useTranslation();
     const node = useAgentStore((state) => state.canvasContext?.snapshot.nodes.find((item) => item.id === reference.nodeId));
-    const endpoint = useAgentStore((state) => state.url);
-    const token = useAgentStore((state) => state.token);
-    const previewUrl = resolveAgentMessageAssetUrl(endpoint, token, reference.previewUrl || node?.metadata?.content || "");
+    const previewUrl = resolveAgentMessageAssetUrl(reference.previewUrl || node?.metadata?.content || "");
     const previewText = reference.text || node?.metadata?.content || node?.metadata?.prompt;
     const Icon = canvasReferenceIcon(reference.kind);
     return (

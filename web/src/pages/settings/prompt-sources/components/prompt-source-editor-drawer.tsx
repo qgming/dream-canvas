@@ -13,7 +13,7 @@ export function PromptSourceEditorDrawer({ open, source, onSave, onClose }: { op
     const { t } = useTranslation();
     const form = useEditorForm<PromptSource>();
     useEffect(() => { if (open && source) form.reset(source); }, [open, source, form]);
-    const urlSchema = z.string().trim().url(t("config.promptSources.editor.invalidUrl")).refine(isHttpUrl, t("config.promptSources.editor.invalidUrl"));
+    const urlSchema = z.string().trim().url(t("config.promptSources.editor.invalidUrl")).refine((value) => isHttpUrl(value) && value.startsWith("https://"), t("workspace.httpsEndpoint"));
     const save = async (draft: PromptSource) => {
         await onSave({ ...draft, name: draft.name.trim(), url: draft.url.trim(), homepage: draft.homepage?.trim() || "", builtIn: false });
         form.reset(draft);

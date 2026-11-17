@@ -27,7 +27,7 @@ type AssetStore = {
 
 function fromServer(record: api.ServerAsset): Asset {
     const meta = record.metadata || {};
-    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", tags: Array.isArray(meta.tags) ? meta.tags as string[] : [], source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: record.error };
+    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", tags: Array.isArray(meta.tags) ? meta.tags as string[] : [], source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
     if (record.kind === "text") return { ...base, kind: "text", data: { content: typeof meta.content === "string" ? meta.content : "" } };
     const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType };
     if (record.kind === "image") return { ...base, kind: "image", data: { ...data, dataUrl: api.assetUrl(record.id) } };
@@ -36,6 +36,7 @@ function fromServer(record: api.ServerAsset): Asset {
 }
 
 export function assetCoverUrl(asset: Asset) {
+    if (asset.kind === "video" && !asset.coverUrl && asset.saveState === "saved") return `/api/assets/${encodeURIComponent(asset.id)}/preview`;
     const own = asset.kind === "image" ? asset.data.dataUrl : "";
     return asset.kind === "image" && (!asset.coverUrl || asset.coverUrl === own) ? previewUrlFor(asset.data.storageKey) || own : asset.coverUrl;
 }

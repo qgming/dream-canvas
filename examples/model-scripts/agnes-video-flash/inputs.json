@@ -1,0 +1,160 @@
+[
+  {
+    "key": "mode",
+    "label": "生成模式",
+    "type": "select",
+    "required": true,
+    "default": "text",
+    "options": [
+      {
+        "label": "文生",
+        "value": "text",
+        "labelEn": "Text"
+      },
+      {
+        "label": "首尾帧",
+        "value": "keyframe",
+        "labelEn": "Keyframes"
+      },
+      {
+        "label": "多模态参考",
+        "value": "reference",
+        "labelEn": "References"
+      }
+    ],
+    "labelEn": "Mode"
+  },
+  {
+    "key": "seconds",
+    "label": "时长（秒）",
+    "type": "number",
+    "required": true,
+    "default": 5,
+    "min": 4,
+    "max": 12,
+    "step": 1,
+    "labelEn": "Duration (seconds)"
+  },
+  {
+    "key": "size",
+    "label": "分辨率",
+    "type": "select",
+    "required": true,
+    "default": "720P",
+    "options": [
+      {
+        "label": "720P",
+        "value": "720P"
+      }
+    ],
+    "labelEn": "Resolution"
+  },
+  {
+    "key": "aspect_ratio",
+    "label": "宽高比",
+    "type": "select",
+    "required": true,
+    "default": "16:9",
+    "options": [
+      {
+        "label": "21:9",
+        "value": "21:9"
+      },
+      {
+        "label": "16:9",
+        "value": "16:9"
+      },
+      {
+        "label": "4:3",
+        "value": "4:3"
+      },
+      {
+        "label": "1:1",
+        "value": "1:1"
+      },
+      {
+        "label": "3:4",
+        "value": "3:4"
+      },
+      {
+        "label": "9:16",
+        "value": "9:16"
+      }
+    ],
+    "labelEn": "Aspect ratio"
+  },
+  {
+    "key": "seed",
+    "label": "随机种子（可选）",
+    "type": "number",
+    "step": 1,
+    "labelEn": "Seed (optional)"
+  },
+  {
+    "key": "first_frame",
+    "label": "首帧",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "labelEn": "First frame",
+    "when": {
+      "key": "mode",
+      "values": [
+        "keyframe"
+      ]
+    }
+  },
+  {
+    "key": "last_frame",
+    "label": "尾帧",
+    "type": "asset",
+    "role": "image",
+    "transport": "https",
+    "labelEn": "Last frame",
+    "when": {
+      "key": "mode",
+      "values": [
+        "keyframe"
+      ]
+    }
+  },
+  {
+    "key": "references_image",
+    "label": "参考图片",
+    "type": "reference",
+    "role": "image",
+    "transport": "https",
+    "maxCount": 5,
+    "maxBytes": 15000000,
+    "minWidth": 256,
+    "maxWidth": 5760,
+    "minHeight": 256,
+    "maxHeight": 5760,
+    "labelEn": "Reference images",
+    "when": {
+      "key": "mode",
+      "values": [
+        "reference"
+      ]
+    }
+  },
+  {
+    "key": "references_audio",
+    "label": "参考音频",
+    "type": "reference",
+    "role": "audio",
+    "transport": "https",
+    "maxCount": 3,
+    "maxBytes": 15000000,
+    "maxDurationMs": 12000,
+    "description": "参考音频总时长须为 2–12 秒。",
+    "labelEn": "Reference audio",
+    "descriptionEn": "Combined reference audio duration must be 2–12 seconds.",
+    "when": {
+      "key": "mode",
+      "values": [
+        "reference"
+      ]
+    }
+  }
+]

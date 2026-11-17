@@ -4,12 +4,13 @@ import localforage from "localforage";
 
 import { ApiError, captureSession } from "@/services/api/client";
 import { getPreference, savePreference } from "@/services/api/preferences";
-import type { CatalogChannel, ParameterControl } from "@/services/api/channels";
+import type { CatalogChannel, ModelFeatures, ParameterControl } from "@/services/api/channels";
 import { useAuthStore } from "@/stores/use-auth-store";
+import { inputVisible } from "@/lib/model-inputs";
 
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
-export type ChannelModel = { id: string; name: string; label: string; capability: ModelCapability; parameters: ParameterControl[] };
+export type ChannelModel = { id: string; name: string; label: string; features: ModelFeatures; capability: ModelCapability; parameters: ParameterControl[] };
 export type ModelChannel = { id: string; name: string; models: ChannelModel[] };
 export type AiConfig = {
     channelMode: "remote";
@@ -21,6 +22,7 @@ export type AiConfig = {
     systemPrompt: string; reasoningEffort: ReasoningEffort;
     quality: string; size: string; background: string; count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
+    parameterDefaults: Record<string, Record<string, unknown>>;
     modelParameters?: Record<string, unknown>;
 };
 export type GenerationPreference = Omit<AiConfig, "channelMode" | "channels" | "models" | "modelParameters">;
@@ -30,6 +32,7 @@ export const defaultConfig: AiConfig = {
     videoSeconds: "6", vquality: "720", videoGenerateAudio: "true", videoWatermark: "false", videoMode: "frames",
     systemPrompt: "", reasoningEffort: "auto", quality: "auto", size: "1:1", background: "", count: "1", canvasImageCount: "3",
     nodeRegenerateBehavior: "new-node", autoFocusOnSelect: false,
+    parameterDefaults: {},
 };
 type ConfigStore = {
     config: AiConfig; hydrated: boolean; version: number; saving: boolean; dirty: boolean; conflict: boolean; error: string;
@@ -79,7 +82,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
-        const channels = catalog.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, capability: model.capability, parameters: model.parameters })) }));
+        const channels = catalog.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, features: model.features, capability: model.capability, parameters: model.parameters })) }));
         return { config: { ...state.config, channels, models: modelOptionsFromChannels(channels) } };
     }),
     updateConfig: (key, value) => {
@@ -146,4 +149,16 @@ export function resolveModelForCapability(config: AiConfig, current: string | un
     const preferred = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
     for (const value of [current, preferred]) { if (value && (!modelCapabilityOf(config, value) || modelCapabilityOf(config, value) === capability)) return value; }
     return "";
+}
+
+export const modelHasParameters = (config: AiConfig, value: string) => Boolean(findChannelModel(config, value));
+export const modelSupportsTools = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.features.tools === true;
+export const channelModelId = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.id;
+export function resolveModelParameters(config: AiConfig, model: string, overrides: Record<string, unknown> = {}) {
+    const selected = findChannelModel(config, model)?.model;
+    const defaults = selected ? config.parameterDefaults[selected.id] || {} : {};
+    const values = Object.fromEntries((selected?.parameters || []).filter((control) => control.type !== "reference").map((control) => [control.key,
+        Object.prototype.hasOwnProperty.call(overrides, control.key) ? overrides[control.key] : Object.prototype.hasOwnProperty.call(defaults, control.key) ? defaults[control.key] : control.default,
+    ]).filter(([, value]) => value !== undefined));
+    return Object.fromEntries(Object.entries(values).filter(([key]) => inputVisible(selected!.parameters.find((control) => control.key === key)!, values)));
 }

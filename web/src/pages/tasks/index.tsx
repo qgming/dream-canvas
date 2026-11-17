@@ -17,7 +17,7 @@ import { Link } from "react-router-dom";
 
 import { AssetMedia } from "@/components/canvas/asset-media";
 import { assetUrl } from "@/services/api/assets";
-import { cancelGeneration, getGeneration, listGenerations, type GenerationTask } from "@/services/api/tasks";
+import { cancelGeneration, getGeneration, listGenerations, resumeGeneration, type GenerationTask } from "@/services/api/tasks";
 import { captureSession } from "@/services/api/client";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -46,7 +46,7 @@ export default function TasksPage() {
     const channels = useConfigStore((state) => state.config.channels);
     const detail = useQuery({ queryKey: ["generation-task", selectedId], queryFn: () => getGeneration(selectedId), enabled: Boolean(selectedId) });
     useEffect(() => {
-        const refresh = () => { void queryClient.invalidateQueries({ queryKey: ["generation-tasks"] }); void queryClient.invalidateQueries({ queryKey: ["generation-task"] }); };
+        const refresh = (event: Event) => { if ((event as CustomEvent<string>).detail === "assistant") return; void queryClient.invalidateQueries({ queryKey: ["generation-tasks"] }); void queryClient.invalidateQueries({ queryKey: ["generation-task"] }); };
         window.addEventListener("server-changed", refresh);
         return () => window.removeEventListener("server-changed", refresh);
     }, [queryClient]);
@@ -78,7 +78,7 @@ export default function TasksPage() {
                     { title: appI18n.t("workspace.original"), render: (_, task) => saveStates[task.saveState] || appI18n.t("workspace.noSaveResult") },
                     { title: appI18n.t("workspace.cloudSync"), render: (_, task) => syncStates[task.syncState] || appI18n.t("workspace.noSyncRecord") },
                     { title: appI18n.t("workspace.submittedAt"), render: (_, task) => new Date(task.createdAt).toLocaleString(appI18n.resolvedLanguage) },
-                    { title: appI18n.t("workspace.actions"), render: (_, task) => <div className="flex gap-1"><Button variant="ghost" size="sm" onClick={() => setSelectedId(task.id)}>{appI18n.t("workspace.details")}</Button>{["queued", "waiting_assets"].includes(task.status) ? <Button variant="ghost" size="sm" disabled={Boolean(cancelling)} loading={cancelling === task.id} onClick={() => void cancel(task)}>{appI18n.t("workspace.cancel")}</Button> : null}</div> },
+                    { title: appI18n.t("workspace.actions"), render: (_, task) => <div className="flex gap-1"><Button variant="ghost" size="sm" onClick={() => setSelectedId(task.id)}>{appI18n.t("workspace.details")}</Button>{["queued", "waiting_assets", "running", "submitting"].includes(task.status) && !task.cancelRequested ? <Button variant="ghost" size="sm" disabled={Boolean(cancelling)} loading={cancelling === task.id} onClick={() => void cancel(task)}>{appI18n.t("workspace.cancel")}</Button> : null}</div> },
                 ]} />
             </div>
             <Sheet title={appI18n.t("workspace.taskDetails")} open={Boolean(selectedId)} onClose={() => setSelectedId("")} width={640}>
@@ -95,7 +95,16 @@ export default function TasksPage() {
                         { key: "cancel", label: appI18n.t("workspace.cancelRequest"), children: task.cancelRequested ? appI18n.t("workspace.cancelRequested") : appI18n.t("workspace.notRequested") },
                     ]} />
                     {task.error ? <Alert type={task.status === "confirmation_required" ? "warning" : "error"} title={task.error} /> : null}
+                    {task.applyError ? <Alert type="warning" title={task.applyError} /> : null}
+                    {task.cancelError ? <Alert type="warning" title={task.cancelError} /> : null}
+                    {task.responseCleanupError ? <Alert type="warning" title={task.responseCleanupError} /> : null}
                     {task.status === "confirmation_required" ? <p className="text-sm text-muted-foreground">{appI18n.t("workspace.pendingOutcome")}</p> : null}
+                    {task.status === "confirmation_required" ? <Button loading={Boolean(cancelling)} onClick={async () => {
+                        const assertSession = captureSession(); setCancelling(task.id);
+                        try { await resumeGeneration(task.id); assertSession(); await Promise.all([detail.refetch(), query.refetch()]); }
+                        catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.operationFailed")); }
+                        finally { setCancelling(""); }
+                    }}>{appI18n.t("execution.resumeTask")}</Button> : null}
                     {task.text ? <pre className="whitespace-pre-wrap break-words text-sm leading-6">{task.text}</pre> : null}
                     {(task.assetIds || []).map((id) => <div key={id} className="space-y-2">{task.capability !== "text" ? <AssetMedia kind={task.capability} src={assetUrl(id)} alt={appI18n.t("workspace.taskOutput")} controls className="max-h-96 max-w-full object-contain" /> : null}<a href={assetUrl(id)} target="_blank" rel="noreferrer" className="text-sm underline">{appI18n.t("workspace.viewOriginal")}</a></div>)}
                     <details><summary className="cursor-pointer text-sm">{appI18n.t("workspace.submittedContent")}</summary><pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5">{JSON.stringify(task.input, null, 2)}</pre></details>

@@ -1,0 +1,195 @@
+[
+  {
+    "key": "size",
+    "label": "尺寸",
+    "type": "text",
+    "labelEn": "Size",
+    "description": "填写 auto 或 WIDTHxHEIGHT，具体可用尺寸以模型文档为准。",
+    "descriptionEn": "Use auto or WIDTHxHEIGHT; supported sizes depend on the model."
+  },
+  {
+    "key": "quality",
+    "label": "质量",
+    "type": "select",
+    "options": [
+      {
+        "label": "auto",
+        "value": "auto"
+      },
+      {
+        "label": "low",
+        "value": "low"
+      },
+      {
+        "label": "medium",
+        "value": "medium"
+      },
+      {
+        "label": "high",
+        "value": "high"
+      },
+      {
+        "label": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "label": "max",
+        "value": "max"
+      },
+      {
+        "label": "standard",
+        "value": "standard"
+      },
+      {
+        "label": "hd",
+        "value": "hd"
+      }
+    ],
+    "labelEn": "Quality",
+    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
+    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+  },
+  {
+    "key": "background",
+    "label": "背景",
+    "type": "select",
+    "options": [
+      {
+        "label": "auto",
+        "value": "auto"
+      },
+      {
+        "label": "opaque",
+        "value": "opaque"
+      },
+      {
+        "label": "transparent",
+        "value": "transparent"
+      }
+    ],
+    "labelEn": "Background",
+    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
+    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+  },
+  {
+    "key": "output_format",
+    "label": "格式",
+    "type": "select",
+    "options": [
+      {
+        "label": "png",
+        "value": "png"
+      },
+      {
+        "label": "jpeg",
+        "value": "jpeg"
+      },
+      {
+        "label": "webp",
+        "value": "webp"
+      }
+    ],
+    "labelEn": "Format",
+    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
+    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+  },
+  {
+    "key": "references_image",
+    "label": "参考图片",
+    "type": "reference",
+    "role": "image",
+    "transport": "file",
+    "mimeTypes": [
+      "image/png",
+      "image/jpeg",
+      "image/webp"
+    ],
+    "labelEn": "Images"
+  },
+  {
+    "key": "mask",
+    "label": "蒙版",
+    "type": "asset",
+    "role": "image",
+    "transport": "file",
+    "mimeTypes": [
+      "image/png"
+    ],
+    "labelEn": "Mask"
+  },
+  {
+    "key": "n",
+    "label": "生成张数",
+    "labelEn": "Number of images",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "response_format",
+    "label": "响应格式（仅支持的模型）",
+    "labelEn": "Response format (supported models only)",
+    "type": "select",
+    "options": [
+      {
+        "label": "url",
+        "value": "url"
+      },
+      {
+        "label": "b64_json",
+        "value": "b64_json"
+      }
+    ],
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "moderation",
+    "label": "审核等级",
+    "labelEn": "Moderation",
+    "type": "select",
+    "options": [
+      {
+        "label": "auto",
+        "value": "auto"
+      },
+      {
+        "label": "low",
+        "value": "low"
+      }
+    ],
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "input_fidelity",
+    "label": "编辑参考保真度",
+    "labelEn": "Edit input fidelity",
+    "type": "select",
+    "options": [
+      {
+        "label": "low",
+        "value": "low"
+      },
+      {
+        "label": "high",
+        "value": "high"
+      }
+    ],
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "output_compression",
+    "label": "供应商输出压缩参数",
+    "labelEn": "Provider output compression",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  }
+]

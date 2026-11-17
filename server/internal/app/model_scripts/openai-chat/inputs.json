@@ -1,0 +1,108 @@
+[
+  {
+    "key": "systemPrompt",
+    "label": "系统指令",
+    "type": "textarea",
+    "labelEn": "System instructions"
+  },
+  {
+    "key": "temperature",
+    "label": "采样温度",
+    "type": "number",
+    "min": 0,
+    "max": 2,
+    "labelEn": "Temperature",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "references_image",
+    "label": "参考图片",
+    "type": "reference",
+    "role": "image",
+    "transport": "data",
+    "mimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif"
+    ],
+    "labelEn": "Images"
+  },
+  {
+    "key": "top_p",
+    "label": "核采样（top_p）",
+    "labelEn": "Nucleus sampling (top_p)",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "max_completion_tokens",
+    "label": "最大输出 Token",
+    "labelEn": "Maximum output tokens",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "reasoning_effort",
+    "label": "推理强度",
+    "labelEn": "Reasoning effort",
+    "type": "select",
+    "options": [
+      {
+        "label": "none",
+        "value": "none"
+      },
+      {
+        "label": "minimal",
+        "value": "minimal"
+      },
+      {
+        "label": "low",
+        "value": "low"
+      },
+      {
+        "label": "medium",
+        "value": "medium"
+      },
+      {
+        "label": "high",
+        "value": "high"
+      },
+      {
+        "label": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "label": "max",
+        "value": "max"
+      }
+    ],
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "max_tokens",
+    "label": "旧版输出上限（max_tokens）",
+    "labelEn": "Legacy output limit (max_tokens)",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  },
+  {
+    "key": "seed",
+    "label": "随机种子",
+    "labelEn": "Seed",
+    "type": "number",
+    "description": "仅填写模型支持的参数；留空时不发送。",
+    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
+    "advanced": true
+  }
+]

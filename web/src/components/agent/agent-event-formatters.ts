@@ -3,7 +3,7 @@ import i18n from "@/i18n";
 import { summarizeCanvasAgentOps, type CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { randomId } from "@/lib/utils";
-import { resolveAgentMessageAssetUrl } from "@/services/api/canvas-agent";
+import { resolveAgentMessageAssetUrl } from "@/services/api/assistant-skills";
 import { useAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMessageAttachment, type AgentTokenUsage } from "@/stores/use-agent-store";
 import type { AgentChatAttachment } from "./agent-chat-message";
 export const REASONING_PLACEHOLDER = i18n.t("agent.events.analyzing");
@@ -57,17 +57,25 @@ export type AgentUserDetail = { kind: string; status: string; rows?: Array<{ lab
 
 export type AgentLogContext = { endpoint: string; connected: boolean; enabled: boolean; activity: string; waiting: boolean; sending: boolean; messages: number; pendingTool?: string };
 
-export function agentMessageToChatMessage(item: AgentChatItem, endpoint: string, token: string) {
-    return { ...item, meta: item.role === "user" || item.role === "assistant" ? undefined : item.meta, attachments: item.attachments?.map((attachment) => agentAttachmentToChatAttachment(attachment, endpoint, token)) };
+export function agentMessageToChatMessage(item: AgentChatItem) {
+    const name = stringText(objectField(item.detail, "name"));
+    if (item.role === "tool" && name) {
+        let result: unknown;
+        try { result = JSON.parse(item.text); } catch { result = null; }
+        const recordedStatus = stringText(objectField(item.detail, "status"));
+        const failed = recordedStatus === "failed" || Boolean(objectField(result, "error") && objectField(result, "code"));
+        return { ...item, title: toolName(name), text: failed ? stringText(objectField(result, "error")) || tr("toolFailed") : tr(recordedStatus === "pending" ? "toolCalled" : "toolCompleted"), detail: { kind: "tool", status: recordedStatus === "pending" ? "recorded" : failed ? "failed" : "completed", output: JSON.stringify(result ?? item.text, null, 2) } };
+    }
+    return { ...item, meta: item.role === "user" || item.role === "assistant" ? undefined : item.meta, attachments: item.attachments?.map(agentAttachmentToChatAttachment) };
 }
 
-export function agentAttachmentToChatAttachment(item: AgentMessageAttachment, endpoint: string, token: string): AgentChatAttachment {
-    return { id: item.id, name: item.name, url: resolveAgentMessageAssetUrl(endpoint, token, item.dataUrl || item.url) };
+export function agentAttachmentToChatAttachment(item: AgentMessageAttachment): AgentChatAttachment {
+    return { id: item.id, name: item.name, url: resolveAgentMessageAssetUrl(item.dataUrl || item.url) };
 }
 
 export function formatAgentEvent(event: AgentEventPayload): Omit<AgentChatItem, "id"> | null {
     const item = event.item;
-    if (event.type === "item.completed" && item?.type === "agent_message") return { role: "assistant", title: "Codex", text: stringText(item.text) };
+    if (event.type === "item.completed" && item?.type === "agent_message") return { role: "assistant", title: i18n.t("nav.agent"), text: stringText(item.text) };
     return null;
 }
 
@@ -317,6 +325,8 @@ export function isConnectionErrorMessage(item: AgentChatItem) {
 }
 
 export function toolName(name: string) {
+    if (name === "admin_script_evidence") return i18n.t("modelScripts.evidence");
+    if (i18n.exists(`agent.businessTools.${name}`)) return i18n.t(`agent.businessTools.${name}`);
     if (name === "imagegen" || name.endsWith("__imagegen")) return tr("tools.generateImage");
     if (name === "view_image" || name.endsWith("__view_image")) return tr("tools.viewImage");
     if (name === "exec" || name === "exec_command" || name.endsWith("__exec_command")) return tr("tools.executeCommand");

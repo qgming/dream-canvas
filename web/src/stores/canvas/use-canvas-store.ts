@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
+import { dequal } from "dequal";
 
 import i18n from "@/i18n";
 import { ApiError, captureSession } from "@/services/api/client";
@@ -26,7 +27,7 @@ export type CanvasProject = {
     viewport: ViewportTransform;
 };
 
-type SaveState = { status: "saving" | "saved" | "conflict" | "error"; message?: string };
+type SaveState = { status: "saving" | "saved" | "draft" | "conflict" | "error"; message?: string };
 type CanvasStore = {
     hydrated: boolean;
     projects: CanvasProject[];
@@ -46,11 +47,14 @@ type CanvasStore = {
     ensureSaved: (id: string) => Promise<CanvasProject>;
     reloadProject: (id: string) => Promise<void>;
     saveCopy: (id: string) => Promise<string>;
+    acceptTaskVersion: (taskId: string, projectId: string, nodeId: string) => Promise<void>;
+    holdSave: (id: string, hold: boolean) => void;
 };
 
 const drafts = localforage.createInstance({ name: "dream-canvas", storeName: "unsaved-projects" });
 const writes = new Map<string, Promise<void>>();
 const running = new Map<string, Promise<void>>();
+const heldSaves = new Set<string>();
 let tabId = sessionStorage.getItem("dream-canvas-editor") || nanoid();
 sessionStorage.setItem("dream-canvas-editor", tabId);
 let editorReady: Promise<void> | undefined;
@@ -89,7 +93,7 @@ function persistDraft(owner: string, project: CanvasProject) {
     void write.catch((error) => { if (useAuthStore.getState().user?.id === owner) saveState(project.id, { status: "error", message: i18n.t("errors.projectDraftFailed", { error: errorText(error) }) }); });
 }
 
-function flushProject(id: string): Promise<void> {
+function flushProject(id: string, force = false): Promise<void> {
     const owner = useAuthStore.getState().user?.id;
     if (!owner) return Promise.resolve();
     const key = draftKey(owner, id);
@@ -103,6 +107,7 @@ function flushProject(id: string): Promise<void> {
             if (state.saves[id]?.status === "conflict") return;
             const project = state.projects.find((item) => item.id === id);
             if (!project) return;
+            if (heldSaves.has(id) && !force) { saveState(id, { status: "draft", message: i18n.t("execution.projectDraft") }); return; }
             saveState(id, { status: "saving" });
             try {
                 await writes.get(key);
@@ -130,6 +135,7 @@ function flushProject(id: string): Promise<void> {
                     saveState(id, { status: "saved" });
                     return;
                 }
+                if (heldSaves.has(id) && !force) { saveState(id, { status: "draft", message: i18n.t("execution.projectDraft") }); return; }
             } catch (error) {
                 try { assertSession(); } catch { return; }
                 if (useAuthStore.getState().user?.id === owner) saveState(id, { status: error instanceof ApiError && error.code === "version_conflict" ? "conflict" : "error", message: errorText(error) });
@@ -150,7 +156,8 @@ function stage(id: string, patch: Partial<CanvasProject>) {
     const project = { ...current, ...patch };
     useCanvasStore.setState({ projects: state.projects.map((item) => item.id === id ? project : item) });
     persistDraft(owner, project);
-    if (state.saves[id]?.status !== "conflict" && state.saves[id]?.status !== "error") void flushProject(id);
+    if (heldSaves.has(id) && state.saves[id]?.status !== "conflict" && state.saves[id]?.status !== "error") saveState(id, { status: "draft", message: i18n.t("execution.projectDraft") });
+    if (state.saves[id]?.status !== "conflict" && state.saves[id]?.status !== "error" && !heldSaves.has(id)) void flushProject(id);
 }
 
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
@@ -159,7 +166,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     remoteChanges: {},
     saves: {},
     error: "",
-    reset: () => { loadSequence += 1; set({ hydrated: false, projects: [], remoteChanges: {}, saves: {}, error: "" }); },
+    reset: () => { loadSequence += 1; heldSaves.clear(); set({ hydrated: false, projects: [], remoteChanges: {}, saves: {}, error: "" }); },
     loadProjects: async () => {
         if (get().hydrated && get().projects.length) return get().refreshProjects();
         const owner = useAuthStore.getState().user?.id;
@@ -211,7 +218,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             incoming.delete(project.id);
             if (!remote || remote.version <= project.version) return project;
             const status = current.saves[project.id]?.status;
-            if (status === "saving") return project;
+            if (status === "saving" || heldSaves.has(project.id)) return project;
             if (project.id !== editing && (!status || status === "saved")) { delete remoteChanges[project.id]; return remote; }
             remoteChanges[project.id] = remote.version;
             return project;
@@ -265,7 +272,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const pending = get().saves[id];
         if (pending?.status === "conflict" || pending?.status === "error") throw new Error(pending.message || i18n.t("errors.projectSaveRequired"));
         if (get().remoteChanges[id]) throw new Error(i18n.t("errors.projectVersionChanged"));
-        if (pending?.status !== "saved") await flushProject(id);
+        const owner = useAuthStore.getState().user?.id;
+        if (owner) await running.get(draftKey(owner, id));
+        await flushProject(id, true);
         assertSession();
         const state = get();
         const project = state.openProject(id);
@@ -298,5 +307,74 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const project = get().openProject(id);
         if (!project) throw new Error(i18n.t("errors.projectMissing"));
         return get().importProject({ ...project, title: i18n.t("errors.projectCopy", { title: project.title }) });
+    },
+    holdSave: (id, hold) => { if (hold) heldSaves.add(id); else { heldSaves.delete(id); if (get().saves[id]?.status === "draft") void flushProject(id); } },
+    acceptTaskVersion: async (taskId, projectId, nodeId) => {
+        const assertSession = captureSession();
+        const owner = useAuthStore.getState().user?.id;
+        if (!owner) throw new Error(i18n.t("errors.accountProjectChanged"));
+        await running.get(draftKey(owner, projectId));
+        assertSession();
+        const before = get().openProject(projectId);
+        if (!before) throw new Error(i18n.t("errors.projectMissing"));
+        try {
+            const received = await api.taskProjectVersion(taskId, before.version);
+            const remote = received.project;
+            assertSession();
+            const latest = get().openProject(projectId);
+            if (!latest || latest.version !== before.version) return get().acceptTaskVersion(taskId, projectId, nodeId);
+            const result = remote.nodes.find((node) => node.id === nodeId);
+            const local = latest.nodes.find((node) => node.id === nodeId);
+            if (!result || !local || !received.targetNode || local.type !== result.type) throw new Error(i18n.t("errors.projectVersionChanged"));
+            const metadata = local.metadata || {}, incoming = result.metadata || {}, original = received.targetNode.metadata || {};
+            const patch: CanvasNodeData["metadata"] = {};
+            const conflict = (): never => { throw new Error(i18n.t("errors.projectResultEdited")); };
+            const mergeSlots = <T extends { id: string; content: string; status: string; storageKey?: string }>(previous: T[] = [], current: T[] = [], next: T[] = [], streaming = false): T[] => {
+                const changed = next.filter((slot) => !dequal(slot, previous.find((item) => item.id === slot.id)) || slot.status !== "loading" && current.some((item) => item.id === slot.id && item.status === "loading"));
+                for (const slot of changed) {
+                    const base = previous.find((item) => item.id === slot.id), localSlot = current.find((item) => item.id === slot.id);
+                    if (!localSlot && base) conflict();
+                    if (localSlot && !dequal(localSlot, slot) && !(localSlot.status === "loading" && (streaming || !localSlot.content)) && (localSlot.storageKey !== base?.storageKey && localSlot.storageKey !== slot.storageKey || localSlot.content !== base?.content && localSlot.content !== slot.content)) conflict();
+                }
+                const merged = current.map((slot) => changed.find((item) => item.id === slot.id) || slot);
+                for (const slot of changed) if (!current.some((item) => item.id === slot.id)) { const index = next.findIndex((item) => item.id === slot.id); const anchor = [...next.slice(0, index)].reverse().find((item) => merged.some((entry) => entry.id === item.id)); merged.splice(anchor ? merged.findIndex((item) => item.id === anchor.id) + 1 : 0, 0, slot); }
+                return merged;
+            };
+            if (received.resultSlotId && original.images?.some((slot) => slot.id === received.resultSlotId)) {
+                patch.images = mergeSlots(original.images, metadata.images, incoming.images);
+                const primaryId = metadata.primaryImageId !== original.primaryImageId ? metadata.primaryImageId : incoming.primaryImageId;
+                const primary = patch.images.find((slot) => slot.id === primaryId) || patch.images.find((slot) => slot.content);
+                if (primary) Object.assign(patch, { ...primary, primaryImageId: primary.id });
+                delete (patch as Record<string, unknown>).id;
+                patch.status = patch.images.some((slot) => slot.status === "loading") ? "loading" : patch.images.some((slot) => slot.status === "success") ? "success" : "error";
+            } else if (received.resultSlotId && original.texts?.some((slot) => slot.id === received.resultSlotId)) {
+                patch.texts = mergeSlots(original.texts, metadata.texts, incoming.texts, true);
+                const primaryId = metadata.primaryTextId !== original.primaryTextId ? metadata.primaryTextId : incoming.primaryTextId;
+                const primary = patch.texts.find((slot) => slot.id === primaryId) || patch.texts.find((slot) => slot.content);
+                if (primary) Object.assign(patch, { content: primary.content, primaryTextId: primary.id });
+                patch.status = patch.texts.some((slot) => slot.status === "loading") ? "loading" : patch.texts.some((slot) => slot.status === "success") ? "success" : "error";
+            } else {
+                const fields = ["content", "storageKey", "naturalWidth", "naturalHeight", "durationMs", "bytes", "mimeType", "images", "texts", "primaryImageId", "primaryTextId"] as const;
+                for (const key of fields) {
+                    if (dequal(incoming[key], original[key])) continue;
+                    if (!dequal(metadata[key], original[key]) && !dequal(metadata[key], incoming[key]) && !(key === "content" && local.type === "text" && metadata.status === "loading")) conflict();
+                    Object.assign(patch, { [key]: incoming[key] });
+                }
+                Object.assign(patch, { status: incoming.status, errorDetails: incoming.errorDetails });
+            }
+            for (const key of ["model", "generationMode", "prompt"] as const) if (dequal(metadata[key], original[key])) Object.assign(patch, { [key]: incoming[key] });
+            const model = incoming.model;
+            if (model && dequal(metadata.modelParameters?.[model], original.modelParameters?.[model])) patch.modelParameters = { ...metadata.modelParameters, [model]: incoming.modelParameters?.[model] || {} };
+            const nodePatch: Partial<CanvasNodeData> = {};
+            if (!metadata.freeResize && metadata.primaryImageId === original.primaryImageId && local.width === received.targetNode.width && local.height === received.targetNode.height) Object.assign(nodePatch, { width: result.width, height: result.height, position: { x: local.position.x + (local.width - result.width) / 2, y: local.position.y + (local.height - result.height) / 2 } });
+            const project = { ...latest, nodes: latest.nodes.map((node) => node.id === nodeId ? { ...node, ...nodePatch, metadata: { ...node.metadata, ...patch } } : node), version: remote.version, updatedAt: remote.updatedAt };
+            set((state) => ({ projects: state.projects.map((item) => item.id === projectId ? project : item), remoteChanges: Object.fromEntries(Object.entries(state.remoteChanges).filter(([key, version]) => key !== projectId || version > remote.version)) }));
+            persistDraft(owner, project);
+            window.dispatchEvent(new CustomEvent("canvas-task-result", { detail: { projectId, nodeId, patch, nodePatch } }));
+        } catch (error) {
+            assertSession();
+            saveState(projectId, { status: "conflict", message: errorText(error) });
+            throw error;
+        }
     },
 }));

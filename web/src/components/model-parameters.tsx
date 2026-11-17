@@ -5,28 +5,48 @@ import { NumberInput as InputNumber } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 
-import { decodeChannelModel, type AiConfig } from "@/stores/use-config-store";
+import { decodeChannelModel, resolveModelParameters, type AiConfig } from "@/stores/use-config-store";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { formatBytes } from "@/lib/image-utils";
+import type { ParameterControl } from "@/services/api/channels";
+import { inputDescription, inputLabel, inputVisible } from "@/lib/model-inputs";
 
-export function ModelParameters({ config, model, value = {}, onChange, disabled = false }: { config: AiConfig; model: string; value?: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void; disabled?: boolean }) {
+export function ModelParameters({ config, model, value, onChange, disabled = false, defaultsOnly = false }: { config: AiConfig; model: string; value?: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void; disabled?: boolean; defaultsOnly?: boolean }) {
     useTranslation();
     const selected = decodeChannelModel(model);
     const controls = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model)?.parameters || [];
+    const resolved = resolveModelParameters(config, model, value);
+    return <ModelInputFields controls={controls} value={defaultsOnly ? value : resolved} disabled={disabled} defaultsOnly={defaultsOnly} onChange={onChange} />;
+}
+
+export function ModelInputFields({ controls, value = {}, onChange, disabled = false, defaultsOnly = false, assetPrefix = true }: { controls: ParameterControl[]; value?: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void; disabled?: boolean; defaultsOnly?: boolean; assetPrefix?: boolean }) {
+    useTranslation();
     const assets = useAssetStore((state) => state.assets);
+    const resolved = { ...Object.fromEntries(controls.filter((control) => control.default != null).map((control) => [control.key, control.default])), ...value };
     if (!controls.length) return null;
-    return <div className="grid gap-3" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
-        {controls.map((control) => {
-            const current = Object.prototype.hasOwnProperty.call(value, control.key) ? value[control.key] : control.default;
+    const render = (control: ParameterControl) => {
+            if (control.hidden || !inputVisible(control, resolved)) return null;
+            const label = inputLabel(control), description = inputDescription(control);
+            if (defaultsOnly && (control.type === "asset" || control.type === "reference")) return null;
+            const current = resolved[control.key];
             const change = (next: unknown) => onChange({ ...value, [control.key]: next });
+            if (control.type === "reference") {
+                const requirements = [control.mimeTypes?.join(", "), control.minCount || control.required ? appI18n.t("workspace.referenceMin", { count: control.minCount || 1 }) : "", control.maxCount !== undefined ? appI18n.t("workspace.referenceMax", { count: control.maxCount }) : "", control.maxBytes ? `≤ ${formatBytes(control.maxBytes)}` : "", control.minWidth || control.minHeight ? `≥ ${control.minWidth || "—"} × ${control.minHeight || "—"} px` : "", control.maxWidth || control.maxHeight ? `≤ ${control.maxWidth || "—"} × ${control.maxHeight || "—"} px` : "", control.minDurationMs ? `≥ ${control.minDurationMs / 1000} s` : "", control.maxDurationMs ? `≤ ${control.maxDurationMs / 1000} s` : ""].filter(Boolean);
+                return <div key={control.key} className="space-y-1 text-xs"><p>{label}{control.required ? " *" : ""}</p><p className="text-muted-foreground">{description || appI18n.t("workspace.referenceInputs")}</p>{requirements.length ? <p className="text-muted-foreground">{requirements.join(" · ")}</p> : null}</div>;
+            }
             return <label key={control.key} className="flex min-w-0 flex-col gap-1.5 text-xs">
-                <span>{control.label}{control.required ? " *" : ""}</span>
-                {control.type === "switch" ? <div className="flex items-center gap-2"><Switch size="small" aria-label={control.label} disabled={disabled} checked={current === true} onChange={change} />{current == null && control.required ? <button type="button" className="text-muted-foreground hover:text-foreground" disabled={disabled} onClick={() => change(false)}>{appI18n.t("workspace.selectOff")}</button> : null}</div>
-                    : control.type === "number" ? <InputNumber className="!w-full" aria-label={control.label} disabled={disabled} value={typeof current === "number" ? current : null} onChange={change} />
-                    : control.type === "asset" ? <Choice aria-label={control.label} disabled={disabled} clearable value={typeof current === "string" ? current : undefined} placeholder={appI18n.t("workspace.chooseSavedAsset")} options={assets.filter((asset) => asset.kind === control.role && asset.saveState === "saved").map((asset) => ({ label: asset.title, value: `asset:${asset.id}` }))} onChange={(next) => change(next ?? null)} />
-                    : control.type === "select" ? <Choice aria-label={control.label} disabled={disabled} clearable value={current == null ? undefined : JSON.stringify(current)} options={control.options?.map((option) => ({ label: option.label, value: JSON.stringify(option.value) }))} onChange={(next) => change(next === undefined ? null : JSON.parse(next))} />
-                    : control.type === "textarea" ? <Textarea aria-label={control.label} disabled={disabled} value={typeof current === "string" ? current : ""} autoSize onChange={(event) => change(event.target.value)} />
-                    : <Input aria-label={control.label} disabled={disabled} value={typeof current === "string" ? current : ""} onChange={(event) => change(event.target.value)} />}
+                <span>{label}{control.required ? " *" : ""}</span>{description ? <span className="text-muted-foreground">{description}</span> : null}
+                {control.type === "switch" ? <div className="flex items-center gap-2"><Switch size="small" aria-label={label} disabled={disabled} checked={current === true} onChange={change} />{current == null && control.required ? <button type="button" className="text-muted-foreground hover:text-foreground" disabled={disabled} onClick={() => change(false)}>{appI18n.t("workspace.selectOff")}</button> : null}{current != null && !control.required ? <button type="button" className="text-muted-foreground hover:text-foreground" disabled={disabled} onClick={() => change(null)}>{appI18n.t("ui.clear")}</button> : null}</div>
+                    : control.type === "number" ? <InputNumber className="!w-full" aria-label={label} disabled={disabled} min={control.min} max={control.max} step={control.step} value={typeof current === "number" ? current : null} onChange={change} />
+                    : control.type === "asset" ? <Choice aria-label={label} disabled={disabled} clearable value={typeof current === "string" ? current : undefined} placeholder={appI18n.t("workspace.chooseSavedAsset")} options={assets.filter((asset) => asset.kind === control.role && asset.saveState === "saved").map((asset) => ({ label: asset.title, value: `${assetPrefix ? "asset:" : ""}${asset.id}` }))} onChange={(next) => change(next ?? null)} />
+                    : control.type === "select" ? <Choice aria-label={label} disabled={disabled} clearable={!control.required} value={current == null ? undefined : JSON.stringify(current)} options={control.options?.map((option) => ({ label: inputLabel(option), value: JSON.stringify(option.value) }))} onChange={(next) => change(next === undefined ? null : JSON.parse(next))} />
+                    : control.type === "textarea" ? <Textarea aria-label={label} minLength={control.minLength} maxLength={control.maxLength} disabled={disabled} value={typeof current === "string" ? current : ""} autoSize onChange={(event) => change(event.target.value)} />
+                    : <Input aria-label={label} minLength={control.minLength} maxLength={control.maxLength} disabled={disabled} value={typeof current === "string" ? current : ""} onChange={(event) => change(event.target.value)} />}
             </label>;
-        })}
+    };
+    return <div className="grid gap-3" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        {controls.filter((control) => !control.advanced).map(render)}
+        {controls.some((control) => control.advanced && !control.hidden && inputVisible(control, resolved)) ? <details className="space-y-3"><summary className="cursor-pointer text-xs text-muted-foreground">{appI18n.t("modelScripts.advanced")}</summary><div className="mt-3 grid gap-3">{controls.filter((control) => control.advanced).map(render)}</div></details> : null}
     </div>;
 }
+

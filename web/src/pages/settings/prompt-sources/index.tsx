@@ -99,7 +99,6 @@ export default function PromptSourcesPage() {
         try {
             const result = await refreshAllSources();
             assertSession();
-            updateSchedule("lastFetchedAt", new Date().toISOString());
             await invalidatePrompts();
             if (result.failureCount) notify.warning(t("config.promptSources.refreshPartial", { success: result.successCount, failed: result.failureCount }));
             else notify.success(t("config.promptSources.refreshAllSuccess", { sources: result.successCount, total: result.total }));
@@ -157,7 +156,7 @@ export default function PromptSourcesPage() {
                         <Choice value={schedule.intervalMinutes} options={intervalOptions} onChange={(value) => updateSchedule("intervalMinutes", value)} />
                     </Field>
                 </EditorForm>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">{schedule.lastFetchedAt ? t("config.promptSources.lastFetched", { time: formatTime(schedule.lastFetchedAt, i18n.resolvedLanguage) }) : t("config.promptSources.neverScheduled")}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{Object.values(statusQuery.data || {}).some((row) => row.lastSuccessAt) ? t("config.promptSources.lastFetched", { time: formatTime(Object.values(statusQuery.data || {}).map((row) => row.lastSuccessAt || "").sort().at(-1)!, i18n.resolvedLanguage) }) : t("config.promptSources.neverScheduled")}</p>
             </section>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">

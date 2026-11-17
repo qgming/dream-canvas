@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (a *App) ListApprovals(userID string) ([]Approval, error) {
@@ -63,6 +65,7 @@ func (a *App) DecideApproval(userID, id string, accept bool) (Approval, error) {
 				if err := tx.Delete(&AssetReference{}, "project_id = ?", approval.TargetID).Error; err != nil { return err }
 			case "delete_asset":
 				if err := tx.Model(&Asset{}).Where("id = ? AND user_id = ? AND delete_state = ?", approval.TargetID, approval.UserID, "").Updates(map[string]any{"delete_state": "pending", "error": ""}).Error; err != nil { return err }
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: approval.TargetID, Kind: "delete"}).Error; err != nil { return err }
 			default:
 				return problem(400, "invalid_action", "不支持的确认操作")
 			}
@@ -72,9 +75,7 @@ func (a *App) DecideApproval(userID, id string, accept bool) (Approval, error) {
 	})
 	if err != nil { return approval, err }
 	a.notify(userID)
-	if approval.Status == "accepted" && approval.Action == "delete_asset" {
-		if err := a.cleanAsset(approval.TargetID); err != nil { return approval, problem(202, "cleanup_pending", "删除待处理，文件清理尚未完成") }
-	}
+	a.signalWork()
 	return approval, nil
 }
 
@@ -97,15 +98,24 @@ func (a *App) cleanAsset(id string) error {
 	var active int64
 	if err := a.db.Model(&TaskAsset{}).Where("asset_id = ? AND released = ?", asset.ID, false).Count(&active).Error; err != nil { return err }
 	if active > 0 { a.db.Model(&asset).Update("error", "等待使用该素材的任务结束后清理"); return problem(409, "asset_in_use", "等待任务结束后清理") }
+	var responseCopies int64
+	if err := a.db.Model(&GenerationTask{}).Where("response_cleanup_pending = ? AND EXISTS (SELECT 1 FROM task_assets WHERE task_assets.task_id = generation_tasks.id AND task_assets.asset_id = ?)", true, asset.ID).Count(&responseCopies).Error; err != nil { return err }
+	if responseCopies > 0 { a.db.Model(&asset).Update("error", "等待供应商响应中的媒体副本清理后完成全局删除"); return problem(409, "response_cleanup_pending", "仍有供应商响应副本待清理") }
 	if asset.Path == "" { return a.db.Model(&asset).Update("delete_state", "deleted").Error }
 	// Wait for uploads and original reads before unlinking their persistent files.
-	a.transfers <- struct{}{}
-	defer func() { <-a.transfers }()
-	a.previews <- struct{}{}
-	defer func() { <-a.previews }()
+	release, err := a.acquireFile(a.ctx, false, false); if err != nil { return err }; defer release()
+	releasePreview, err := a.acquireFile(a.ctx, true, false); if err != nil { return err }; defer releasePreview()
+	a.assetFiles.Lock(); defer a.assetFiles.Unlock()
 	if err := a.db.First(&asset, "id = ?", id).Error; err != nil { return err }
 	if asset.DeleteState == "deleted" { return nil }
-	if asset.PreviewPath != "" {
+	if asset.StorageID != "" {
+		policy, err := a.executionPolicy()
+		if err != nil { return err }
+		ctx, cancel := context.WithTimeout(a.ctx, seconds(policy.TransferSeconds))
+		err = a.deleteCloudAsset(ctx, asset, policy); cancel()
+		if err != nil { a.db.Model(&asset).Update("error", "云端副本删除失败，仍在处理中，本地原件暂时保留"); return err }
+	}
+	if asset.Kind == "image" || asset.Kind == "video" {
 		preview, err := a.previewPath(asset.ID)
 		if err == nil { err = os.Remove(preview) }
 		if err != nil && !errors.Is(err, os.ErrNotExist) { a.db.Model(&asset).Update("error", "缩略图清理失败，请检查目录权限后重试"); return err }

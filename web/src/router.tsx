@@ -15,7 +15,11 @@ const AccessTokensPage = lazy(() => import("@/pages/settings/access-tokens"));
 const ApprovalsPage = lazy(() => import("@/pages/settings/approvals"));
 const UsersPage = lazy(() => import("@/pages/settings/users"));
 const ChannelsPage = lazy(() => import("@/pages/settings/channels"));
+const ModelScriptsPage = lazy(() => import("@/pages/settings/model-scripts"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
+const RuntimePage = lazy(() => import("@/pages/settings/runtime"));
+const StoragePage = lazy(() => import("@/pages/settings/storage"));
+const UsagePage = lazy(() => import("@/pages/settings/usage"));
 import AssetsPage from "@/pages/assets";
 import CanvasPage from "@/pages/canvas";
 import CanvasProjectPage from "@/pages/canvas/project";
@@ -49,9 +53,14 @@ export const router = createBrowserRouter([
                         { path: "prompt-sources", element: <PromptSourcesPage /> },
                         { path: "access-tokens", element: <AccessTokensPage /> },
                         { path: "approvals", element: <ApprovalsPage /> },
+                        { path: "usage", element: <UsagePage /> },
                         { element: <RequireAdmin />, children: [
                             { path: "users", element: <UsersPage /> },
                             { path: "channels", element: <ChannelsPage /> },
+                            { path: "model-scripts", element: <ModelScriptsPage /> },
+                            { path: "model-scripts/:id", element: <ModelScriptsPage /> },
+                            { path: "runtime", element: <RuntimePage /> },
+                            { path: "storage", element: <StoragePage /> },
                         ] },
                     ] },
                     { path: "/tasks", element: <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner /></div>}><TasksPage /></Suspense> },

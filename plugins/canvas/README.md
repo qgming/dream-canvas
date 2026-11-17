@@ -130,12 +130,14 @@ SDK 导出的 hooks(`useState/useEffect/useMemo/useRef/...`)运行时转发宿�
 | `ctx.getUpstream()` / `ctx.getDownstream()` | 取上/下游相连节点 |
 | `ctx.applyOps(ops)` | 用画布指令集增删节点/连线、选择、触发生成(见下) |
 | `ctx.emit(event, payload)` / `ctx.on(event, handler)` | 节点/插件间事件通信 |
-| `ctx.ai` | 绑定当前项目和节点，经业务后端提交生成；模型与参数使用渠道目录，当前真实执行仍待接入 |
+| `ctx.ai` | 绑定当前项目和节点，经业务后端提交生成；按渠道模型的声明传递参数，真实链路仍待验收 |
 | `ctx.storage` | 按账号与插件隔离的浏览器偏好缓存；项目内容写入节点 metadata，媒体引用服务端资产 |
 
 > `metadata` 的**内置字段**(content、status、model…)是强类型;插件写入的**自定义字段**读出为 `unknown`,按需 `as` 断言(参考 `sticky-note` 的 `pluginColor`)。
 
 `ctx.ai.generateImage` 的 `images` 返回当前账号可访问的稳定资产地址；无需转换成 Base64，可直接预览并保存到节点。生成前会保存目标节点并检查项目版本，保存失败或发生冲突时不提交供应商。完整后端化范围与当前限制见 [Unreleased](../../CHANGELOG.md#已确认的后端化规划待实施)。
+
+生成选项统一使用 `parameters` 传递当前渠道模型声明的参数，例如 `ctx.ai.generateVideo(prompt, { model, parameters: { duration: 6 } })`。参数名和类型以管理员配置为准，尺寸、时长与供应商单次返回张数均放在此对象中；不支持未声明参数。缺省值依次取节点已保存值、个人模型默认值、管理员模型默认值，提交前固定到节点与任务记录中。
 
 ### 画布指令集(ctx.applyOps)
 
