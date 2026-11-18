@@ -141,7 +141,7 @@ func (a *App) UpdateAsset(userID, id, title string, metadata JSON) error {
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var asset Asset
 		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "").Error; err != nil { return err }
-		if err := validateAssetMetadata(tx, userID, metadata); err != nil { return err }
+		metadata, err := validateAssetMetadata(tx, userID, metadata); if err != nil { return err }
 		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(title), "metadata": metadata, "workbench_record_id": ""}).Error
 	})
 	if err == nil { a.notify(userID) }; return err
@@ -158,25 +158,30 @@ func (a *App) CreateTextAsset(userID, title string, metadata JSON) (Asset, error
 	if err := validTitle(title); err != nil { return Asset{}, err }
 	asset := Asset{ID: identifier(), UserID: userID, Kind: "text", Title: strings.TrimSpace(title), Metadata: metadata, SaveState: "saved", SyncState: "local"}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
-		if err := validateAssetMetadata(tx, asset.UserID, asset.Metadata); err != nil { return err }
+		metadata, err := validateAssetMetadata(tx, asset.UserID, asset.Metadata); if err != nil { return err }; asset.Metadata = metadata
 		return tx.Create(&asset).Error
 	})
 	if err == nil { a.notify(asset.UserID) }; return asset, err
 }
 
-func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) error {
-	var metadata map[string]any
-	if json.Unmarshal(data, &metadata) != nil || metadata == nil { return problem(400, "invalid_metadata", "资产信息必须是对象") }
-	if value, exists := metadata["coverUrl"]; exists { if _, ok := value.(string); !ok { return problem(400, "invalid_cover", "封面地址需要文本") } }
-	for _, key := range []string{"source", "note", "content"} { if value, exists := metadata[key]; exists { if _, ok := value.(string); !ok && value != nil { return problem(400, "invalid_metadata", "资产说明需要文本") } } }
-	if value, exists := metadata["tags"]; exists { tags, ok := value.([]any); if !ok { return problem(400, "invalid_metadata", "标签需要文本数组") }; for _, tag := range tags { if _, ok := tag.(string); !ok { return problem(400, "invalid_metadata", "标签需要文本数组") } } }
-	cover, _ := metadata["coverUrl"].(string)
-	if cover == "" { return nil }
+func assetMetadata(data JSON) (map[string]json.RawMessage, error) {
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal(data, &metadata) != nil || metadata == nil { return nil, problem(400, "invalid_metadata", "资产信息必须是对象") }
+	delete(metadata, "tags")
+	return metadata, nil
+}
+
+func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) (JSON, error) {
+	metadata, err := assetMetadata(data); if err != nil { return nil, err }
+	cover := ""
+	if value, exists := metadata["coverUrl"]; exists { var text *string; if json.Unmarshal(value, &text) != nil || text == nil { return nil, problem(400, "invalid_cover", "封面地址需要文本") }; cover = *text }
+	for _, key := range []string{"source", "note", "content"} { if value, exists := metadata[key]; exists { var text *string; if json.Unmarshal(value, &text) != nil { return nil, problem(400, "invalid_metadata", "资产说明需要文本") } } }
+	if cover == "" { return encode(metadata), nil }
 	parts := strings.Split(strings.TrimPrefix(cover, "/api/assets/"), "/")
-	if !strings.HasPrefix(cover, "/api/assets/") || len(parts) != 2 || (parts[1] != "file" && parts[1] != "preview") { return problem(400, "invalid_cover", "请上传封面并使用服务端资产地址") }
+	if !strings.HasPrefix(cover, "/api/assets/") || len(parts) != 2 || (parts[1] != "file" && parts[1] != "preview") { return nil, problem(400, "invalid_cover", "请上传封面并使用服务端资产地址") }
 	var asset Asset
-	if err := tx.First(&asset, "id = ? AND user_id = ? AND kind = ? AND save_state = ? AND delete_state = ?", parts[0], userID, "image", "saved", "").Error; err != nil { return problem(400, "invalid_cover", "封面不存在、已删除或无权访问") }
-	return nil
+	if err := tx.First(&asset, "id = ? AND user_id = ? AND kind = ? AND save_state = ? AND delete_state = ?", parts[0], userID, "image", "saved", "").Error; err != nil { return nil, problem(400, "invalid_cover", "封面不存在、已删除或无权访问") }
+	return encode(metadata), nil
 }
 
 func (a *App) retryAssetCleanup(c *gin.Context) {

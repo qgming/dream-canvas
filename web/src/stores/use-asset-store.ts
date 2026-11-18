@@ -8,11 +8,11 @@ import { previewUrlFor } from "@/services/image-storage";
 import { captureSession } from "@/services/api/client";
 
 export type AssetKind = "text" | "image" | "video" | "audio";
-type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; tags: string[]; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; error?: string };
+type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; error?: string };
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
 export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
-export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
-export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
+export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string; durationMs?: number } };
+export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string; durationMs?: number } };
 export type Asset = TextAsset | ImageAsset | VideoAsset | AudioAsset;
 type AssetInput = Asset extends infer T ? T extends Asset ? Omit<T, "id" | "createdAt" | "updatedAt"> : never : never;
 type AssetStore = {
@@ -26,10 +26,11 @@ type AssetStore = {
 };
 
 function fromServer(record: api.ServerAsset): Asset {
-    const meta = record.metadata || {};
-    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", tags: Array.isArray(meta.tags) ? meta.tags as string[] : [], source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
+    const meta = { ...record.metadata };
+    delete meta.tags;
+    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
     if (record.kind === "text") return { ...base, kind: "text", data: { content: typeof meta.content === "string" ? meta.content : "" } };
-    const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType };
+    const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType, durationMs: record.durationMs };
     if (record.kind === "image") return { ...base, kind: "image", data: { ...data, dataUrl: api.assetUrl(record.id) } };
     if (record.kind === "video") return { ...base, kind: "video", data: { ...data, url: api.assetUrl(record.id) } };
     return { ...base, kind: "audio", data: { ...data, url: api.assetUrl(record.id) } };
@@ -59,7 +60,8 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
     },
     addAsset: async (input) => {
         const assertSession = captureSession();
-        const metadata = { ...input.metadata, coverUrl: input.coverUrl, tags: input.tags, source: input.source, note: input.note, ...(input.kind === "text" ? input.data : {}) };
+        const metadata: Record<string, unknown> = { ...input.metadata, coverUrl: input.coverUrl, source: input.source, note: input.note, ...(input.kind === "text" ? input.data : {}) };
+        delete metadata.tags;
         let id: string;
         if (input.kind === "text") id = (await api.createTextAsset(input.title, metadata)).id;
         else {
@@ -77,7 +79,9 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
         const current = get().assets.find((asset) => asset.id === id);
         if (!current) throw new Error(i18n.t("errors.assetMissing"));
         const next = { ...current, ...patch } as Asset;
-        await api.updateAsset(id, next.title, { ...next.metadata, coverUrl: next.coverUrl, tags: next.tags, source: next.source, note: next.note, ...(next.kind === "text" ? next.data : {}) });
+        const metadata: Record<string, unknown> = { ...next.metadata, coverUrl: next.coverUrl, source: next.source, note: next.note, ...(next.kind === "text" ? next.data : {}) };
+        delete metadata.tags;
+        await api.updateAsset(id, next.title, metadata);
         assertSession();
         await get().loadAssets();
     },

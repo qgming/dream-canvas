@@ -70,6 +70,12 @@ type AssetReference struct {
 	AssetID string `gorm:"primaryKey"`
 }
 
+func (asset Asset) MarshalJSON() ([]byte, error) {
+	type plain Asset
+	metadata, err := assetMetadata(asset.Metadata); if err != nil { return nil, err }
+	return json.Marshal(struct { plain; Metadata map[string]json.RawMessage `json:"metadata"` }{plain(asset), metadata})
+}
+
 type Approval struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	UserID string `json:"-" gorm:"index;not null"`

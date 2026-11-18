@@ -1,46 +1,25 @@
-import { Copy, FileText } from "lucide-react";
+import { Copy, FileText, Image, Video } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge as Tag } from "@/components/ui/display";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import type { Prompt } from "@/services/api/prompts";
 
-import { formatPromptDate, type Prompt } from "@/services/api/prompts";
+const promptIcons = { text: FileText, image: Image, video: Video };
 
-export function PromptCard({
-    item,
-    onOpen,
-    onCopy,
-    actionLabel,
-    actionIcon = <Copy className="size-3.5" />,
-    actionType = "text",
-    extraAction,
-    compact = false,
-}: {
-    item: Prompt;
-    onOpen: () => void;
-    onCopy: () => void;
-    actionLabel?: string;
-    actionIcon?: ReactNode;
-    actionType?: "text" | "primary";
-    extraAction?: ReactNode;
-    compact?: boolean;
-}) {
-    const { i18n, t } = useTranslation();
-    return (
-        <article className={compact ? "group overflow-hidden rounded-xl border border-border bg-card" : "flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card"}>
-                <button type="button" className="block w-full cursor-pointer text-left" onClick={onOpen}>
-                    {item.coverUrl ? <img src={item.coverUrl} alt={item.title} className={compact ? "aspect-square w-full object-cover transition-transform duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover:scale-[1.03]" : "aspect-[4/3] w-full object-cover"} loading="lazy" /> : <span className={compact ? "grid aspect-square w-full place-items-center bg-muted text-muted-foreground  " : "grid aspect-[4/3] w-full place-items-center bg-muted text-muted-foreground  "}><FileText className="size-8" /></span>}
-                </button>
-            <button type="button" className={compact ? "block w-full cursor-pointer text-left" : "block w-full flex-1 cursor-pointer text-left"} onClick={onOpen}>
-                <div className={compact ? "px-3 py-2.5" : "p-4"}>
-                    <div className="flex items-start justify-between gap-3">
-                        <h2 className="line-clamp-1 text-sm font-medium text-foreground ">{item.title}</h2>
-                        {!compact ? <span className="shrink-0 text-xs text-muted-foreground ">{formatPromptDate(item.updatedAt, i18n.resolvedLanguage)}</span> : null}
-                    </div>
-                    {!compact ? <><p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground ">{item.description || item.prompt}</p><div className="mt-3 flex flex-wrap gap-1.5">{item.tags.map((tag) => <Tag key={tag} className="m-0 text-xs">{tag}</Tag>)}</div></> : null}
-                </div>
-            </button>
-            {!compact ? <div className="mt-auto flex items-center gap-2 px-4 pb-4"><Button className="w-full" variant={actionType === "primary" ? "default" : "ghost"} size="sm" icon={actionIcon} onClick={onCopy}>{actionLabel || t("common.copy")}</Button>{extraAction}</div> : null}
-        </article>
-    );
+export function PromptCard({ item, onOpen, onCopy, extraAction, compact = false }: { item: Prompt; onOpen: () => void; onCopy: () => void; extraAction?: ReactNode; compact?: boolean }) {
+    const { t } = useTranslation();
+    const Icon = promptIcons[item.type];
+    return <article className={cn("flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25", !compact && "min-h-40")}>
+        <button type="button" onClick={onOpen} className={cn("flex min-w-0 flex-1 flex-col p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", !compact && "pb-1")}>
+            <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5"><Icon className="size-3.5" />{t(`prompts.types.${item.type}`)}</span>
+                {item.category ? <span>{item.category}</span> : null}
+                <span className="ml-auto">{t(item.builtIn ? "inspiration.builtin" : "inspiration.mine")}</span>
+            </div>
+            <h3 className="line-clamp-2 text-sm font-medium leading-5">{item.title}</h3>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.description || item.prompt}</p>
+        </button>
+        {!compact ? <div className="flex items-center justify-end gap-0.5 px-2 pb-2">{extraAction}<Button variant="ghost" size="icon" className="size-7" title={t("common.copyPrompt")} aria-label={t("common.copyPrompt")} onClick={onCopy}><Copy className="size-4" /></Button></div> : null}
+    </article>;
 }

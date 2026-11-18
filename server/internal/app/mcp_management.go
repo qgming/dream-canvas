@@ -12,11 +12,8 @@ func managementTools() []toolDefinition {
 	objectField := func(description string) map[string]any { return map[string]any{"type": "object", "description": description} }
 	tool := func(name, description, scope string, fields map[string]any, required ...string) toolDefinition { return toolDefinition{name, description, scope, toolSchema(fields, required...)} }
 	return []toolDefinition{
-		tool("preference_get", "读取创作偏好或提示词来源；需要不限项目的授权", "read", map[string]any{"name": stringField("generation 或 prompt-sources")}, "name"),
-		tool("preference_save", "按版本保存个人创作偏好或提示词来源；模型默认参数由管理员配置，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation 或 prompt-sources"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；generation 仅支持 count/canvasImageCount/nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
-		tool("prompt_source_statuses", "读取提示词来源缓存及错误状态", "read", map[string]any{}),
-		tool("prompt_source_get", "读取已配置来源的提示词缓存", "read", map[string]any{"sourceId": stringField("来源 ID")}, "sourceId"),
-		tool("prompt_source_refresh", "主动重新读取已保存来源，不改写来源配置", "edit", map[string]any{"sourceId": stringField("来源 ID")}, "sourceId"),
+		tool("preference_get", "读取个人创作偏好；需要不限项目的授权", "read", map[string]any{"name": stringField("generation")}, "name"),
+		tool("preference_save", "按版本保存个人创作偏好；模型默认参数由管理员配置，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；仅支持 count/canvasImageCount/nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
 		tool("asset_cleanup", "继续已确认的全局资产删除，不创建新的删除意愿", "edit", map[string]any{"assetId": stringField("待删除资产 ID")}, "assetId"),
 		tool("assistant_threads_list", "读取全局助手对话列表，需要单独的助手权限", "assistant", map[string]any{}),
 		tool("assistant_thread_get", "读取全局对话、轮次、消息与待确认项", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
@@ -74,8 +71,6 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	if strings.HasPrefix(name, "preference_") && len(p.Projects) > 0 { return nil, true, problem(403, "preference_scope", "全局偏好需要不限项目的授权") }
 	if name == "preference_get" { value, err = a.GetPreference(p.User.ID, read("name")); return value, true, err }
 	if name == "preference_save" { var request struct { Version uint64 `json:"version"`; Value JSON `json:"value"` }; if err = decode(input, &request); err == nil { value, err = a.SavePreference(p.User.ID, read("name"), request.Version, request.Value) }; return value, true, err }
-	if name == "prompt_source_statuses" { rows := []PromptCache{}; err = a.db.Where("user_id = ?", p.User.ID).Omit("items", "signature").Find(&rows).Error; return rows, true, err }
-	if name == "prompt_source_get" || name == "prompt_source_refresh" { value, err = a.sourcePrompts(ctx, p.User.ID, read("sourceId"), name == "prompt_source_refresh"); return value, true, err }
 	if name == "asset_cleanup" {
 		if len(p.Projects) > 0 { return nil, true, problem(403, "asset_scope", "全局删除清理需要不限项目的授权") }
 		var asset Asset; if err = a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", read("assetId"), p.User.ID, "pending").Error; err != nil { return nil, true, err }

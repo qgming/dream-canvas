@@ -5,11 +5,9 @@ import { EmptyState as Empty } from "@/components/ui/display";
 import { Input } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
 import { Spinner as Spin } from "@/components/ui/display";
-import { FilterChip } from "@/components/ui/display";
 import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/popover";
-import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, LayoutGrid, ListChecks, Music2, Plus, Rows3, Search, Settings2, Square, Trash2, Type, Video, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
@@ -19,12 +17,13 @@ import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { exportCanvasNodes } from "@/lib/canvas/canvas-export";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { cn } from "@/lib/utils";
-import { PromptDetailDialog } from "@/pages/prompts/components/prompt-detail-dialog";
-import { fetchSourcePrompts, type Prompt } from "@/services/api/prompts";
+import { PromptDetailDialog } from "@/components/prompts/prompt-detail-dialog";
+import { ALL_PROMPTS_OPTION, type Prompt, type PromptScope } from "@/services/api/prompts";
+import { usePromptList } from "@/components/prompts/use-prompt-list";
+import { useCopyText } from "@/hooks/use-copy-text";
 import { uploadMediaFile } from "@/services/file-storage";
 import { previewUrlFor, subscribeImagePreviews, getImagePreviewRevision, uploadImage } from "@/services/image-storage";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
-import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -351,7 +350,7 @@ function CheckMark({ checked, theme }: { checked: boolean; theme: CanvasTheme })
 }
 
 // ---------------------------------------------------------------------------
-// Assets tab: collapsible type groups, tag filtering, and click-to-insert.
+// Assets tab: collapsible type groups, search, and click-to-insert.
 // ---------------------------------------------------------------------------
 
 const ASSET_GROUPS: { kind: AssetKind; icon: typeof Square }[] = [
@@ -374,17 +373,14 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
     const addAsset = useAssetStore((state) => state.addAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
     const [keyword, setKeyword] = useState("");
-    const [tagFilter, setTagFilter] = useState<string>("all");
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const allTags = useMemo(() => Array.from(new Set(assets.flatMap((asset) => asset.tags || []))).slice(0, 20), [assets]);
-
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
-        return assets.filter((asset) => (tagFilter === "all" || (asset.tags || []).includes(tagFilter)) && (!query || [asset.title, ...(asset.tags || [])].join(" ").toLowerCase().includes(query)));
-    }, [assets, keyword, tagFilter]);
+        return assets.filter((asset) => !query || asset.title.toLowerCase().includes(query));
+    }, [assets, keyword]);
 
     const groups = useMemo(() => ASSET_GROUPS.map((group) => ({ ...group, items: filtered.filter((asset) => asset.kind === group.kind) })).filter((group) => group.items.length > 0), [filtered]);
 
@@ -398,11 +394,11 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
             for (const file of files) {
                 if (file.type.startsWith("image/")) {
                     const image = await uploadImage(file);
-                    await addAsset({ kind: "image", title: file.name || t("assets.kinds.image"), coverUrl: image.url, tags: [], data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType } });
+                    await addAsset({ kind: "image", title: file.name || t("assets.kinds.image"), coverUrl: image.url, data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType } });
                     added += 1;
                 } else if (file.type.startsWith("video/") || file.type.startsWith("audio/")) {
                     const media = await uploadMediaFile(file, "video");
-                    await addAsset({ kind: file.type.startsWith("audio/") ? "audio" : "video", title: file.name || appI18n.t("workspace.mediaAsset"), coverUrl: "", tags: [], data: { url: media.url, storageKey: media.storageKey, width: media.width || 0, height: media.height || 0, bytes: media.bytes, mimeType: media.mimeType } });
+                    await addAsset({ kind: file.type.startsWith("audio/") ? "audio" : "video", title: file.name || appI18n.t("workspace.mediaAsset"), coverUrl: "", data: { url: media.url, storageKey: media.storageKey, width: media.width || 0, height: media.height || 0, bytes: media.bytes, mimeType: media.mimeType } });
                     added += 1;
                 }
             }
@@ -434,18 +430,6 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
                 </button>
                 <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple className="hidden" onChange={(e) => void handleFiles(e.target.files)} />
             </div>
-            {allTags.length ? (
-                <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-                    <FilterChip checked={tagFilter === "all"} className={cn("prompt-filter-tag", tagFilter === "all" && "is-active")} onChange={() => setTagFilter("all")}>
-                        {t("common.all")}
-                    </FilterChip>
-                    {allTags.map((tag) => (
-                        <FilterChip key={tag} checked={tagFilter === tag} className={cn("prompt-filter-tag", tagFilter === tag && "is-active")} onChange={() => setTagFilter((prev) => (prev === tag ? "all" : tag))}>
-                            {tag}
-                        </FilterChip>
-                    ))}
-                </div>
-            ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {groups.length ? (
                     <div className="space-y-1">
@@ -519,26 +503,14 @@ function AssetCover({ asset }: { asset: Asset }) {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt library tab: collapsible source groups, lazy loading, and copy or text-node insertion actions.
+// Prompt library tab: built-in and personal prompts from the same server catalog.
 // ---------------------------------------------------------------------------
 
 const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { onInsert: (payload: InsertAssetPayload) => void; theme: CanvasTheme }) {
-    const { notify } = useFeedback();
     const { t } = useTranslation();
-    const sources = usePromptSourceStore((state) => state.sources);
-    const enabledSources = useMemo(() => sources.filter((source) => source.enabled), [sources]);
+    const copyText = useCopyText();
     const [keyword, setKeyword] = useState("");
-    const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const [detail, setDetail] = useState<Prompt | null>(null);
-
-    const copyPrompt = async (prompt: string) => {
-        try {
-            await navigator.clipboard.writeText(prompt);
-            notify.success(t("canvas.sidePanel.promptCopied"));
-        } catch {
-            notify.error(t("canvas.sidePanel.copyFailed"));
-        }
-    };
 
     return (
         <div className="flex h-full flex-col">
@@ -547,65 +519,49 @@ const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { o
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 <div className="space-y-1">
-                    {enabledSources.length ? enabledSources.map((source) => (
-                        <PromptSourceGroup
-                            key={source.id}
-                            sourceId={source.id}
-                            sourceName={source.name}
+                    {(["builtin", "user"] as const).map((scope) => (
+                        <PromptScopeGroup
+                            key={scope}
+                            scope={scope}
                             keyword={keyword}
-                            open={!!expanded[source.id]}
                             theme={theme}
-                            onToggle={() => setExpanded((prev) => ({ ...prev, [source.id]: !prev[source.id] }))}
                             onInsert={onInsert}
                             onView={setDetail}
                         />
-                    )) : <Empty description={t("canvas.sidePanel.noPrompts")} className="pt-12" />}
+                    ))}
                 </div>
             </div>
-            <PromptDetailDialog prompt={detail} onClose={() => setDetail(null)} onCopy={(prompt) => void copyPrompt(prompt)} />
+            <PromptDetailDialog prompt={detail} onClose={() => setDetail(null)} onCopy={(prompt) => void copyText(prompt, t("canvas.sidePanel.promptCopied"))} />
         </div>
     );
 });
 
-function PromptSourceGroup({
-    sourceId,
-    sourceName,
+function PromptScopeGroup({
+    scope,
     keyword,
-    open,
     theme,
-    onToggle,
     onInsert,
     onView,
 }: {
-    sourceId: string;
-    sourceName: string;
+    scope: PromptScope;
     keyword: string;
-    open: boolean;
     theme: CanvasTheme;
-    onToggle: () => void;
     onInsert: (payload: InsertAssetPayload) => void;
     onView: (prompt: Prompt) => void;
 }) {
     const { t } = useTranslation();
-    // Load expanded sources or search results, and cache them to avoid repeated requests.
+    const [open, setOpen] = useState(true);
     const showResults = open || !!keyword.trim();
-    const query = useQuery({ queryKey: ["side-panel-prompts", sourceId], queryFn: () => fetchSourcePrompts(sourceId), enabled: showResults, staleTime: 1000 * 60 * 60 });
-
-    const filtered = useMemo(() => {
-        const items = query.data || [];
-        const q = keyword.trim().toLowerCase();
-        if (!q) return items;
-        return items.filter((item) => [item.title, item.prompt, ...item.tags].join(" ").toLowerCase().includes(q));
-    }, [query.data, keyword]);
+    const { query, items, total } = usePromptList({ keyword, category: ALL_PROMPTS_OPTION, scope, enabled: showResults });
 
     const insertPrompt = (item: Prompt) => onInsert({ kind: "text", content: item.prompt, title: item.title });
 
     return (
         <div>
-            <button type="button" onClick={onToggle} className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-xs font-semibold opacity-75 transition hover:opacity-100">
+            <button type="button" onClick={() => setOpen(!open)} aria-expanded={showResults} className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-xs font-semibold opacity-75 transition hover:opacity-100">
                 <ChevronRight className={cn("size-3.5 transition-transform", showResults && "rotate-90")} />
                 <BookOpen className="size-3.5" />
-                <span className="min-w-0 flex-1 truncate">{sourceName}</span>
+                <span className="min-w-0 flex-1 truncate">{t(scope === "builtin" ? "prompts.builtin" : "prompts.mine")}</span><span className="font-normal opacity-60">{total}</span>
             </button>
             {showResults ? (
                 <div className="px-1 pb-2 pt-1">
@@ -617,15 +573,16 @@ function PromptSourceGroup({
                         <button type="button" onClick={() => void query.refetch()} className="block w-full py-4 text-center text-xs text-destructive opacity-80 transition hover:opacity-100">
                             {t("canvas.sidePanel.loadFailedRetry")}
                         </button>
-                    ) : filtered.length ? (
+                    ) : items.length ? (
                         <div className="space-y-1.5">
-                            {filtered.map((item) => (
+                            {items.map((item) => (
                                 <PromptRow key={item.id} item={item} theme={theme} onInsert={() => insertPrompt(item)} onView={() => onView(item)} />
                             ))}
                         </div>
                     ) : (
-                        <div className="py-4 text-center text-xs opacity-40">{keyword.trim() ? t("canvas.sidePanel.noMatchingPrompts") : t("canvas.sidePanel.sourceEmpty")}</div>
+                        <div className="py-4 text-center text-xs text-muted-foreground">{t(keyword.trim() ? "canvas.sidePanel.noMatchingPrompts" : scope === "user" ? "prompts.personalEmpty" : "prompts.empty")}</div>
                     )}
+                    {query.hasNextPage ? <Button variant="ghost" size="sm" className="mt-2 w-full" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t("prompts.more")}</Button> : null}
                 </div>
             ) : null}
         </div>
@@ -636,30 +593,28 @@ function PromptRow({ item, theme, onInsert, onView }: { item: Prompt; theme: Can
     const { t } = useTranslation();
     return (
         <div className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-black/5 dark:hover:bg-white/5">
-            {item.coverUrl ? (
-                <img src={item.coverUrl} alt="" className="size-10 shrink-0 rounded-md object-cover" loading="lazy" />
-            ) : (
-                <span className="grid size-10 shrink-0 place-items-center rounded-md" style={{ background: theme.node.panel }}>
+                <span className="grid size-10 shrink-0 place-items-center">
                     <FileText className="size-4 opacity-50" />
                 </span>
-            )}
             <button type="button" onClick={onView} className="min-w-0 flex-1 text-left">
                 <div className="truncate text-sm font-medium leading-snug">{item.title}</div>
-                <div className="mt-0.5 truncate text-xs leading-snug opacity-50">{item.prompt}</div>
+                <div className="mt-0.5 truncate text-xs leading-snug opacity-50">{t(`prompts.types.${item.type}`)} · {item.description || item.prompt}</div>
             </button>
             <div className="flex shrink-0 flex-col items-center gap-0.5">
-                <Tooltip title={t("canvas.sidePanel.viewDetails")}><button type="button" onClick={onView} className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-muted hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.viewDetails")}>
+                <Button variant="ghost" size="icon" title={t("canvas.sidePanel.viewDetails")} onClick={onView} className="size-6 rounded-md opacity-60 hover:opacity-100" aria-label={t("canvas.sidePanel.viewDetails")}>
                     <Eye className="size-3.5" />
-                </button></Tooltip>
-                <Tooltip title={t("canvas.sidePanel.inserted")}><button
-                    type="button"
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    title={t("canvas.sidePanel.inserted")}
                     onClick={onInsert}
-                    className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-muted hover:opacity-100 dark:hover:bg-white/10"
+                    className="size-6 rounded-md opacity-60 hover:opacity-100"
                     style={{ color: theme.toolbar.activeText }}
                     aria-label={t("canvas.sidePanel.inserted")}
                 >
                     <Plus className="size-3.5" />
-                </button></Tooltip>
+                </Button>
             </div>
         </div>
     );

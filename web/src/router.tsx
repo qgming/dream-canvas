@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/display";
 const GeneralSettingsPage = lazy(() => import("@/pages/settings/general"));
 const AccountSettingsPage = lazy(() => import("@/pages/settings/account"));
 const PreferencesPage = lazy(() => import("@/pages/settings/preferences"));
-const PromptSourcesPage = lazy(() => import("@/pages/settings/prompt-sources"));
+const InspirationPage = lazy(() => import("@/pages/inspiration"));
 const ModelsPage = lazy(() => import("@/pages/settings/models"));
 const AccessTokensPage = lazy(() => import("@/pages/settings/access-tokens"));
 const ApprovalsPage = lazy(() => import("@/pages/settings/approvals"));
@@ -27,7 +27,6 @@ import CanvasProjectPage from "@/pages/canvas/project";
 import ImagePage from "@/pages/image";
 import NotFound from "@/pages/not-found";
 import PageError from "@/pages/error";
-import PromptsPage from "@/pages/prompts";
 import VideoPage from "@/pages/video";
 
 export const router = createBrowserRouter([
@@ -43,7 +42,7 @@ export const router = createBrowserRouter([
                     { path: "/image", element: <ImagePage /> },
                     { path: "/video", element: <VideoPage /> },
                     { path: "/assets", element: <AssetsPage /> },
-                    { path: "/prompts", element: <PromptsPage /> },
+                    { path: "/inspiration", element: <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner /></div>}><InspirationPage /></Suspense> },
                     { path: "/canvas", element: <CanvasPage /> },
                     { path: "/canvas/:id", element: <CanvasProjectPage /> },
                     { path: "/settings", element: <SettingsLayout />, children: [
@@ -51,7 +50,6 @@ export const router = createBrowserRouter([
                         { path: "account", element: <AccountSettingsPage /> },
                         { path: "preferences", element: <PreferencesPage /> },
                         { path: "models", element: <ModelsPage /> },
-                        { path: "prompt-sources", element: <PromptSourcesPage /> },
                         { path: "access-tokens", element: <AccessTokensPage /> },
                         { path: "approvals", element: <ApprovalsPage /> },
                         { path: "usage", element: <UsagePage /> },

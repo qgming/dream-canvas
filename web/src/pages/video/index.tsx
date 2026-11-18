@@ -334,7 +334,6 @@ export default function VideoPage() {
             kind: "video",
             title: t("videoWorkbench.resultTitle"),
             coverUrl: "",
-            tags: [],
             source: t("videoWorkbench.source"),
             data: { url: video.url, storageKey: video.storageKey, width: video.width, height: video.height, bytes: video.bytes, mimeType: video.mimeType },
             metadata: { source: "video-page", prompt },
@@ -603,7 +602,7 @@ export default function VideoPage() {
                     <ModelParameters key={`${model}:parameters`} config={effectiveConfig} model={model} value={parameters[model]} compact section="parameters" references={visibleReferences} disabled={running} onChange={updateParameters} />
                 </div>
             </Dialog>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} initialType="video" />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
     );

@@ -285,7 +285,6 @@ export default function ImagePage() {
             kind: "image",
             title: t("imageWorkbench.resultTitle", { count: index + 1 }),
             coverUrl: stored.url,
-            tags: [],
             source: t("imageWorkbench.source"),
             data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
             metadata: { source: "image-page", prompt },
@@ -593,7 +592,7 @@ export default function ImagePage() {
                     <ModelParameters key={model} config={effectiveConfig} model={model} value={parameterValues} compact disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                 </div>
             </Dialog>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} initialType="image" />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
     );

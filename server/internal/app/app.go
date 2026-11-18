@@ -38,7 +38,6 @@ type App struct {
 	workMu sync.Mutex
 	active map[string]context.CancelFunc
 	previewMu sync.Mutex
-	promptMu sync.Mutex
 	clients clientRegistry
 	logs *appLogger
 }
@@ -57,7 +56,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -146,9 +145,11 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/auth/password", a.changePassword)
 	authed.GET("/preferences/:name", a.getPreference)
 	authed.PUT("/preferences/:name", a.savePreference)
-	authed.GET("/prompts/sources/statuses", a.promptStatuses)
-	authed.GET("/prompts/sources/:id", a.getSourcePrompts)
-	authed.POST("/prompts/sources/:id/refresh", a.getSourcePrompts)
+	authed.GET("/prompts", a.listPrompts)
+	authed.POST("/prompts", a.savePrompt)
+	authed.GET("/prompts/:id", a.getPrompt)
+	authed.PUT("/prompts/:id", a.savePrompt)
+	authed.DELETE("/prompts/:id", a.deletePrompt)
 	authed.POST("/clients", a.saveClient)
 	authed.DELETE("/clients/:id", a.removeClient)
 	authed.GET("/clients/:id/events", a.clientEvents)

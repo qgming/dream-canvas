@@ -1,0 +1,257 @@
+[
+  {
+    "id": "builtin:short-drama-outline", "type": "text",
+    "title": "故事改编与短剧分集",
+    "description": "把故事或小说整理成有因果、可拍摄的分集大纲，保留原作设定与悬念。",
+    "category": "剧本开发",
+    "prompt": "你是短剧编剧。根据以下材料制作分集大纲。\n原作或创意：{{故事文本}}\n类型与观众：{{类型、目标观众}}\n制作目标：{{集数、单集大致时长、横竖屏；未定项注明未定}}\n必须保留：{{人物关系、关键事件、世界规则、结局或原文台词}}\n先提炼主角目标、阻力、人物关系与核心悬念，再按因果推进划分集数，不把原文章节直接当作集数。每集列出开场处境、人物选择、冲突升级、信息揭示与集尾未解决的问题。让反转有铺垫，避免靠巧合解决冲突。最后列出可合并的场景、主要人物与叙事道具，以及改编新增内容和待确认项。本轮只交付文字，不生成媒体。",
+    "en": {
+      "title": "Story adaptation and episode outline",
+      "description": "Adapt a story into shootable short-drama episodes while preserving its rules and suspense.",
+      "category": "Screenwriting",
+      "prompt": "Act as a short-drama screenwriter. Develop an episode outline from these materials.\nStory or premise: {{source text}}\nGenre and audience: {{genre and audience}}\nProduction goal: {{episode count, approximate episode duration, aspect ratio; mark undecided items}}\nPreserve: {{relationships, key events, world rules, ending or verbatim dialogue}}\nIdentify the protagonist's goal, resistance, relationships and central unanswered question. Divide episodes by cause and effect rather than source chapter numbers. For each episode, state the opening situation, consequential choice, escalating conflict, reveal and unresolved closing question. Seed reversals and avoid coincidence solving the conflict. Finish with opportunities to reuse locations, a cast and narrative-prop list, adaptation additions and open decisions. Deliver text only in this round."
+    }
+  },
+  {
+    "id": "builtin:episode-screenplay", "type": "text",
+    "title": "单集可拍剧本", "description": "从分集大纲写出场次、可见动作、对白与情绪变化。",
+    "category": "剧本开发",
+    "prompt": "根据大纲写一集可拍摄的短剧剧本。\n本集大纲：{{大纲}}\n人物与前情：{{人物关系、上一集结束状态}}\n本集目标：{{时长建议、核心情绪、结尾悬念}}\n固定设定：{{时代、场景、人物动机及必须保留的台词}}\n按场次组织，以「场次号 / 内外景 / 地点 / 日夜」开头。动作写观众能看到或听到的事实；对白标明说话人，区分现场对白、画外音与内心独白。让动作与对白交替推动关系变化，删去重复解释。保留关键台词原文，不把剧本塞成运镜术语表。列出每场开场状态与结束变化，检查前因后果、道具去向和台词是否能在建议时长内自然说完；估时注明为建议。只输出剧本与少量待确认项。",
+    "en": {
+      "title": "Shootable episode screenplay", "description": "Write scenes, observable action and dialogue with clear emotional changes.",
+      "category": "Screenwriting",
+      "prompt": "Write one shootable short-drama episode.\nOutline: {{episode outline}}\nCast and prior events: {{relationships and previous ending state}}\nEpisode goal: {{suggested duration, central emotion, ending question}}\nEstablished facts: {{period, locations, motivations and exact lines to preserve}}\nOrganize scenes under scene number / interior or exterior / location / day or night. Write actions as things the audience can see or hear. Name each speaker and distinguish in-scene dialogue, voiceover and internal monologue. Alternate action and dialogue to change relationships and remove redundant exposition. Preserve required lines verbatim. Avoid turning the screenplay into a camera glossary. Record each scene's opening state and resulting change. Check causality, prop ownership and natural delivery time; label duration estimates as suggestions. Output the screenplay and a brief list of unresolved decisions."
+    }
+  },
+  {
+    "id": "builtin:character-bible", "type": "text",
+    "title": "角色设定与连戏锚点", "description": "区分角色固定外貌、场次造型与逐镜变化，供三视图和视频复用。",
+    "category": "视觉设定",
+    "prompt": "从以下剧本提炼影视角色设定，不生成图片。\n剧本：{{文本}}\n视觉方向：{{写实、动画或其他方向}}\n给角色分配稳定编号 C01、C02……。每位角色写清：叙事作用与动机、年龄段与体态、脸型与辨识特征、发型发色、基础服装与鞋、关系及声音表演方向。将「固定外貌」「按场次变化的服装或伤痕」「逐镜变化的持物、手势、视线」分开。为固定外貌和每套造型各写一条可原样复用的简短视觉描述，避免相互矛盾。列出正面全身基准图、侧面、背面、表情或细节图的实际需求；道具单独建档，不靠始终拿在手里定义身份。原文未给出的设计标为创作建议，不伪造已存在的参考图。",
+    "en": {
+      "title": "Character bible and continuity anchors", "description": "Separate fixed identity, scene-specific looks and changing shot states for reusable references.",
+      "category": "Visual development",
+      "prompt": "Extract a film character bible without generating images.\nScreenplay: {{text}}\nArt direction: {{live action, animation or other direction}}\nAssign stable IDs C01, C02 and so on. For each character describe story function, motivation, age range, build, face and distinguishing features, hair, base clothing and shoes, relationships, and vocal performance. Separate fixed appearance, scene-specific costume or injury changes, and per-shot hands, props and eyelines. Write a short reusable visual phrase for identity and each costume state. List needed front full-body, profile, back, expression and detail references. Catalogue props separately; do not define identity by permanently holding a prop. Label additions not supported by the source as design suggestions, and do not invent existing reference images."
+    }
+  },
+  {
+    "id": "builtin:production-assets", "type": "text",
+    "title": "剧本拆人物、场景与道具", "description": "建立可复用的制作资产清单，记录使用场次和状态变化。",
+    "category": "视觉设定",
+    "prompt": "担任影视美术统筹，拆解以下剧本的制作资产。\n剧本：{{文本}}\n已有人物与素材：{{已有设定或资产清单，没有则写无}}\n沿用已有编号，新人物用 C、场景用 S、道具用 P 编号。分别列出名称、可见特征、出现的场次、叙事用途、状态变化与需要的参考图。场景记录门窗、主要陈设、出入口、人物可活动区域、主光方向及需要的正反机位；道具记录尺寸参照、材质、持有人及完整、打开、破损等状态。区分已有资产和待制作资产，同一物件不同称呼合并，实质不同的造型保留变体。给出先角色基准、再场景与道具、再镜头图的依赖顺序，不生成素材、不假设图片已存在。",
+    "en": {
+      "title": "Cast, location and prop breakdown", "description": "Build a reusable asset inventory with scene usage, variants and state changes.",
+      "category": "Visual development",
+      "prompt": "Act as a film art coordinator and break down this screenplay.\nScreenplay: {{text}}\nExisting designs and assets: {{inventory or none}}\nReuse established IDs; use C for characters, S for locations and P for props. Record each item's name, visible features, scenes, narrative function, state changes and required images. For locations include doors, windows, major fixtures, entrances, blocking areas, key-light direction and reverse coverage. For props include scale, material, owner and intact, open or damaged states. Distinguish existing assets from work to create. Merge aliases for the same item while retaining genuinely different states. Give a dependency order from character anchors through locations and props to shot images. Do not generate media or pretend references exist."
+    }
+  },
+  {
+    "id": "builtin:shot-breakdown", "type": "text",
+    "title": "剧本文本拆分镜", "description": "把剧情拆成可独立出图、出视频的镜头，每镜明确起点与终点。",
+    "category": "分镜设计",
+    "prompt": "将剧本拆成可执行的分镜表。\n剧本：{{文本}}\n角色与场景设定：{{设定}}\n画幅与目标时长：{{要求}}\n按剧情顺序为镜头编号 EP01-SH001……。每镜写明：叙事信息、场景和角色编号、景别与机位、开场构图和人物站位、动作过程、结束状态、对白或音效、建议时长、与相邻镜头的衔接。动作具体到谁用哪只手拿什么、看向何处、从哪里移动到哪里。对白保留说话人和原文，考虑自然语速及反应停顿，不强行压缩到固定秒数。将每镜的「首帧图片提示词」和「动作视频提示词」单独列出；首帧只描述一个瞬间，视频描述状态变化。保持轴线、视线、道具与光源连续，明确有意跳时或换场。本轮只拆分镜，不生成媒体。",
+    "en": {
+      "title": "Screenplay to shot breakdown", "description": "Plan independently generatable shots with clear opening and ending states.",
+      "category": "Storyboarding",
+      "prompt": "Break this screenplay into an executable shot list.\nScreenplay: {{text}}\nCharacter and location bible: {{designs}}\nAspect ratio and target duration: {{requirements}}\nNumber shots EP01-SH001 onward in story order. Include narrative information, location and character IDs, framing and camera position, opening composition and blocking, action, ending state, dialogue or sound, suggested duration and transition. Specify which hand holds what, eyelines and movement paths. Preserve speakers and exact lines with natural delivery and reaction pauses. Provide separate first-frame image and motion-video prompts for each shot. An image describes one instant; a video describes change. Preserve axis, eyelines, props and light direction. Mark intentional time jumps or scene changes. Deliver planning text only."
+    }
+  },
+  {
+    "id": "builtin:opening-blocking", "type": "text",
+    "title": "双人戏站位与正反打", "description": "先固定空间、轴线和视线，再设计主镜头与正反打覆盖。",
+    "category": "分镜设计",
+    "prompt": "为下面的对话场次设计开场调度与正反打。\n场次：{{剧本}}\n空间与陈设：{{场景说明或参考图信息}}\n人物与情绪关系：{{角色设定}}\n先用简短文字平面图标记门窗、桌椅、出入口、角色初始位置及朝向，区分从场景平面和从摄影机看到的左右。建立人物关系轴线与主机位，设计全景、双方近景、过肩及必要的反应或道具特写；每个机位说明新增信息和使用时机。记录眼线方向、肩位、进出画方向、持物手与主光来源。有人移动越轴时说明重建空间的镜头。为每个必要镜头给一条首帧描述，不为增加镜头而重复同一信息。没有场景图时把站位标为待视觉核对的方案。",
+    "en": {
+      "title": "Dialogue blocking and reverse coverage", "description": "Establish geography, axis and eyelines before planning master and reverse shots.",
+      "category": "Storyboarding",
+      "prompt": "Plan opening blocking and shot/reverse-shot coverage.\nScene: {{screenplay}}\nSpace and fixtures: {{description or reference details}}\nCharacters and emotional relationship: {{designs}}\nStart with a simple text floor plan showing doors, windows, furniture, entrances, starting positions and facing directions. Distinguish floor-plan directions from camera-relative left and right. Establish the interaction axis and master camera, then choose useful wide, close, over-shoulder, reaction and prop coverage. Explain what information each angle reveals and when to use it. Track eyelines, foreground shoulders, entrances and exits, holding hands and key-light source. Explain how to re-establish an intentional axis crossing. Supply one opening-frame description per necessary shot. Avoid redundant coverage. Without location images, mark the layout as provisional."
+    }
+  },
+  {
+    "id": "builtin:dialogue-polish", "type": "text",
+    "title": "对白改写与表演节拍", "description": "用潜台词、停顿和可见动作改善短剧对白，不改变人物动机。",
+    "category": "剧本开发",
+    "prompt": "润色这段影视对白。\n原文：{{对白及上下文}}\n人物目标和关系：{{设定}}\n需要保留的原句：{{原句或无}}\n为每人明确当下想从对方得到什么、在隐藏什么。保留剧情信息与人物动机，减少双方都知道的说明性台词，让打断、停顿、回避视线、拿放道具等可见行为承载潜台词。输出一版可拍场景，再简要说明关键修改。将可见说话、画外音和内心独白分开；不要用长段旁白覆盖人物表演，不加入未经要求的口头禅、喊叫或反转。若台词量与目标镜长冲突，提出拆镜或延长建议，不承诺逐字口型同步。",
+    "en": {
+      "title": "Dialogue and performance beats", "description": "Improve subtext, pauses and observable performance without changing motivations.",
+      "category": "Screenwriting",
+      "prompt": "Polish this film dialogue.\nOriginal scene: {{dialogue and context}}\nObjectives and relationship: {{facts}}\nLines to preserve: {{verbatim lines or none}}\nIdentify what each speaker wants and conceals. Preserve plot and motivations while removing exposition both people know. Use interruptions, pauses, avoided eyelines and prop interactions to carry subtext. Deliver a shootable revised scene and brief reasons for key changes. Distinguish visible speech, off-screen voice and internal monologue. Avoid covering performance with narration or adding unsolicited catchphrases, shouting or twists. If the words do not fit the shot, suggest splitting or extending it rather than promising exact lip synchronization."
+    }
+  },
+  {
+    "id": "builtin:continuity-review", "type": "text",
+    "title": "分镜连戏与可生成性检查", "description": "定位换装、道具、视线、空间、对白和镜头动作冲突。",
+    "category": "审片与交付",
+    "prompt": "审查下列剧本、分镜和提示词之间的连戏与可生成性。\n设定：{{角色、场景、道具设定}}\n分镜与提示词：{{内容}}\n已有结果或反馈：{{真实观察，没有则写无}}\n逐镜比较上一镜结束状态与下一镜开始状态：人物身份与服装、伤痕、站位和视线、持物手及道具状态、地标和光位、对白说话人、时间与天气。找出单张图描述多个时刻、单镜堆叠互斥运镜、对白放不下、参考图角色不明确等问题。输出「镜号 / 证据 / 影响 / 最小修改」，保留有意跳切及创作选择。区分文字中能发现的问题、需要看成品才能判断的问题和仅为建议的取舍。没有实际成品时不得声称已审片通过，不自动重生成。",
+    "en": {
+      "title": "Continuity and generation review", "description": "Locate identity, prop, eyeline, spatial, dialogue and motion conflicts.",
+      "category": "Review and delivery",
+      "prompt": "Review continuity and generation feasibility.\nBible: {{characters, locations and props}}\nShots and prompts: {{content}}\nObserved results: {{verified observations or none}}\nCompare each ending with the next opening: identity, costume, injuries, blocking, eyelines, hands and prop state, landmarks, lighting, speaker, time and weather. Flag still images describing multiple moments, contradictory camera moves, overcrowded dialogue and unclear reference roles. Report shot ID / evidence / impact / smallest useful correction. Respect intentional jump cuts and artistic choices. Separate text-demonstrable problems from issues requiring footage and optional suggestions. Without real outputs, do not claim a completed footage review. Do not regenerate automatically."
+    }
+  },
+  {
+    "id": "builtin:editing-plan", "type": "text",
+    "title": "镜头交付与剪辑单", "description": "整理真实片段、对白和补拍需求，供外部剪辑使用。",
+    "category": "审片与交付",
+    "prompt": "为这些已生成或已拍摄的镜头制作剪辑交接单。\n剧本与镜头顺序：{{内容}}\n实际素材及观察：{{片段名称、可用区间、已核实问题}}\n音频与字幕要求：{{已有素材和要求}}\n按镜号列出真实素材、建议入出点及理由、承接动作或声桥、对白归属、字幕原文、待补镜头和缺失素材。没有实测信息的时间点明确标注待外部核对，不能假装看过或分析过未提供的音视频。字幕沿用剧本，不从画面猜台词。输出顺序与声音层次建议，不把镜头排列当作已完成拼接，不宣称已经调色、混音、提取末帧或导出成片。",
+    "en": {
+      "title": "Shot delivery and edit handoff", "description": "Organize real clips, dialogue and pickup needs for an external edit.",
+      "category": "Review and delivery",
+      "prompt": "Prepare an edit handoff.\nScreenplay and shot order: {{content}}\nActual media and observations: {{clip names, usable ranges and verified issues}}\nAudio and subtitle requirements: {{existing assets and requirements}}\nFor each shot list the real source, suggested in/out points with reasons, action or sound bridge, speaker, exact subtitle text, pickups and missing media. Mark unmeasured timecodes for external verification. Do not pretend to have viewed unavailable footage. Take subtitles from the screenplay rather than guessing speech. Deliver sequencing and sound-layer recommendations without claiming completed stitching, grading, mixing, final-frame extraction or a rendered film."
+    }
+  },
+  {
+    "id": "builtin:character-anchor", "type": "image",
+    "title": "角色正面全身基准图", "description": "先建立清楚的身份、体态与服装基准，再用于三视图和分镜。",
+    "category": "角色参考图",
+    "prompt": "影视角色造型参考，{{角色编号与名称}}。{{年龄段、体态、脸型、辨识特征、发型发色}}，穿着{{服装层次、材质、颜色与鞋}}，整体美术方向为{{视觉风格}}。单人正面全身站立，身体自然放松，双手可见且不遮挡服装，头顶至鞋底完整入画，平视机位，透视克制。均匀柔光，简洁中性背景，清楚呈现面部、身体比例与服装结构。{{若有参考：保留参考图人物身份及指定造型}}。这是一张制作基准照，不表现剧情动作，不额外添加手持道具、文字标注、面板边框或水印。",
+    "en": {
+      "title": "Front full-body character anchor", "description": "Establish identity, proportions and costume before turnarounds or storyboard shots.",
+      "category": "Character references",
+      "prompt": "Film character reference for {{character ID and name}}. {{Age range, build, face, distinctive features and hair}}, wearing {{clothing layers, materials, colors and shoes}}, in {{art direction}}. One person standing front-facing in a relaxed neutral pose, hands visible without covering the costume. Show the entire figure from head to soles, with an eye-level camera and restrained perspective. Even soft light and a neutral background reveal identity, proportions and garment construction. {{If referenced: retain the supplied identity and designated costume}}. A production anchor rather than a dramatic scene; no extra handheld props, labels, panel borders or watermark."
+    }
+  },
+  {
+    "id": "builtin:character-turnaround", "type": "image",
+    "title": "同一角色正侧背三视图", "description": "用已选定的基准图生成同一人物的正面、侧面与背面。",
+    "category": "角色参考图",
+    "prompt": "以提供的角色基准图为身份与造型依据，为{{角色名称}}制作一张横向三视图设定图。左到右依次为正面、严格 90 度侧面、背面；是同一个人在三个角度的完整全身展示。三个人像等高、同比例，头顶与脚底对齐，间距清楚，鞋和头发完整可见，手臂自然垂放不遮挡轮廓。保持参考中的五官、年龄感、身材、发型、发色、服装层次、材质、配色与鞋一致。简洁中性背景、均匀柔光、近似正交的制作视角。{{补充角色设计}}。不变成三位不同人物，不添加新服饰或道具，无文字、标题、边框、水印。",
+    "en": {
+      "title": "Consistent front, profile and back turnaround", "description": "Use an established anchor for the same person's three full-body views.",
+      "category": "Character references",
+      "prompt": "Use the supplied character anchor as the identity and costume source for {{character name}}. Create one horizontal turnaround sheet: front view, strict 90-degree profile and back view from left to right. These are three views of the same person, with equal scale, aligned head and foot baselines and clear separation. Show complete hair and shoes with relaxed arms. Retain identity, age, build, hair, garment layers, materials, colors and footwear. Neutral background, even soft lighting and near-orthographic production views. {{Additional established details}}. No different people, new costume or props, text, titles, borders or watermark."
+    }
+  },
+  {
+    "id": "builtin:character-expression", "type": "image",
+    "title": "角色表情与表演参考", "description": "保持人物身份，展示指定的表情和视线变化。",
+    "category": "角色参考图",
+    "prompt": "根据提供的角色基准图，制作{{角色名称}}的表情参考图。{{需要的表情及排列，例如克制愤怒、迟疑、释然}}。每格使用相同头肩尺度、清楚间距、同一发型服装与面部身份；以眉眼、嘴角、下颌及视线变化表现情绪，符合{{写实或风格化表演方向}}。保持统一光源和中性背景，皮肤或材质符合既定美术。各表情自然可区分，不改变年龄、脸型和五官，不把不同表情画成不同角色，不加入剧情背景、对白气泡、文字标签和水印。",
+    "en": {
+      "title": "Character expression and performance reference", "description": "Explore expressions and eyelines while retaining the same identity.",
+      "category": "Character references",
+      "prompt": "Create an expression reference for {{character name}} using the supplied anchor. Show {{expressions and arrangement, such as restrained anger, hesitation and relief}}. Equal head-and-shoulder framing and clear spacing, preserving identity, hair and costume. Express emotion through brows, eyes, mouth, jaw and eyeline in {{realistic or stylized direction}}. Consistent lighting, neutral background and established material treatment. Distinct expressions without altered age or facial structure. No narrative setting, speech balloons, labels or watermark."
+    }
+  },
+  {
+    "id": "builtin:location-establishing", "type": "image",
+    "title": "影视场景空间基准图", "description": "明确出入口、地标、陈设与光位，给后续镜头建立空间依据。",
+    "category": "场景与道具图",
+    "prompt": "为影视场景{{场景编号与名称}}制作无人空间参考图。时代和地点：{{设定}}；空间结构与固定陈设：{{门窗、出入口、桌椅及关键地标的相对位置}}；时间天气：{{设定}}；主光来源与方向：{{设定}}；美术风格和材质：{{方向}}。使用能清楚读懂空间的大全景，真实或既定风格的尺度，保留人物表演和走位区域。{{需固定的颜色与陈设细节}}。空间可实际连通，家具比例合理，地标位置明确。画面无人、无手、无人物剪影，不用夸张广角改变空间，不出现文字说明、分镜框和水印。",
+    "en": {
+      "title": "Location geography anchor", "description": "Establish entrances, landmarks, fixtures and light direction for later shots.",
+      "category": "Locations and props",
+      "prompt": "Unoccupied film location reference for {{location ID and name}}. Period and place: {{setting}}. Layout: {{relative positions of doors, windows, entrances, furniture and landmarks}}. Time and weather: {{conditions}}. Key-light source and direction: {{lighting}}. Style and materials: {{art direction}}. A readable wide view at the intended scale, with practical blocking areas. {{Established colors and fixture details}}. Physically connected routes and proportionate furniture. No people, hands, silhouettes, extreme wide-angle distortion, explanatory text, storyboard borders or watermark."
+    }
+  },
+  {
+    "id": "builtin:location-reverse", "type": "image",
+    "title": "同场景反向机位参考", "description": "沿用空间基准图，补充侧向或反向覆盖，不重新设计房间。",
+    "category": "场景与道具图",
+    "prompt": "以提供的{{场景名称}}空间基准图为同一空间依据，生成{{目标机位的位置、朝向与景别}}的无人参考画面。保留原场景的门窗连接关系、陈设尺寸、材质、颜色和地标；摄影机从{{原机位}}移动到{{新机位}}，因此画面中的左右关系随观察方向合理改变。光源仍来自场景中同一扇窗或灯，不随机位自动翻转。{{新视角应看到的结构与边界}}。对原图不可见区域作符合平面关系的延伸，保留整体尺度和时间天气。无人、无手、无文字和水印，不把反打简单变成原图的水平镜像。",
+    "en": {
+      "title": "Reverse location coverage", "description": "Derive side or reverse coverage from established geography.",
+      "category": "Locations and props",
+      "prompt": "Use the supplied {{location name}} anchor as the same physical space. Generate an unoccupied view from {{target camera position, direction and framing}}. Retain door and window connectivity, fixture scale, materials, colors and landmarks. The camera moves from {{original position}} to {{new position}}, so screen-relative directions change consistently. Light still comes from the same physical window or lamp rather than flipping with the camera. {{Structures visible from this angle}}. Extend unseen areas plausibly from the layout, retaining scale, time and weather. No people, hands, text or watermark. Do not simply mirror the original horizontally."
+    }
+  },
+  {
+    "id": "builtin:prop-reference", "type": "image",
+    "title": "叙事道具与状态参考", "description": "单独建立关键道具，明确材质、尺寸与当前状态。",
+    "category": "场景与道具图",
+    "prompt": "影视叙事道具参考：{{道具编号与名称}}。{{形状、材质、颜色、尺寸参照、可辨识细节}}。当前状态为{{合拢、打开、损坏等指定状态}}，美术方向为{{风格}}。在简洁中性背景下清楚展示完整轮廓与关键结构，使用均匀照明和可信的接触阴影。{{若需多视角，指定各视角及一致状态}}。沿用已有参考的设计，不添加故事里没有的功能、饰品或品牌。画面无人、无手持展示、无包装文案与水印；可见的叙事文字仅限{{必要文字原文或无}}。",
+    "en": {
+      "title": "Narrative prop and state reference", "description": "Define a key prop's material, scale and state independently.",
+      "category": "Locations and props",
+      "prompt": "Film narrative-prop reference for {{prop ID and name}}. {{Shape, material, color, scale and distinguishing details}}. State: {{closed, open, damaged or specified state}}. Art direction: {{style}}. Show the complete silhouette and construction on a neutral background with even light and contact shadows. {{Views and consistent state if needed}}. Retain the established design; no unsupported functions, decorations or branding. No person, holding hand, packaging copy or watermark. Visible story text is limited to {{exact text or none}}."
+    }
+  },
+  {
+    "id": "builtin:storyboard-frame", "type": "image",
+    "title": "单镜首帧分镜图片", "description": "将文本镜头和人物、场景参考组合成可用于图生视频的干净首帧。",
+    "category": "分镜图片",
+    "prompt": "生成影视镜头{{镜号}}的单张开场画面，视觉风格{{风格}}。人物身份与服装依据{{人物参考图及各自用途}}；空间结构与光源依据{{场景参考图}}；关键道具依据{{道具参考图或描述}}。{{景别、机位高度、观察方向、前中后景构图}}。在这个瞬间，{{每个人物的画面位置、朝向、姿态、双手、持物、视线及表情}}。{{环境、时间、光源方向与可辨识地标}}。保留参考角色身份和本场造型，表达{{本镜的核心叙事信息}}。只展示动作开始前的一个明确瞬间，不将后续动作画成残影或连续格；无字幕、镜号、分镜边框、运镜箭头和水印。",
+    "en": {
+      "title": "Single-shot opening storyboard frame", "description": "Combine a shot and design references into a clean image-to-video opening.",
+      "category": "Storyboard images",
+      "prompt": "Create the single opening frame for film shot {{shot ID}} in {{art direction}}. Identity and costume follow {{character images and roles}}; layout and light follow {{location reference}}; props follow {{prop references or descriptions}}. {{Framing, camera height, direction and foreground/midground/background}}. At this instant, {{each person's screen position, facing, pose, hands, objects, eyeline and expression}}. {{Setting, time, light source and landmarks}}. Retain identities and scene-specific looks while conveying {{essential information}}. One definite moment before the next action, without motion trails or sequential panels. No subtitles, shot numbers, borders, arrows or watermark."
+    }
+  },
+  {
+    "id": "builtin:storyboard-contact-sheet", "type": "image",
+    "title": "多镜分镜联系表", "description": "将镜头排成审稿图；独立生成用的首帧仍应逐镜制作。",
+    "category": "分镜图片",
+    "prompt": "制作一张用于人工审稿的影视分镜联系表，采用{{行列布局}}，按从左到右、从上到下排列以下镜头：{{每格镜号、景别、机位、人物站位和关键瞬间}}。整体风格为{{黑白线稿或指定风格}}，角色与场景依据{{参考图用途}}，所有面板保持统一画幅、清楚间距和一致的角色服装、道具、地标与光位。每格只画该镜的一个关键瞬间，不在一个面板内混入多个镜头。除用户明确要求的{{简短镜号或无}}外无文字。这是分镜审稿联系表，不是已拆成独立资产的首帧集合，不出现水印。",
+    "en": {
+      "title": "Storyboard contact sheet", "description": "Preview shots together; generate independent clean frames separately when needed.",
+      "category": "Storyboard images",
+      "prompt": "Create a storyboard contact sheet for human review in {{row and column layout}}. Arrange shots left to right and top to bottom: {{shot IDs, framing, viewpoint, blocking and key moment per panel}}. Use {{sketch or specified style}}, following {{reference roles}}. Consistent panel ratios, clear gutters, identities, costume, props, landmarks and lighting. Each panel contains one key moment from its assigned shot. No text except {{requested shot IDs or none}}. This is a review sheet, not already separated first-frame assets. No watermark."
+    }
+  },
+  {
+    "id": "builtin:cinematic-performance", "type": "video",
+    "title": "单镜动作与情绪表演", "description": "用起始状态、动作因果和可见反应表达戏剧变化。",
+    "category": "镜头视频",
+    "prompt": "{{视觉风格}}。{{场景、时间、天气及主光来源}}。{{景别与机位}}中，{{角色外貌、服装、起始位置、姿态、双手持物与视线}}。先{{起始动作}}，随后{{由此引发的可见变化或接触结果}}，角色以{{眼神、呼吸、嘴角或重心变化}}作出反应，最后停在{{明确结束姿态与道具位置}}。摄影机{{一个主要运镜及速度幅度，或固定}}，将注意力从{{起始信息}}引向{{揭示信息}}。环境声为{{可听见的具体声源}}，{{音乐需求或无配乐}}。保持同一角色造型、空间地标和物理光源，动作有重量和接触反馈，不添加未要求的字幕或镜头切换。",
+    "en": {
+      "title": "Single-shot action and emotional performance", "description": "Convey dramatic change through an opening state, causal action and visible reaction.",
+      "category": "Video shots",
+      "prompt": "{{Visual style}}. {{Location, time, weather and light source}}. In a {{framing and camera position}}, {{identity, costume, starting pose, hands, objects and eyeline}}. First {{initial action}}, then {{observable change or contact consequence}}. The character reacts through {{eyes, breath, mouth or weight shift}}, ending in {{final pose and prop position}}. The camera {{one principal move with speed and amplitude, or holds still}}, directing attention from {{initial information}} toward {{reveal}}. Sound: {{audible sources}}. {{Music or no score}}. Retain identity, landmarks and physical light with credible weight and contact. No unsolicited subtitles or cuts."
+    }
+  },
+  {
+    "id": "builtin:dialogue-shot", "type": "video",
+    "title": "对白镜头与听者反应", "description": "明确说话人、台词和听者动作，供支持音画生成的模型使用。",
+    "category": "镜头视频",
+    "prompt": "{{视觉风格}}，{{场景和光源}}，{{景别及机位}}。{{说话人身份、服装、站位与朝向}}面对{{听者位置}}，先{{说话前的表演动作}}，用{{语言、音色、语速、情绪}}说：“{{台词原文}}”。说话人的嘴部清楚可见，身体动作配合语义；听者{{视线、闭嘴倾听及反应动作}}。说完后，{{停顿和结束状态}}。摄影机{{固定或主要运镜}}。保留{{空间、道具与光位连续性}}。环境声{{具体声源}}，{{配乐需求或无配乐}}。台词只在说话动作处出现一次，不把旁白变成其他人物开口，不添加字幕或额外台词。",
+    "en": {
+      "title": "Dialogue shot and listener reaction", "description": "Bind a line to its speaker and listener for audiovisual-capable models.",
+      "category": "Video shots",
+      "prompt": "{{Style}}, {{location and light}}, {{framing and viewpoint}}. {{Speaker identity, costume, position and facing}} looks toward {{listener}}, first {{pre-speech action}}, then says in {{language, timbre, pace and emotion}}, “{{exact dialogue}}”. The mouth is clearly visible and gestures support the line. The listener {{eyeline, closed-mouth listening and reaction}}. After the line, {{pause and final state}}. The camera {{holds or makes one move}}. Preserve {{spatial, prop and light continuity}}. Ambient sound: {{source}}. {{Music or no score}}. The line appears once, attached to the speaker's action. Do not turn voiceover into another person's speech or add subtitles or dialogue."
+    }
+  },
+  {
+    "id": "builtin:image-to-video", "type": "video",
+    "title": "分镜首帧转动态镜头", "description": "从已选首帧继续动作，保留人物、构图与空间关系。",
+    "category": "镜头视频",
+    "prompt": "以输入图片作为视频开场的实际画面，沿用其中的角色身份、服装、物件、空间关系、画幅与光线。开场时{{简述首帧中可见状态}}。随后{{一个清晰的主要动作及必要中间过程}}，{{环境或对手的可见反应}}，最终{{结束姿态、视线和持物位置}}。摄影机{{与首帧兼容的固定或主要运动}}。{{对白原文与说话动作；无则省略}}。声音{{环境和动作声；只用于支持音画生成的模型}}。{{需要保留的连续性细节}}。运动从现有状态自然发生，不另起一张不同构图的开场，不将人物换装或替换，不增加分镜边框和文字。",
+    "en": {
+      "title": "Storyboard first frame to moving shot", "description": "Continue from a real image while retaining identity, composition and geography.",
+      "category": "Video shots",
+      "prompt": "Use the input image as the actual opening frame, retaining identity, costume, objects, spatial relationships, aspect ratio and lighting. Initially {{visible state}}. Then {{principal action and intermediate movement}}, followed by {{visible reaction}}, ending in {{pose, eyeline and prop position}}. The camera {{holds or makes a compatible move}}. {{Exact dialogue attached to speaking action, or omit}}. Sound: {{ambience and action sounds for an audiovisual-capable model}}. {{Continuity details}}. Motion develops from the supplied state rather than a different opening composition. No costume or identity replacement, storyboard borders or added text."
+    }
+  },
+  {
+    "id": "builtin:first-last-frame", "type": "video",
+    "title": "首尾帧之间的连续动作", "description": "描述两个状态之间的运动路径，适用于支持首尾帧的模型。",
+    "category": "镜头视频",
+    "prompt": "以首帧图片作为开场，以尾帧图片作为结束状态，在一个连续镜头里连接两者。首帧中{{起始姿态、道具状态、人物与摄影机位置}}；尾帧中{{目标姿态、道具状态、人物与摄影机位置}}。过程依次为{{关键动作、接触、重心与物件变化}}，摄影机{{能连接两个构图的运动或固定机位}}。运动逐渐收敛到尾帧的站位、朝向、视线和构图，不用突然瞬移、物件凭空替换或中途硬切跳过变化。沿用人物身份、服装、场景地标与同一物理光源。{{声音与对白需求或无}}。首尾差异过大时应先修改设计或拆镜，不以提示词保证不可能的连续变化。",
+    "en": {
+      "title": "Continuous motion between first and last frames", "description": "Describe a plausible path between two states for a keyframe-capable model.",
+      "category": "Video shots",
+      "prompt": "Begin at the first frame and end at the last frame in one continuous shot. Opening: {{pose, prop state, subject and camera positions}}. Ending: {{target pose, prop state, subject and camera positions}}. Connect them through {{ordered actions, contact, weight shifts and object changes}} as the camera {{moves compatibly or stays fixed}}. Converge to the final blocking, orientation, eyeline and composition. Do not bypass changes with teleportation, unexplained replacement or a hard cut. Retain identity, costume, landmarks and physical light. {{Sound and dialogue or none}}. If the states cannot connect plausibly, revise or split the shot rather than promise impossible continuity."
+    }
+  },
+  {
+    "id": "builtin:h3-text-video", "type": "video",
+    "title": "MiniMax H3 文生音画镜头", "description": "H3 基础音画描述模板；关键帧任务需另绑定真实首尾帧。",
+    "category": "MiniMax H3",
+    "prompt": "integrated_multimodal_description: [Shot 1] {{用英文描述视觉风格、开场景别、人物身份服装与位置、环境光源}}. {{按播放顺序用英文写动作、运镜和可见反应}}. {{说话人描述}} (S1) says, <d>[Mandarin Chinese] {{中文台词原文；无对白则删除整个说话句}}</d>. {{结束状态；如需切镜，按实际时长添加 [Shot 2] At MM:SS.mmm 并描述新画面}}.\n\noverall_soundscape: {{用英文描述贯穿的环境声与物理动作声，不重复台词}}.\n\nnon_diegetic_music: {{用英文描述观众听到的配乐；无配乐写 N/A}}",
+    "en": {
+      "title": "MiniMax H3 text-to-audiovisual shot", "description": "A base H3 audiovisual template; keyframe work also needs actual frame bindings.",
+      "category": "MiniMax H3",
+      "prompt": "integrated_multimodal_description: [Shot 1] {{Style, framing, identity, costume, positions, environment and light}}. {{Actions, camera movement and reactions in playback order}}. {{Speaker}} (S1) says, <d>[English] {{Exact dialogue; delete the entire speaking sentence if absent}}</d>. {{Final state; add [Shot 2] At MM:SS.mmm only for a required cut within the actual duration}}.\n\noverall_soundscape: {{Ambience and physical sounds; do not repeat dialogue}}.\n\nnon_diegetic_music: {{Audience-only score, or N/A}}"
+    }
+  },
+  {
+    "id": "builtin:h3-reference-video", "type": "video",
+    "title": "MiniMax H3 多参考音画镜头", "description": "用六段描述明确人物、画面、视频与声音各自参考什么。",
+    "category": "MiniMax H3",
+    "prompt": "subject_definitions:\n<Subject 1> is {{角色的固定外貌与本场服装，英文}} from <Picture 1>.\n<Subject 2> is {{场景结构与关键地标，英文}} from <Picture 2>.\n{{仅在真实绑定时补充其他 Picture、Video、Audio 标签及用途，按各类型实际输入顺序编号}}\n\nsummary:\n[reference generation] {{用英文概述目标动作与参考关系}}.\n\nretention_analysis:\n<Subject 1>: fully_preserved - {{要保留的身份与造型}}.\n<Subject 2>: fully_preserved - {{要保留的空间、材质与光位}}.\n{{只列实际引用内容的保留、变化或声音参考关系}}\n\ndetailed_description:\n{{用英文说明整体影像方向}}. [Shot 1] {{景别、角色的画面位置与初始状态}}. {{具体动作过程、运镜、接触反馈、结束状态，在实际生效处引用对应标签}}. {{若有对白：<Subject 1> (S1) says, <d>[Mandarin Chinese] 台词原文</d>，台词只出现一次}}.\n\noverall_soundscape:\n{{用英文描述环境与动作声；有参考音频时说明参考声线还是复用音轨，不重复台词}}.\n\nnon_diegetic_music:\n{{用英文说明配乐或 N/A}}",
+    "en": {
+      "title": "MiniMax H3 multi-reference audiovisual shot", "description": "Use six sections to distinguish subject, image, video and audio reference roles.",
+      "category": "MiniMax H3",
+      "prompt": "subject_definitions:\n<Subject 1> is {{fixed appearance and scene costume}} from <Picture 1>.\n<Subject 2> is {{location layout and landmarks}} from <Picture 2>.\n{{Add other Picture, Video and Audio labels only for actual bound inputs; number each media type in input order and state its role}}\n\nsummary:\n[reference generation] {{Target action and reference relationships}}.\n\nretention_analysis:\n<Subject 1>: fully_preserved - {{Identity and costume}}.\n<Subject 2>: fully_preserved - {{Geography, materials and light}}.\n{{Only real preservation, change and audio relationships}}\n\ndetailed_description:\n{{Visual direction}}. [Shot 1] {{Framing, positions and starting state}}. {{Actions, camera, consequences and ending state; cite reference labels where they apply}}. {{If needed: <Subject 1> (S1) says, <d>[English] Exact dialogue</d>; each line appears once}}.\n\noverall_soundscape:\n{{Ambience and physical sound; distinguish timbre reference from signal reuse, without repeated dialogue}}.\n\nnon_diegetic_music:\n{{Audience-only music or N/A}}"
+    }
+  }
+]

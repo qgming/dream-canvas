@@ -17,11 +17,10 @@ import { useConfigStore } from "@/stores/use-config-store";
 import { modelCatalog } from "@/services/api/channels";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useWorkbenchDraftStore } from "@/stores/use-workbench-draft-store";
-import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
 export default function RequireAuth() {
-    useTranslation();
+    const { i18n } = useTranslation();
     const { pathname, search } = useLocation();
     const user = useAuthStore((state) => state.user);
     const ready = useAuthStore((state) => state.ready);
@@ -42,7 +41,6 @@ export default function RequireAuth() {
         useCanvasStore.getState().reset();
         useAssetStore.getState().reset();
         useConfigStore.getState().reset();
-        usePromptSourceStore.getState().reset();
         useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, editingProjectTitle: "", selectedProjectIds: [], deleteProjectIds: [] });
         useWorkbenchAgentStore.setState({ imageCommand: null, videoCommand: null, tasks: [] });
         useWorkbenchDraftStore.getState().reset();
@@ -50,9 +48,10 @@ export default function RequireAuth() {
         useAgentSkillStore.getState().reset();
         void cleanupUnusedImages(null);
         setScope(user?.id || null);
-        if (user) { void useCanvasStore.getState().loadProjects(); void useAssetStore.getState().loadAssets(); void useConfigStore.getState().load(); void usePromptSourceStore.getState().load(); void useWorkbenchDraftStore.getState().load(); }
+        if (user) { void useCanvasStore.getState().loadProjects(); void useAssetStore.getState().loadAssets(); void useConfigStore.getState().load(); void useWorkbenchDraftStore.getState().load(); }
     }, [queryClient, user?.id]);
     useEffect(() => { if (catalog.data && scope === user?.id) useConfigStore.getState().setCatalog(catalog.data); }, [catalog.data, scope, user?.id]);
+    useEffect(() => { if (user && scope === user.id) void useAgentSkillStore.getState().loadSkills(); }, [user?.id, scope, i18n.resolvedLanguage]);
     useEffect(() => {
         const refresh = () => { void useAssetStore.getState().loadAssets(); };
         window.addEventListener("assets-changed", refresh);
@@ -68,13 +67,13 @@ export default function RequireAuth() {
             if (refreshing) { pending = true; return; }
             refreshing = true;
             pending = false;
-            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
+            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), useAgentSkillStore.getState().loadSkills(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] }), queryClient.invalidateQueries({ queryKey: ["prompts"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
             window.dispatchEvent(new Event("server-changed"));
         };
         const connect = () => {
             if (source || useAuthStore.getState().user?.id !== user.id) return;
             source = new EventSource("/api/events");
-            source.addEventListener("changed", (event) => { const { topic } = JSON.parse((event as MessageEvent<string>).data) as { topic?: string }; if (!topic || topic === "all") refresh(); else { if (topic === "prompts") for (const key of ["prompts", "side-panel-prompts", "prompt-source-statuses"]) void queryClient.invalidateQueries({ queryKey: [key] }); window.dispatchEvent(new CustomEvent("server-changed", { detail: topic })); } });
+            source.addEventListener("changed", (event) => { const { topic } = JSON.parse((event as MessageEvent<string>).data) as { topic?: string }; if (!topic || topic === "all") refresh(); else { if (topic === "prompts") void queryClient.invalidateQueries({ queryKey: ["prompts"] }); if (topic === "skills") void useAgentSkillStore.getState().loadSkills(); window.dispatchEvent(new CustomEvent("server-changed", { detail: topic })); } });
             source.onerror = () => { if (source?.readyState === EventSource.CLOSED) { source.close(); source = undefined; } };
         };
         const focused = () => { connect(); refresh(); };

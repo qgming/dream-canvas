@@ -105,7 +105,7 @@ export function CanvasNodePromptPanel({ node, nodes, connections, isRunning, onP
                     <Tooltip title={t("canvas.promptPanel.expandEditor")}>
                         <Button variant="ghost" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-md !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
                     </Tooltip>
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+                    <CanvasPromptLibrary onSelect={updatePrompt} type={mode === "audio" ? "all" : mode} />
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={openModelSettings} className="max-w-[190px]" />

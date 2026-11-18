@@ -3,16 +3,14 @@ package app
 import (
 	"encoding/json"
 	"errors"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-func validPreference(name string) bool { return name == "generation" || name == "prompt-sources" }
+func validPreference(name string) bool { return name == "generation" }
 
 func validatePreference(name string, value map[string]any) error {
 	invalid := problem(400, "invalid_preference", "配置字段或类型不正确")
@@ -26,34 +24,7 @@ func validatePreference(name string, value map[string]any) error {
 		}
 		return nil
 	}
-	if len(value) != 2 { return invalid }
-	sources, ok := value["sources"].([]any)
-	if !ok { return invalid }
-	ids := map[string]bool{}
-	for _, item := range sources {
-		source, ok := item.(map[string]any)
-		if !ok || len(source) != 6 { return invalid }
-		for _, key := range []string{"id", "name", "url", "homepage"} { if _, ok := source[key].(string); !ok { return invalid } }
-		id := source["id"].(string)
-		if strings.TrimSpace(id) == "" || ids[id] || strings.TrimSpace(source["name"].(string)) == "" { return invalid }
-		ids[id] = true
-		for _, key := range []string{"enabled", "builtIn"} { if _, ok := source[key].(bool); !ok { return invalid } }
-		for _, key := range []string{"url", "homepage"} {
-			text := source[key].(string)
-			if key == "homepage" && text == "" { continue }
-			parsed, err := url.Parse(text)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || key == "url" && parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil { return invalid }
-		}
-	}
-	schedule, ok := value["schedule"].(map[string]any)
-	if !ok || len(schedule) != 2 { return invalid }
-	interval, ok := schedule["intervalMinutes"].(float64)
-	// Preserve the existing source scheduler choices; no new refresh policy is introduced here.
-	if !ok || (interval != 0 && interval != 30 && interval != 60 && interval != 360 && interval != 1440) { return invalid }
-	last, ok := schedule["lastFetchedAt"].(string)
-	if !ok { return invalid }
-	if last != "" { if _, err := time.Parse(time.RFC3339Nano, last); err != nil { return invalid } }
-	return nil
+	return invalid
 }
 
 func (a *App) getPreference(c *gin.Context) {

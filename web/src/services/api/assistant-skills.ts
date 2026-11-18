@@ -1,7 +1,7 @@
 import { apiRequest, captureSession, jsonRequest } from "./client";
 import i18n from "@/i18n";
 
-export type AgentSkillScope = "user" | "repo" | "system" | "admin";
+export type AgentSkillScope = "user" | "builtin";
 export type AgentSkillInterface = { displayName?: string | null; shortDescription?: string | null; defaultPrompt?: string | null };
 export type AgentSkillSummary = {
     name: string;
@@ -13,6 +13,7 @@ export type AgentSkillSummary = {
     scope: AgentSkillScope;
     enabled: boolean;
     managed: boolean;
+    revision: string;
 };
 export type AgentSkillDetail = {
     name: string;
@@ -33,16 +34,13 @@ export type AgentSkillDraftResponse = { ok?: boolean; data?: AgentSkillDraft };
 export function resolveAgentMessageAssetUrl(value: string) {
     return value.startsWith("/api/assets/") ? value : "";
 }
-export const fetchAssistantSkills = () => apiRequest<AgentSkillsResponse>("/assistant/skills");
-export const fetchAssistantSkill = (name: string) => apiRequest<AgentSkillResponse>(`/assistant/skills/${encodeURIComponent(name)}`);
+export const fetchAssistantSkills = () => apiRequest<AgentSkillsResponse>(`/assistant/skills?locale=${encodeURIComponent(i18n.resolvedLanguage || "zh-CN")}`);
+export const fetchAssistantSkill = (name: string) => apiRequest<AgentSkillResponse>(`/assistant/skills/${encodeURIComponent(name)}?locale=${encodeURIComponent(i18n.resolvedLanguage || "zh-CN")}`);
 export const createAssistantSkill = (input: AgentSkillInput) => apiRequest<AgentSkillResponse>("/assistant/skills", jsonRequest("POST", input));
 export const updateAssistantSkill = (name: string, input: AgentSkillInput) => apiRequest<AgentSkillResponse>(`/assistant/skills/${encodeURIComponent(name)}`, jsonRequest("PUT", input));
 export const deleteAssistantSkill = (name: string, expectedRevision: string) => apiRequest<void>(`/assistant/skills/${encodeURIComponent(name)}`, jsonRequest("DELETE", { expectedRevision }));
-export async function setAssistantSkillEnabled(skill: Pick<AgentSkillSummary, "name" | "path">, enabled: boolean) {
-    const assertSession = captureSession();
-    const record = await fetchAssistantSkill(skill.name);
-    assertSession();
-    return apiRequest<AgentSkillResponse>(`/assistant/skills/${encodeURIComponent(skill.name)}`, jsonRequest("PUT", { enabled, expectedRevision: record.data?.revision }));
+export function setAssistantSkillEnabled(skill: Pick<AgentSkillSummary, "name" | "revision">, enabled: boolean) {
+    return apiRequest<AgentSkillResponse>(`/assistant/skills/${encodeURIComponent(skill.name)}`, jsonRequest("PUT", { enabled, expectedRevision: skill.revision }));
 }
 export async function createAssistantSkillDraft(input: AgentSkillDraftInput): Promise<AgentSkillDraftResponse> {
     const assertSession = captureSession();

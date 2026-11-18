@@ -55,8 +55,8 @@ export function AppSidebar() {
                 </motion.div>
                 <nav className={cn("min-h-0 flex-1 overflow-y-auto", collapsed ? "hide-scrollbar w-[55px] space-y-2" : "space-y-1")} aria-label={t("sidebar.workspace")}>
                     {navigationTools.map(({ slug, icon: Icon }, index) => (
-                        <motion.div key={slug} initial={false} animate={{ paddingTop: !collapsed && (index === 3 || index === 5) ? 20 : 0 }} transition={transition}>
-                        {index === 0 || index === 3 || index === 5 ? <motion.p initial={false} animate={{ height: collapsed ? 0 : "auto", marginBottom: collapsed ? 0 : 8, opacity: collapsed ? 0 : 1 }} transition={transition} aria-hidden={collapsed} className="overflow-hidden whitespace-nowrap px-3 text-xs text-muted-foreground">{t(index === 0 ? "ui.creation" : index === 3 ? "ui.resources" : "navigation.tasks")}</motion.p> : null}
+                        <motion.div key={slug} initial={false} animate={{ paddingTop: !collapsed && (slug === "inspiration" || slug === "tasks") ? 20 : 0 }} transition={transition}>
+                        {index === 0 || slug === "inspiration" || slug === "tasks" ? <motion.p initial={false} animate={{ height: collapsed ? 0 : "auto", marginBottom: collapsed ? 0 : 8, opacity: collapsed ? 0 : 1 }} transition={transition} aria-hidden={collapsed} className="overflow-hidden whitespace-nowrap px-3 text-xs text-muted-foreground">{t(index === 0 ? "ui.creation" : slug === "inspiration" ? "ui.resources" : "navigation.tasks")}</motion.p> : null}
                         <Tooltip key={slug} title={collapsed ? t(`navigation.${slug}`) : undefined} placement="right">
                             <NavLink to={`/${slug}`} onClick={closeMobile} aria-label={t(`navigation.${slug}`)} className={navigationItemClass}>
                                 <Icon className="size-[18px] shrink-0" /><AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate">{t(`navigation.${slug}`)}</motion.span> : null}</AnimatePresence>

@@ -1,9 +1,9 @@
 import appI18n from "@/i18n";
-import { Copy, Download, PencilLine, Trash2, Upload, Ellipsis } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AudioLines, Clapperboard, Copy, Download, FileText, Image as ImageIcon, LayoutGrid, PencilLine, Trash2, Upload, Ellipsis } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Tabs } from "@animate-ui/react/primitives/radix-ui";
 import { useQuery } from "@tanstack/react-query";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
-import { Checkbox } from "@/components/ui/controls";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { Menu } from "@/components/ui/popover";
@@ -15,18 +15,17 @@ import { z } from "zod";
 import { MediaPreview } from "@/components/ui/media-preview";
 import { Input, Textarea, SearchInput } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
-import { Pagination } from "@/components/ui/data-table";
+import { Pagination } from "@/components/ui/pagination";
 import { Choice } from "@/components/ui/choice";
-import { Badge as Tag, FilterChip } from "@/components/ui/display";
+import { Badge as Tag } from "@/components/ui/display";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
-import { formatBytes } from "@/lib/image-utils";
+import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { cn } from "@/lib/utils";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { retryAssetCleanup, retryAssetSync, listAssetVoices, saveAssetVoice } from "@/services/api/assets";
@@ -37,7 +36,6 @@ type AssetFormValues = {
     kind: AssetKind;
     title: string;
     coverUrl: string;
-    tags: string[];
     source?: string;
     note?: string;
     content?: string;
@@ -45,7 +43,13 @@ type AssetFormValues = {
 
 type ImageDraft = ImageAsset["data"] | null;
 
-const kindOptions = ["all", "text", "image", "video", "audio"] as const;
+const kindOptions = [
+    { key: "all", icon: LayoutGrid },
+    { key: "text", icon: FileText },
+    { key: "image", icon: ImageIcon },
+    { key: "video", icon: Clapperboard },
+    { key: "audio", icon: AudioLines },
+] as const;
 
 export default function AssetsPage() {
     const { notify } = useFeedback();
@@ -74,15 +78,11 @@ export default function AssetsPage() {
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
     const [mediaDraft, setMediaDraft] = useState<UploadedFile | null>(null);
     const [saving, setSaving] = useState(false);
-    const [selectedIds, setSelectedIds] = useState<string[]>([]);
-    const [bulkDeleting, setBulkDeleting] = useState(false);
-    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
     const savingRef = useRef(false);
     const deleteRef = useRef(false);
     const editorRevision = useRef(0);
     const coverUrl = useWatch({ name: "coverUrl", control: form.control }) || "";
     const title = useWatch({ name: "title", control: form.control }) || "";
-    const tags = useWatch({ name: "tags", control: form.control }) || [];
     const content = useWatch({ name: "content", control: form.control }) || "";
     const validAssets = assets;
 
@@ -99,9 +99,6 @@ export default function AssetsPage() {
         const start = (page - 1) * pageSize;
         return filteredAssets.slice(start, start + pageSize);
     }, [filteredAssets, page, pageSize]);
-    const selectedAssets = validAssets.filter((asset) => selectedIds.includes(asset.id));
-    const allFilteredSelected = filteredAssets.length > 0 && filteredAssets.every((asset) => selectedIds.includes(asset.id));
-    useEffect(() => { setSelectedIds((ids) => ids.filter((id) => assets.some((asset) => asset.id === id))); }, [assets]);
 
     useEffect(() => {
         const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
@@ -114,7 +111,7 @@ export default function AssetsPage() {
         setImageDraft(null);
         setMediaDraft(null);
         setFormKind("text");
-        form.reset({ kind: "text", title: "", coverUrl: "", tags: [], source: t("assets.manual"), note: "", content: "" });
+        form.reset({ kind: "text", title: "", coverUrl: "", source: t("assets.manual"), note: "", content: "" });
         setIsAssetOpen(true);
     };
 
@@ -128,7 +125,6 @@ export default function AssetsPage() {
             kind: asset.kind,
             title: asset.title,
             coverUrl: asset.coverUrl,
-            tags: asset.tags || [],
             source: asset.source,
             note: asset.note,
             content: asset.kind === "text" ? asset.data.content : "",
@@ -144,7 +140,6 @@ export default function AssetsPage() {
         const base = {
             title: values.title.trim(),
             coverUrl: values.coverUrl?.trim() || (values.kind === "image" && imageDraft ? imageDraft.dataUrl : ""),
-            tags: values.tags || [],
             source: values.source?.trim(),
             note: values.note?.trim(),
             metadata: editingAsset?.metadata || { source: "manual" },
@@ -264,59 +259,37 @@ export default function AssetsPage() {
         try { await removeAsset(deletingAsset.id); notify.success(t("assets.deleted")); setDeletingAsset(null); }
         finally { deleteRef.current = false; }
     };
-    const deleteSelected = async () => {
-        if (deleteRef.current) return;
-        deleteRef.current = true; setBulkDeleting(true);
-        const assertSession = captureSession();
-        try {
-            for (const asset of selectedAssets) { assertSession(); await removeAsset(asset.id); setSelectedIds((ids) => ids.filter((id) => id !== asset.id)); }
-            setBulkDeleteOpen(false); notify.success(t("assets.deleted"));
-        } finally { deleteRef.current = false; setBulkDeleting(false); }
-    };
+
+    const assetContent = <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />)}
+        </div>
+        {!hydrated ? <div className="flex justify-center py-20"><Spinner /></div> : !visibleAssets.length && !assetError ? <Empty description={t("assets.empty")} className="py-20" /> : null}
+    </div>;
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground ">
-            <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8 ">
-                {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
-                {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button>} />)}
-                <div className="mx-auto mb-6 max-w-7xl">
+        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+            <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:py-8">
+                <div className="mx-auto max-w-7xl">
+                    {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
+                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button>} />)}
                     <PageHeader title={t("assets.title")} description={t("assets.description")} actions={<>
                         <Button variant="ghost" disabled={!hydrated} onClick={() => void exportAllAssets()}>{t("assets.export")}</Button>
                         <Button variant="ghost" onClick={() => assetInputRef.current?.click()}>{t("assets.import")}</Button>
                         <Button variant="default" disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
-                    </>}>
-                        <div className="flex flex-wrap items-center gap-4">
-                            <SearchInput className="w-full sm:max-w-sm" value={keyword} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
-                            <div className="flex flex-wrap gap-1">{kindOptions.map((kind) => <FilterChip key={kind} checked={kindFilter === kind} onChange={() => { setPage(1); setKindFilter(kind); }}>{t(kind === "all" ? "common.all" : `assets.kinds.${kind}`)}</FilterChip>)}</div>
+                    </>} />
+                    <div className="mb-3 mt-6">
+                        <SearchInput className="w-full sm:max-w-sm" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
+                    </div>
+                    <Tabs.Root value={kindFilter} onValueChange={(value) => { setPage(1); setKindFilter(value as AssetKind | "all"); }} className="min-w-0">
+                        <div className="thin-scrollbar mb-4 overflow-x-auto overflow-y-hidden pb-2">
+                            <Tabs.List aria-label={t("assets.browseByType")} className="inline-flex w-max items-center gap-1 rounded-xl bg-muted p-1">
+                                {kindOptions.map(({ key, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-card data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4" />{t(key === "all" ? "common.all" : `assets.kinds.${key}`)}</Tabs.Trigger>)}
+                            </Tabs.List>
                         </div>
-                    </PageHeader>
-                </div>
-
-                <div className="mx-auto flex max-w-7xl flex-col gap-5">
-                    {filteredAssets.length ? <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <Checkbox checked={allFilteredSelected} indeterminate={!allFilteredSelected && filteredAssets.some((asset) => selectedIds.includes(asset.id))} disabled={bulkDeleting} onChange={({ target }) => setSelectedIds((ids) => target.checked ? [...new Set([...ids, ...filteredAssets.map((asset) => asset.id)])] : ids.filter((id) => !filteredAssets.some((asset) => asset.id === id)))}>{t("ui.selectFiltered")}</Checkbox>
-                        {selectedAssets.length ? <><span className="text-muted-foreground">{t("ui.selectedCount", { count: selectedAssets.length })}</span><Button size="sm" disabled={bulkDeleting} onClick={() => { void exportAssets(selectedAssets, t("assets.packageName")).catch((error: unknown) => notify.error(error instanceof Error ? error.message : t("workspace.exportAssetsFailed"))); }}>{t("ui.exportSelected")}</Button><Button variant="ghost" size="sm" data-destructive disabled={bulkDeleting} onClick={() => setBulkDeleteOpen(true)}>{t("ui.deleteSelected")}</Button><Button variant="ghost" size="sm" disabled={bulkDeleting} onClick={() => setSelectedIds([])}>{t("ui.clear")}</Button></> : null}
-                    </div> : null}
-                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {visibleAssets.map((asset) => (
-                            <AssetCard key={asset.id} asset={asset} selected={selectedIds.includes(asset.id)} selectionDisabled={bulkDeleting} onSelect={(checked) => setSelectedIds((ids) => checked ? [...new Set([...ids, asset.id])] : ids.filter((id) => id !== asset.id))} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />
-                        ))}
-                    </div>
-
-                    {!hydrated ? <div className="flex justify-center py-20"><Spinner /></div> : !visibleAssets.length && !assetError ? <Empty description={t("assets.empty")} className="py-20" /> : null}
-
-                    <div className="flex justify-center">
-                        <Pagination
-                            current={page}
-                            pageSize={pageSize}
-                            total={filteredAssets.length}
-                            onPageSizeChange={setPageSize}
-                            onChange={(nextPage, nextPageSize) => {
-                                setPage(nextPage);
-                                setPageSize(nextPageSize);
-                            }}
-                        />
-                    </div>
+                        {kindOptions.map(({ key }) => <AssetTabPanel key={key} value={key} active={key === kindFilter}>{key === kindFilter ? assetContent : null}</AssetTabPanel>)}
+                    </Tabs.Root>
+                    {hydrated && !assetError ? <Pagination className="mt-5" current={page} pageSize={pageSize} total={filteredAssets.length} onChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} /> : null}
                 </div>
             </main>
 
@@ -342,9 +315,6 @@ export default function AssetsPage() {
                             <Field name="coverUrl" label={t("assets.fields.coverUrl")} className="min-w-0 flex-1"><Input placeholder={t("assets.fields.coverPlaceholder")} /></Field>
                             <Button icon={<Upload className="size-4" />} onClick={() => coverInputRef.current?.click()}>{t("common.upload")}</Button>
                         </div>
-                        <Field name="tags" label={t("assets.fields.tags")}>
-                            <Choice multiple creatable  placeholder={t("assets.fields.tagsPlaceholder")} />
-                        </Field>
                         <div className="grid gap-4 sm:grid-cols-2">
                             <Field name="source" label={t("assets.fields.source")}>
                                 <Input placeholder={t("assets.fields.sourcePlaceholder")} />
@@ -385,21 +355,11 @@ export default function AssetsPage() {
                             ) : (
                                 <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground ">{content || t("assets.noCover")}</div>
                             )}
-                            <div className="p-4">
-                                <span data-strong data-ellipsis className="block">
+                            <div className="flex items-center justify-between gap-2 p-3">
+                                <span className="truncate text-sm font-medium">
                                     {title || t("assets.untitled")}
                                 </span>
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {tags.length ? (
-                                        tags.map((tag) => (
-                                            <Tag key={tag} className="m-0">
-                                                {tag}
-                                            </Tag>
-                                        ))
-                                    ) : (
-                                        <Tag className="m-0">{t("assets.untagged")}</Tag>
-                                    )}
-                                </div>
+                                <Tag className="shrink-0 text-xs">{t(`assets.kinds.${formKind}`)}</Tag>
                             </div>
                         </div>
                     </div>
@@ -433,58 +393,44 @@ export default function AssetsPage() {
             <Dialog title={t("assets.deleteTitle")} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive cancelText={t("common.cancel")}>
                 <p>{t("workspace.deleteAssetDescription", { title: deletingAsset?.title })}</p>
             </Dialog>
-            <Dialog title={t("ui.deleteSelectedTitle", { count: selectedAssets.length })} open={bulkDeleteOpen} busy={bulkDeleting} onClose={() => setBulkDeleteOpen(false)} onConfirm={deleteSelected} confirmText={t("common.delete")} destructive description={t("workspace.assetDeleteDescription")}><ul className="max-h-48 space-y-1 overflow-auto text-sm">{selectedAssets.map((asset) => <li key={asset.id} className="truncate">{asset.title}</li>)}</ul></Dialog>
         </div>
     );
 }
 
-function AssetCard({ asset, selected, selectionDisabled, onSelect, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; selected: boolean; selectionDisabled: boolean; onSelect: (checked: boolean) => void; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
+function AssetTabPanel({ value, active, children }: { value: AssetKind | "all"; active: boolean; children: ReactNode }) {
+    const [content, setContent] = useState(children);
+    // Keep the outgoing assets visible until the tab's exit animation finishes.
+    if (active && content !== children) setContent(children);
+    return <Tabs.Content value={value} className="outline-none focus-visible:ring-2 focus-visible:ring-ring">{active ? children : content}</Tabs.Content>;
+}
+
+function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = assetCoverUrl(asset);
     const summary = assetSummary(asset);
     return (
-        <article className={cn("relative overflow-hidden rounded-xl border bg-card text-card-foreground", selected ? "border-primary ring-1 ring-primary" : "border-border")}>
-                <div className="absolute left-3 top-3 z-10 rounded-md bg-card/95 p-1.5"><Checkbox checked={selected} disabled={selectionDisabled} aria-label={t("ui.selectNamed", { name: asset.title })} onChange={({ target }) => onSelect(target.checked)} /></div>
-                <button type="button" className="block w-full text-left" onClick={onOpen}>
-                    {cover ? (
-                        <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
-                    ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm leading-6 text-muted-foreground  ">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
-                    )}
-                </button>
-            <button type="button" className="block w-full text-left" onClick={onOpen}>
-                <div className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <h2 className="line-clamp-1 text-sm font-medium text-foreground ">{asset.title}</h2>
-                            <span data-secondary className="mt-1 block text-xs">
-                                {asset.source || t("assets.unknownSource")}
-                            </span>
-                        </div>
-                        <Tag className="m-0 shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
-                    </div>
-                    <p data-secondary className="!mb-0 !mt-2 !text-xs !leading-5">
-                        {summary}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                        {(asset.tags || []).slice(0, 3).map((tag) => (
-                            <Tag key={tag} className="m-0 text-xs">
-                                {tag}
-                            </Tag>
-                        ))}
-                        {!asset.tags?.length ? <Tag className="m-0 text-xs">{t("assets.noTags")}</Tag> : null}
-                    </div>
-                </div>
+        <article className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25">
+            <button type="button" className="block w-full shrink-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={t("assets.previewNamed", { name: asset.title })} onClick={onOpen}>
+                {cover ? (
+                    <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
+                ) : (
+                    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted p-4 text-center text-sm leading-6 text-muted-foreground"><span className="line-clamp-5 break-words">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</span></div>
+                )}
             </button>
-            <div className="flex items-center justify-between gap-2 px-4 pb-4">
-                <Button variant="ghost" size="sm" icon={asset.kind === "text" ? <Copy /> : <Download />} onClick={() => asset.kind === "text" ? onCopy(asset) : onDownload(asset)}>{t(asset.kind === "text" ? "common.copy" : "common.download")}</Button>
-                <Menu placement="topRight" items={[
-                    { key: "view", label: t("common.view"), onClick: onOpen },
-                    { key: "edit", label: t("common.edit"), icon: <PencilLine className="size-4" />, onClick: onEdit },
-                    { type: "divider" },
-                    { key: "delete", label: t("common.delete"), icon: <Trash2 className="size-4" />, danger: true, onClick: onDelete },
-                ]}><Button variant="ghost" size="icon" aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>
+            <div className="space-y-1 p-3">
+                <div className="flex items-center justify-between gap-2">
+                    <button type="button" className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onOpen}><h2 className="truncate text-sm font-medium">{asset.title}</h2></button>
+                    <Tag className="shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="truncate text-xs leading-5 text-muted-foreground">{summary}</span>
+                    <Menu placement="topRight" items={[
+                        { key: "use", label: t(asset.kind === "text" ? "common.copy" : "common.download"), icon: asset.kind === "text" ? <Copy /> : <Download />, onClick: () => asset.kind === "text" ? onCopy(asset) : onDownload(asset) },
+                        { key: "edit", label: t("common.edit"), icon: <PencilLine />, onClick: onEdit },
+                        { key: "delete", label: t("common.delete"), icon: <Trash2 />, danger: true, onClick: onDelete },
+                    ]}><Button variant="ghost" size="icon" className="size-7" title={t("ui.moreActions")} aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>
+                </div>
             </div>
         </article>
     );
@@ -511,9 +457,6 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         </h3>
                         <div className="flex flex-wrap items-center gap-2">
                             <Tag>{t(`assets.kinds.${asset.kind}`)}</Tag>
-                            {(asset.tags || []).map((tag) => (
-                                <Tag key={tag}>{tag}</Tag>
-                            ))}
                         </div>
                     </div>
                     <p className="text-sm text-muted-foreground">{t("workspace.fileSave")}：{asset.saveState === "saved" ? appI18n.t("workspace.saved") : asset.saveState === "saving" ? appI18n.t("workspace.savingFile") : appI18n.t("workspace.saveFileFailed")} · {t("workspace.cloudSync")}：{asset.syncState === "synced" ? appI18n.t("workspace.synced") : asset.syncState === "syncing" ? appI18n.t("workspace.syncing") : asset.syncState === "failed" ? appI18n.t("workspace.syncFailed") : appI18n.t("workspace.local")}{asset.error ? ` · ${asset.error}` : ""}</p>
@@ -592,11 +535,14 @@ async function readAssetMediaBlob(asset: Exclude<Asset, { kind: "text" }>) {
 }
 
 function assetSummary(asset: Asset) {
-    if (asset.kind === "text") return asset.data.content;
-    if (asset.kind === "audio") return `${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
-    return `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
+    if (asset.kind === "text") return appI18n.t("assets.characterCount", { count: asset.data.content.length });
+    return [
+        asset.kind !== "audio" && asset.data.width > 0 && asset.data.height > 0 ? formatRatio(asset.data.width, asset.data.height) : "",
+        formatBytes(asset.data.bytes),
+        asset.kind !== "image" && asset.data.durationMs && asset.data.durationMs > 0 ? formatDuration(asset.data.durationMs) : "",
+    ].filter(Boolean).join(" · ") || "—";
 }
 
 function assetSearchText(asset: Asset) {
-    return [asset.title, asset.source || "", asset.note || "", (asset.tags || []).join(" "), asset.kind === "text" ? asset.data.content : asset.data.mimeType].join(" ").toLowerCase();
+    return [asset.title, asset.source || "", asset.note || "", asset.kind === "text" ? asset.data.content : asset.data.mimeType].join(" ").toLowerCase();
 }

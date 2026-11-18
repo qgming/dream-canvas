@@ -1883,7 +1883,7 @@ function InfiniteCanvasPage() {
             if (node.type === CanvasNodeType.Text) {
                 const content = node.metadata?.content?.trim();
                 if (!content) return notify.error(t("canvas.projectPage.noTextToSave"));
-                await addAsset({ kind: "text", title: node.metadata?.prompt?.slice(0, 24) || t("canvas.projectPage.canvasText"), coverUrl: "", tags: [], source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
+                await addAsset({ kind: "text", title: node.metadata?.prompt?.slice(0, 24) || t("canvas.projectPage.canvasText"), coverUrl: "", source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
                 notify.success(t("common.addedToAssets"));
                 return;
             }
@@ -1893,7 +1893,6 @@ function InfiniteCanvasPage() {
                     kind: "video",
                     title: node.metadata?.prompt?.slice(0, 24) || t("canvas.projectPage.canvasVideo"),
                     coverUrl: "",
-                    tags: [],
                     source: "Canvas",
                     data: { url: node.metadata.content, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" },
                     metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
@@ -1907,7 +1906,6 @@ function InfiniteCanvasPage() {
                 kind: "image",
                 title: node.metadata?.prompt?.slice(0, 24) || t("canvas.projectPage.canvasImage"),
                 coverUrl: node.metadata.content,
-                tags: [],
                 source: "Canvas",
                 data: {
                     dataUrl,

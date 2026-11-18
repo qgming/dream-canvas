@@ -145,12 +145,12 @@ func skillView(skill AssistantSkill, detail bool) gin.H {
 }
 
 func (a *App) listAssistantSkills(c *gin.Context) {
-	result, err := a.ListAssistantSkills(currentUser(c)); if err != nil { respondError(c, err); return }
+	result, err := a.ListAssistantSkills(currentUser(c), c.Query("locale")); if err != nil { respondError(c, err); return }
 	c.JSON(200, gin.H{"data": result, "errors": []string{}})
 }
 
 func (a *App) getAssistantSkill(c *gin.Context) {
-	view, err := a.GetAssistantSkill(currentUser(c), c.Param("name")); if err != nil { respondError(c, err); return }; c.JSON(200, gin.H{"data": view})
+	view, err := a.GetAssistantSkill(currentUser(c), c.Param("name"), c.Query("locale")); if err != nil { respondError(c, err); return }; c.JSON(200, gin.H{"data": view})
 }
 
 func (a *App) saveAssistantSkill(c *gin.Context) {
@@ -165,7 +165,7 @@ func (a *App) saveAssistantSkill(c *gin.Context) {
 type skillInput struct { Name string `json:"name"`; Description string `json:"description"`; Instructions string `json:"instructions"`; Interface JSON `json:"interface"`; ExpectedRevision string `json:"expectedRevision"`; Enabled *bool `json:"enabled"` }
 
 func (a *App) SaveAssistantSkill(userID, name string, input skillInput, create bool) (AssistantSkill, error) {
-	if name == modelAdapterSkill { return AssistantSkill{}, problem(403, "builtin_readonly", "内置 Skill 只读") }
+	if isBuiltinSkill(name) { return AssistantSkill{}, problem(403, "builtin_readonly", "内置 Skill 只读") }
 	if !skillName.MatchString(name) { return AssistantSkill{}, problem(400, "invalid_skill_name", "Skill 标识需使用小写字母、数字与短横线") }
 	if len(input.Interface) == 0 || string(input.Interface) == "null" { input.Interface = JSON(`{}`) }
 	var metadata map[string]any
@@ -193,7 +193,7 @@ func (a *App) SaveAssistantSkill(userID, name string, input skillInput, create b
 		if err := tx.Model(&skill).Updates(values).Error; err != nil { return err }
 		return tx.First(&skill, "user_id = ? AND name = ?", skill.UserID, name).Error
 	})
-	if err == nil { a.notify(skill.UserID) }; return skill, err
+	if err == nil { a.notifyTopic(skill.UserID, "skills") }; return skill, err
 }
 
 func (a *App) deleteAssistantSkill(c *gin.Context) {
@@ -204,8 +204,8 @@ func (a *App) deleteAssistantSkill(c *gin.Context) {
 }
 
 func (a *App) DeleteAssistantSkill(userID, name, revision string) error {
-	if name == modelAdapterSkill { return problem(403, "builtin_readonly", "内置 Skill 只读") }
+	if isBuiltinSkill(name) { return problem(403, "builtin_readonly", "内置 Skill 只读") }
 	version, err := strconv.ParseUint(revision, 10, 64); if err != nil { return problem(400, "version_required", "请先读取 Skill 版本") }
 	result := a.db.Delete(&AssistantSkill{}, "user_id = ? AND name = ? AND version = ?", userID, name, version)
-	if result.Error != nil { return result.Error }; if result.RowsAffected == 0 { return problem(409, "version_conflict", "Skill 已更新或删除，请重新读取") }; a.notify(userID); return nil
+	if result.Error != nil { return result.Error }; if result.RowsAffected == 0 { return problem(409, "version_conflict", "Skill 已更新或删除，请重新读取") }; a.notifyTopic(userID, "skills"); return nil
 }

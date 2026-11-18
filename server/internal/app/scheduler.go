@@ -80,7 +80,6 @@ func (a *App) workRevision(key string) string {
 
 func (a *App) dispatch(policy executionPolicy) {
 	a.repairAssistantUsage()
-	a.dispatchPromptRefresh()
 	var cleanup []GenerationTask
 	if a.db.Where("response_cleanup_pending = ? AND (next_run_at IS NULL OR next_run_at <= ?)", true, time.Now()).Find(&cleanup).Error == nil { for _, task := range cleanup { a.launch("results:"+task.ID, func(ctx context.Context) { a.cleanupTaskResponses(task) }) } }
 	var tasks []GenerationTask

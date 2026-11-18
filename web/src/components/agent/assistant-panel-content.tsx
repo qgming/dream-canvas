@@ -6,7 +6,7 @@ import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { Choice } from "@/components/ui/choice";
 import { History, MessageSquare, Plus, RefreshCw, Settings2, Sparkles, X } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -23,7 +23,6 @@ import { AgentPanelTabs } from "./agent-panel-tabs";
 import { AgentChatTimeline } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import { AgentHistoryView } from "./agent-history-view";
-import { AgentSkillsView } from "./agent-skills-view";
 import * as api from "@/services/api/assistant";
 import { uploadImage } from "@/services/image-storage";
 import { assetId, assetUrl } from "@/services/api/assets";
@@ -39,6 +38,7 @@ export function AssistantPanelContent() {
     const user = useAuthStore((state) => state.user);
     const config = useEffectiveConfig();
     const { pathname } = useLocation();
+    const navigate = useNavigate();
     const routeProject = /^\/canvas\/([^/]+)$/.exec(pathname)?.[1] || "";
     const projects = useCanvasStore((state) => state.projects);
     const [target, setTarget] = useState("");
@@ -48,8 +48,8 @@ export function AssistantPanelContent() {
     const followedTurn = useRef<{ threadId: string; turnId: string; projectId: string } | null>(null);
     const chooseTarget = (projectId: string) => { targetRef.current = projectId; setTarget(projectId); };
     const activeTab = useAgentStore((state) => state.activeTab);
-    const tab = activeTab === "history" || activeTab === "skills" ? activeTab : "chat";
-    const setTab = (activeTab: "chat" | "history" | "skills") => useAgentStore.setState({ activeTab });
+    const tab = activeTab === "history" ? activeTab : "chat";
+    const setTab = (activeTab: "chat" | "history") => useAgentStore.setState({ activeTab });
     const [snapshot, setSnapshot] = useState<api.AssistantSnapshot | null>(null);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
@@ -77,7 +77,6 @@ export function AssistantPanelContent() {
     const reportedTurn = running || snapshot?.turns.at(-1);
     const busy = Boolean(running || submitting || creating);
     useEffect(() => { useAgentStore.setState({ sending: submitting, waiting: Boolean(running) }); }, [submitting, running?.id]);
-    useEffect(() => { if (user) void useAgentSkillStore.getState().loadSkills(); }, [user?.id]);
     useEffect(() => { chooseTarget(routeProject); }, [routeProject]);
     const showError = (error: unknown) => { const text = error instanceof Error ? error.message : appI18n.t("workspace.operationFailed"); setError(text); useAgentStore.setState({ connectError: text }); };
     const refreshThreads = async () => {
@@ -187,7 +186,7 @@ export function AssistantPanelContent() {
     };
     return (
         <>
-            <AgentPanelTabs value={tab} theme={theme} onChange={setTab} items={[{ value: "chat", label: appI18n.t("workspace.chat"), icon: <MessageSquare className="size-4" /> }, { value: "history", label: appI18n.t("workspace.history"), icon: <History className="size-4" /> }, { value: "skills", label: "Skill", icon: <Sparkles className="size-4" /> }]} right={<><Button variant="ghost"  icon={<Plus className="size-4" />} disabled={loading || busy} onClick={() => void newThread()} aria-label={appI18n.t("workspace.newConversation")} /><Button variant="ghost"  icon={<X className="size-4" />} onClick={() => useAgentStore.getState().closePanel()} aria-label={appI18n.t("workspace.collapseAssistant")} /></>} />
+            <AgentPanelTabs value={tab} theme={theme} onChange={setTab} items={[{ value: "chat", label: appI18n.t("workspace.chat"), icon: <MessageSquare className="size-4" /> }, { value: "history", label: appI18n.t("workspace.history"), icon: <History className="size-4" /> }]} right={<><Button variant="ghost" icon={<Sparkles className="size-4" />} title={appI18n.t("inspiration.title")} onClick={() => { navigate("/inspiration?kind=skills"); useAgentStore.getState().closePanel(); }} /><Button variant="ghost"  icon={<Plus className="size-4" />} disabled={loading || busy} onClick={() => void newThread()} aria-label={appI18n.t("workspace.newConversation")} /><Button variant="ghost"  icon={<X className="size-4" />} onClick={() => useAgentStore.getState().closePanel()} aria-label={appI18n.t("workspace.collapseAssistant")} /></>} />
             {error ? <Alert type="error" title={error} className="mx-3 mt-3" action={<Button size="sm" disabled={loading} onClick={() => { void refreshThreads().then(() => { setError(""); useAgentStore.setState({ connectError: "" }); if (activeId) return openThread(activeId, false); }).catch(showError); }}>{appI18n.t("workspace.retry")}</Button>} onClose={() => setError("")} /> : null}
             <div hidden={tab !== "history"} inert={tab !== "history"} className={tab === "history" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><AgentHistoryView theme={theme} threads={threads} activeThreadId={activeId} workspacePath={appI18n.t("workspace.allConversations")} loading={loading} busy={busy} connected onRefresh={() => void refreshThreads().catch(showError)} onNewThread={() => void newThread()} onResumeThread={(id) => void openThread(id)} onDeleteThreads={(ids) => {
                 const assertSession = captureSession();
@@ -198,7 +197,6 @@ export function AssistantPanelContent() {
                     await refreshThreads();
                 } });
             }} /></div>
-            <div hidden={tab !== "skills"} inert={tab !== "skills"} className={tab === "skills" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><AgentSkillsView clientId={user?.id || ""} /></div>
             <div hidden={tab !== "chat"} inert={tab !== "chat"} className={tab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                 <div className="flex shrink-0 items-center gap-2 px-4 pt-3 text-xs" style={{ color: theme.node.muted }}><span>{appI18n.t("workspace.targetProject")}</span><Choice compact borderless aria-label={appI18n.t("workspace.targetProject")} className="min-w-0 flex-1" value={running ? running.projectId || "" : target} disabled={busy} onChange={chooseTarget} options={[{ value: "", label: appI18n.t("workspace.noProject") }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} /><Button variant="ghost" size="sm" icon={<RefreshCw className="size-3.5" />} disabled={loading} onClick={() => activeId ? void openThread(activeId) : void refreshThreads().catch(showError)} aria-label={appI18n.t("workspace.reloadConversation")} /></div>
                 {loading ? <div className="flex justify-center px-4 pt-3"><Spinner size="small" /></div> : null}

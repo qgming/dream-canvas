@@ -43,17 +43,20 @@ func businessTools() []toolDefinition {
 		{"asset_get", "读取私人资产元数据及保存、同步、删除状态", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_update", "修改资产名称与说明，并将工作台文件保留到资产库，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
-		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content、note、tags 等信息"}}, "title", "metadata")},
+		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content 文本正文、note 备注、source 来源、coverUrl 封面地址"}}, "title", "metadata")},
 		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
 		{"asset_voice_save", "关联已注册音色编号；不会调用供应商克隆或注册音色", "edit", toolSchema(map[string]any{"assetId": stringField("音频资产 ID"), "channelId": stringField("渠道 ID"), "voiceId": stringField("已注册编号"), "version": numberField("现有版本，新建为 0")}, "assetId", "channelId", "voiceId", "version")},
 		{"catalog_list", "读取按管理员排序返回的可用渠道模型目录；parameters 包含管理员及脚本默认值，pricing 只返回积分投影，不含真实凭据或成本", "read", toolSchema(map[string]any{})},
-		{"prompts_search", "搜索已保存来源的服务端提示词，读取失败明确报错", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "sourceId": stringField("可选来源 ID")} )},
+		{"prompts_search", "按文本、图片或视频类型搜索项目内置及当前用户的提示词", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "scope": map[string]any{"type": "string", "enum": []string{"all", "builtin", "user"}}, "type": map[string]any{"type": "string", "enum": []string{"all", "text", "image", "video"}}, "locale": stringField("可选 zh-CN 或 en-US")})},
+		{"prompt_get", "读取内置或当前用户的提示词及版本", "read", toolSchema(map[string]any{"promptId": stringField("提示词 ID"), "locale": stringField("可选 zh-CN 或 en-US")}, "promptId")},
+		{"prompt_save", "创建或按版本保存我的提示词；内置提示词只读，需要不限项目的授权", "edit", toolSchema(map[string]any{"promptId": stringField("修改时填写，新建留空"), "version": numberField("读取版本，新建为 0"), "title": stringField("名称"), "prompt": stringField("提示词正文"), "type": map[string]any{"type": "string", "enum": []string{"text", "image", "video"}}, "description": stringField("说明"), "category": stringField("分类")}, "version", "title", "prompt", "type")},
+		{"prompt_delete", "按读取版本删除我的提示词；内置提示词只读，需要不限项目的授权", "edit", toolSchema(map[string]any{"promptId": stringField("提示词 ID"), "version": numberField("读取版本")}, "promptId", "version")},
 		{"workbench_records", "读取图片或视频工作台展示记录，与生成任务分开管理", "read", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}}, "kind")},
 		{"workbench_record_save", "按版本保存工作台展示记录，不提交生成或记账", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取的版本，新建为 0"), "value": map[string]any{"type": "object"}}, "kind", "recordId", "version", "value")},
 		{"workbench_record_remove", "按版本删除生成记录并清理未手动保留的专属文件；保留资产库、其他记录及项目引用和历史用量，在途任务继续执行，文件清理可能待处理", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取到的记录版本")}, "kind", "recordId", "version")},
-		{"skills_list", "读取个人及当前角色可用的内置 Skill 列表", "read", toolSchema(map[string]any{})},
-		{"skill_get", "读取个人或当前角色可用的内置 Skill 指令与版本", "read", toolSchema(map[string]any{"name": stringField("Skill 标识")}, "name")},
+		{"skills_list", "读取个人及当前角色可用的内置 Skill 列表", "read", toolSchema(map[string]any{"locale": stringField("可选 zh-CN 或 en-US")})},
+		{"skill_get", "读取个人或当前角色可用的内置 Skill 指令与版本", "read", toolSchema(map[string]any{"name": stringField("Skill 标识"), "locale": stringField("可选 zh-CN 或 en-US")}, "name")},
 		{"skill_save", "创建或按版本修改个人 Skill；不执行模型调用", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "description": stringField("说明"), "instructions": stringField("指令"), "interface": map[string]any{"type": "object"}, "expectedRevision": stringField("读取的版本，新建时留空"), "enabled": map[string]any{"type": "boolean"}}, "name")},
 		{"skill_delete", "按读取版本删除个人 Skill，不删除对话或项目", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "expectedRevision": stringField("读取的版本")}, "name", "expectedRevision")},
 		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点，独立工作台任务可指定记录归属并手动保留成品", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "workbenchRecordId": stringField("可选图片或视频工作台记录 ID，与 projectId 互斥；成品仅手动保存后进入资产库"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
@@ -174,7 +177,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 			if err := a.queueAssetSync(id); err != nil { return nil, err }; if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", id, "sync").Update("next_run_at", nil).Error; err != nil { return nil, err }; a.signalWork(); return map[string]any{"queued": true}, nil
 		case "asset_content":
 			policy, err := a.executionPolicy(); if err != nil { return nil, err }
-			if asset.Kind == "text" { return json.RawMessage(asset.Metadata), nil }
+			if asset.Kind == "text" { return assetMetadata(asset.Metadata) }
 			if asset.SaveState != "saved" || asset.Bytes < 0 || asset.Bytes > (policy.JSONBytes/4)*3 { return nil, problem(413, "content_too_large", "原件尚未保存或超过工具 JSON 边界，请使用带 Bearer 的 HTTP 文件接口") }
 			release, err := a.acquireFile(ctx, false, false); if err != nil { return nil, err }; defer release(); a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
 			if err := a.db.First(&asset, "id = ? AND delete_state = ?", id, "").Error; err != nil { return nil, err }; path, err := a.assetPath(id); if err != nil { return nil, err }; file, err := os.Open(path); if err != nil { return nil, err }; defer file.Close()
@@ -184,8 +187,16 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if len(p.Projects) > 0 { return nil, problem(403, "asset_scope", "创建全局资产需要不限项目的授权") }
 		return a.CreateTextAsset(p.User.ID, text("title"), encode(input["metadata"]))
 	case "prompts_search":
-		rows, err := a.ListPrompts(ctx, p.User.ID); if err != nil { return nil, err }; result := []map[string]any{}; keyword := strings.ToLower(strings.TrimSpace(text("keyword")))
-		for _, row := range rows { if text("sourceId") != "" && row["sourceId"] != text("sourceId") { continue }; if keyword == "" || strings.Contains(strings.ToLower(string(encode(row))), keyword) { result = append(result, row) } }; return result, nil
+		if scope := text("scope"); scope != "" && !includes([]string{"all", "builtin", "user"}, scope) { return nil, problem(400, "invalid_prompt_scope", "请选择内置提示词或我的提示词") }
+		if promptType := text("type"); promptType != "" && !includes([]string{"all", "text", "image", "video"}, promptType) { return nil, problem(400, "invalid_prompt_type", "请选择文本、图片或视频提示词") }
+		rows, err := a.ListPrompts(ctx, p.User.ID, text("locale")); if err != nil { return nil, err }; result := []Prompt{}; keyword := strings.ToLower(strings.TrimSpace(text("keyword")))
+		for _, row := range rows { if text("scope") == "builtin" && !row.BuiltIn || text("scope") == "user" && row.BuiltIn { continue }; if text("type") != "" && text("type") != "all" && row.Type != text("type") { continue }; if keyword == "" || strings.Contains(strings.ToLower(strings.Join([]string{row.Title, row.Description, row.Prompt, row.Category}, " ")), keyword) { result = append(result, row) } }; return result, nil
+	case "prompt_get":
+		return a.GetPrompt(ctx, p.User.ID, text("promptId"), text("locale"))
+	case "prompt_save", "prompt_delete":
+		if len(p.Projects) > 0 { return nil, problem(403, "prompt_scope", "修改个人提示词需要不限项目的授权") }
+		if name == "prompt_delete" { err := a.DeletePrompt(p.User.ID, text("promptId"), version); return map[string]any{"deleted": err == nil}, err }
+		var request promptInput; if err := json.Unmarshal(encode(input), &request); err != nil { return nil, err }; return a.SavePrompt(p.User.ID, text("promptId"), request, text("promptId") == "")
 	case "workbench_records", "workbench_record_save", "workbench_record_remove":
 		if len(p.Projects) > 0 { return nil, problem(403, "workbench_scope", "全局工作台记录需要不限项目的授权") }
 		kind := text("kind"); if !includes([]string{"image", "video"}, kind) { return nil, problem(400, "invalid_workbench", "请选择图片或视频工作台") }
@@ -193,9 +204,9 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if name == "workbench_record_remove" { pending, err := a.DeleteWorkbenchRecord(p.User.ID, kind, text("recordId"), version); return map[string]any{"removed": err == nil, "cleanupPending": pending}, err }
 		rows := []WorkbenchRecord{}; err := a.db.Where("user_id = ? AND kind = ? AND removed = ?", p.User.ID, kind, false).Order("created_at DESC").Find(&rows).Error; return rows, err
 	case "skills_list":
-		user := p.User; if !p.allows("admin", "") { user.Role = "user" }; return a.ListAssistantSkills(user)
+		user := p.User; if !p.allows("admin", "") { user.Role = "user" }; return a.ListAssistantSkills(user, text("locale"))
 	case "skill_get":
-		user := p.User; if !p.allows("admin", "") { user.Role = "user" }; return a.GetAssistantSkill(user, text("name"))
+		user := p.User; if !p.allows("admin", "") { user.Role = "user" }; return a.GetAssistantSkill(user, text("name"), text("locale"))
 	case "skill_save", "skill_delete":
 		if len(p.Projects) > 0 { return nil, problem(403, "skill_scope", "修改全局个人 Skill 需要不限项目的授权") }
 		if name == "skill_delete" { err := a.DeleteAssistantSkill(p.User.ID, text("name"), text("expectedRevision")); return map[string]any{"deleted": err == nil}, err }

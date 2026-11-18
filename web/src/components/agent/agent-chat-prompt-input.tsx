@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { buildCanvasResourceReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
-import type { AgentSkillSummary } from "@/services/api/canvas-agent";
+import type { AgentSkillSummary } from "@/services/api/assistant-skills";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentCanvasReference, type AgentSkillReference } from "@/stores/use-agent-store";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
