@@ -41,8 +41,15 @@ func (a *App) saveGeneratedAsset(ctx context.Context, task GenerationTask, index
 	if err == nil && asset.SaveState == "saved" { return asset, a.queueAssetSync(asset.ID) }
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return asset, err }
 	if asset.ID == "" {
-		asset = Asset{ID: id, UserID: task.UserID, Kind: task.Capability, Title: "生成成品", Path: id, SaveState: "saving", SyncState: "local", Metadata: encode(map[string]any{"source": "generation", "taskId": task.ID, "projectId": task.ProjectID, "nodeId": task.NodeID})}
-		if err := a.db.Transaction(func(tx *gorm.DB) error { if err := tx.Create(&asset).Error; err != nil { return err }; return tx.Create(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error }); err != nil { return asset, err }
+		asset = Asset{ID: id, UserID: task.UserID, WorkbenchRecordID: task.WorkbenchRecordID, Kind: task.Capability, Title: "生成成品", Path: id, SaveState: "saving", SyncState: "local", Metadata: encode(map[string]any{"source": "generation", "taskId": task.ID, "projectId": task.ProjectID, "nodeId": task.NodeID})}
+		if err := a.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&asset).Error; err != nil { return err }
+			if err := tx.Create(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err }
+			if task.WorkbenchRecordID == "" { return nil }
+			var removed int64
+			if err := tx.Model(&WorkbenchRecord{}).Where("user_id = ? AND id = ? AND removed = ?", task.UserID, task.WorkbenchRecordID, true).Count(&removed).Error; err != nil { return err }
+			if removed > 0 { _, err := queueWorkbenchMediaCleanup(tx, task.UserID, []string{asset.ID}); return err }; return nil
+		}); err != nil { return asset, err }
 	}
 	name, err := a.assetPath(id)
 	if err != nil { return asset, err }

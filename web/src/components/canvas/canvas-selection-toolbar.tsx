@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Group, Ungroup } from "lucide-react";
 import { Tooltip } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -73,13 +74,8 @@ export function CanvasSelectionToolbar({
 
 function SelectionAction({ title, label, icon, onClick }: { title: string; label: string; icon: ReactNode; onClick: () => void }) {
     return (
-        <Tooltip title={title} placement="top">
-            <button type="button" className="group relative flex h-12 items-center whitespace-nowrap px-1.5" onClick={onClick} aria-label={title}>
-                <span className="flex h-9 items-center gap-2 rounded-lg px-2.5 transition group-hover:bg-accent">
-                    {icon}
-                    <span>{label}</span>
-                </span>
-            </button>
-        </Tooltip>
+        <div className="flex h-12 items-center px-1.5"><Tooltip title={title} placement="top">
+            <Button variant="ghost" className="h-9 gap-2 rounded-lg px-2.5" icon={icon} onClick={onClick} aria-label={title}>{label}</Button>
+        </Tooltip></div>
     );
 }

@@ -6,6 +6,7 @@ import { Command } from "cmdk";
 import i18n from "@/i18n";
 import { inputClass } from "@/components/ui/input";
 import { ModelPrice } from "@/components/model-price";
+import { Tooltip } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { findChannelModel, modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
@@ -45,15 +46,15 @@ export function ModelPicker({ config, value, onChange, capability, toolsOnly = f
         if (next) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
         setQuery(""); setOpen(next);
     }}>
-        <Popover.Trigger asChild><button type="button" role="combobox" id={id} aria-label={ariaLabel || t("workbench.model")} aria-describedby={ariaDescription} aria-expanded={open} aria-controls={open ? listId : undefined} aria-haspopup="listbox" aria-invalid={invalid || undefined} className={cn("canvas-composer-model-picker flex h-8 w-fit max-w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm font-normal outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-ring aria-invalid:border-destructive aria-invalid:text-destructive", fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start", className)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} title={invalid ? t("points.unavailableModel") : current ? modelOptionLabel(config, current) : pickerPlaceholder}>
+        <Tooltip open={open ? false : undefined} title={invalid ? t("points.unavailableModel") : current ? modelOptionLabel(config, current) : pickerPlaceholder}><Popover.Trigger asChild><button type="button" role="combobox" id={id} aria-label={ariaLabel || t("workbench.model")} aria-describedby={ariaDescription} aria-expanded={open} aria-controls={open ? listId : undefined} aria-haspopup="listbox" aria-invalid={invalid || undefined} className={cn("canvas-composer-model-picker flex h-8 w-fit max-w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm font-normal outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-ring aria-invalid:border-destructive aria-invalid:text-destructive", fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start", className)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             {invalid ? <CircleAlert className="size-4 shrink-0" /> : <ModelIcon model={current} />}
             <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : pickerPlaceholder}</span><ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-        </button></Popover.Trigger>
+        </button></Popover.Trigger></Tooltip>
         <Popover.Portal><Popover.Content data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore sideOffset={6} align="start" className="z-[1500] w-96 max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg outline-none" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             {invalid ? <p role="alert" className="border-b border-border px-3 py-2 text-xs text-destructive">{t("points.unavailableModel")}</p> : null}
             <Command label={ariaLabel || t("workbench.model")} loop>
                 <Command.Input value={query} onValueChange={setQuery} aria-label={t("workspace.searchModels")} placeholder={t("workspace.searchModels")} className={cn(inputClass, "rounded-none border-0 border-b px-3")} />
-                <Command.List ref={(element) => { if (element) setListId(element.id); }} className="thin-scrollbar max-h-80 overflow-y-auto p-1" aria-label={ariaLabel || t("workbench.model")}>
+                <Command.List ref={(element) => { if (element) setListId(element.id); }} className="thin-scrollbar max-h-80 overflow-x-hidden overflow-y-auto p-1" aria-label={ariaLabel || t("workbench.model")}>
                     <Command.Empty className="px-3 py-4 text-sm text-muted-foreground">{options.length ? t("ui.noMatches") : emptyModelLabel(config, capability)}</Command.Empty>
                     {groups.map((group, index) => <Command.Group key={`${group.channelId}:${index}`} heading={group.name} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
                         {group.models.map((model) => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/controls";
@@ -140,7 +141,7 @@ export function CanvasPluginManagerModal({ open, onClose }: { open: boolean; onC
     const withUpgradeDot = (icon: ReactNode) => (
         <span className="relative inline-flex">
             {icon}
-            <span className="absolute -right-1 -top-1 size-2 rounded-full" style={{ background: "var(--success)", boxShadow: `0 0 0 2px ${theme.node.fill}` }} title={t("canvas.plugins.newVersion")} />
+            <Tooltip title={t("canvas.plugins.newVersion")}><span tabIndex={0} className="absolute -right-1 -top-1 size-2 rounded-full" style={{ background: "var(--success)", boxShadow: `0 0 0 2px ${theme.node.fill}` }} /></Tooltip>
         </span>
     );
 

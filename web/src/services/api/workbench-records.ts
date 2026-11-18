@@ -7,4 +7,4 @@ export const saveWorkbenchRecord = async <T extends { id: string; recordVersion?
     const record = await apiRequest<RecordValue<T>>(`/workbench/${kind}/records/${encodeURIComponent(value.id)}`, jsonRequest("PUT", { value: data, version: recordVersion || 0 }));
     return { ...record.value, recordVersion: record.version };
 };
-export const deleteWorkbenchRecord = (kind: "image" | "video", id: string) => apiRequest<void>(`/workbench/${kind}/records/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const deleteWorkbenchRecord = (kind: "image" | "video", record: { id: string; recordVersion?: number }) => apiRequest<{ removed: boolean; cleanupPending: boolean }>(`/workbench/${kind}/records/${encodeURIComponent(record.id)}`, jsonRequest("DELETE", { version: record.recordVersion || 0 }));

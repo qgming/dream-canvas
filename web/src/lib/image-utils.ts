@@ -16,6 +16,16 @@ export function formatBytes(bytes: number) {
     return `${value.toLocaleString(i18n.resolvedLanguage, { minimumFractionDigits: fraction, maximumFractionDigits: fraction })} ${units[unitIndex]}`;
 }
 
+export function formatRatio(width: number, height: number) {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "—";
+    const divisor = gcd(width, height);
+    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function gcd(a: number, b: number): number {
+    return b ? gcd(b, a % b) : Math.max(1, a);
+}
+
 export function formatDuration(ms: number) {
     const value = Math.max(0, Math.floor(ms / 1000));
     const minutes = Math.floor(value / 60);

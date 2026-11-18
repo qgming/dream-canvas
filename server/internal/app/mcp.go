@@ -39,10 +39,10 @@ func businessTools() []toolDefinition {
 		{"project_get", "读取指定项目，不能猜测浏览器活动项目", "read", toolSchema(map[string]any{"projectId": stringField("项目 ID")}, "projectId")},
 		{"project_create", "创建项目；仅未限制项目的令牌可用", "edit", toolSchema(map[string]any{"title": stringField("项目名称"), "document": map[string]any{"type": "object"}}, "title", "document")},
 		{"project_save", "按版本保存节点、连线和设置，冲突时返回错误，不覆盖服务端更新", "edit", toolSchema(projectFields, "projectId", "title", "version", "document")},
-		{"assets_list", "读取私人资产元数据；项目范围令牌仅返回范围内项目引用的素材", "read", toolSchema(map[string]any{})},
+		{"assets_list", "读取私人资产库元数据；工作台文件须手动保存才进入资产库，项目范围令牌仅返回范围内项目引用的素材", "read", toolSchema(map[string]any{})},
 		{"asset_get", "读取私人资产元数据及保存、同步、删除状态", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
-		{"asset_update", "修改资产名称与说明，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
+		{"asset_update", "修改资产名称与说明，并将工作台文件保留到资产库，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
 		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content、note、tags 等信息"}}, "title", "metadata")},
 		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
@@ -51,12 +51,12 @@ func businessTools() []toolDefinition {
 		{"prompts_search", "搜索已保存来源的服务端提示词，读取失败明确报错", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "sourceId": stringField("可选来源 ID")} )},
 		{"workbench_records", "读取图片或视频工作台展示记录，与生成任务分开管理", "read", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}}, "kind")},
 		{"workbench_record_save", "按版本保存工作台展示记录，不提交生成或记账", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取的版本，新建为 0"), "value": map[string]any{"type": "object"}}, "kind", "recordId", "version", "value")},
-		{"workbench_record_remove", "移除工作台展示记录，仅解除引用，原件和用量记录保留", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID")}, "kind", "recordId")},
+		{"workbench_record_remove", "按版本删除生成记录并清理未手动保留的专属文件；保留资产库、其他记录及项目引用和历史用量，在途任务继续执行，文件清理可能待处理", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取到的记录版本")}, "kind", "recordId", "version")},
 		{"skills_list", "读取个人及当前角色可用的内置 Skill 列表", "read", toolSchema(map[string]any{})},
 		{"skill_get", "读取个人或当前角色可用的内置 Skill 指令与版本", "read", toolSchema(map[string]any{"name": stringField("Skill 标识")}, "name")},
 		{"skill_save", "创建或按版本修改个人 Skill；不执行模型调用", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "description": stringField("说明"), "instructions": stringField("指令"), "interface": map[string]any{"type": "object"}, "expectedRevision": stringField("读取的版本，新建时留空"), "enabled": map[string]any{"type": "boolean"}}, "name")},
 		{"skill_delete", "按读取版本删除个人 Skill，不删除对话或项目", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "expectedRevision": stringField("读取的版本")}, "name", "expectedRevision")},
-		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
+		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点，独立工作台任务可指定记录归属并手动保留成品", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "workbenchRecordId": stringField("可选图片或视频工作台记录 ID，与 projectId 互斥；成品仅手动保存后进入资产库"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
 		{"generation_quote", "按明确渠道、模型和有效参数预估积分，不调用供应商；未知单位或 token 用量返回 unknown 和 null，不猜测为 0", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "parameters": map[string]any{"type": "object", "description": "与生成提交相同的模型参数；省略字段采用管理员及脚本默认值"}, "prompt": stringField("可选提示词，用于字符数计价"), "messages": map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "可选消息数组，用于字符数计价"}, "requests": map[string]any{"type": "integer", "minimum": 1, "description": "可选请求次数，默认 1"}}, "channelId", "modelId", "parameters")},
 		{"tasks_wait", "读取明确任务是否均已结束或需人工核对；ready=false 返回待等待任务。云端助手会持久等待并让出执行名额，完成后自动续行；外部 MCP 返回同一状态快照，不阻塞 HTTP，也不重新生成", "read", toolSchema(map[string]any{"taskIds": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": stringField("明确生成任务 ID")}}, "taskIds")},
 		{"tasks_list", "读取授权项目内的生成任务和保存、同步状态", "read", toolSchema(map[string]any{})},
@@ -151,7 +151,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	case "assets_list":
 		assets := []Asset{}
 		query := a.db.Where("user_id = ? AND delete_state = ?", p.User.ID, "")
-		if len(p.Projects) > 0 { query = query.Where("id IN (?)", a.db.Model(&AssetReference{}).Select("asset_id").Where("project_id IN ?", p.Projects)) }
+		if len(p.Projects) > 0 { query = query.Where("id IN (?)", a.db.Model(&AssetReference{}).Select("asset_id").Where("project_id IN ?", p.Projects)) } else { query = query.Where("workbench_record_id = ?", "") }
 		err := query.Order("created_at DESC").Find(&assets).Error
 		return assets, err
 	case "asset_get":
@@ -190,8 +190,8 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if len(p.Projects) > 0 { return nil, problem(403, "workbench_scope", "全局工作台记录需要不限项目的授权") }
 		kind := text("kind"); if !includes([]string{"image", "video"}, kind) { return nil, problem(400, "invalid_workbench", "请选择图片或视频工作台") }
 		if name == "workbench_record_save" { return a.SaveWorkbenchRecord(p.User.ID, kind, text("recordId"), version, encode(input["value"])) }
-		if name == "workbench_record_remove" { err := a.db.Delete(&WorkbenchRecord{}, "user_id = ? AND kind = ? AND id = ?", p.User.ID, kind, text("recordId")).Error; return map[string]any{"removed": err == nil}, err }
-		rows := []WorkbenchRecord{}; err := a.db.Where("user_id = ? AND kind = ?", p.User.ID, kind).Order("created_at DESC").Find(&rows).Error; return rows, err
+		if name == "workbench_record_remove" { pending, err := a.DeleteWorkbenchRecord(p.User.ID, kind, text("recordId"), version); return map[string]any{"removed": err == nil, "cleanupPending": pending}, err }
+		rows := []WorkbenchRecord{}; err := a.db.Where("user_id = ? AND kind = ? AND removed = ?", p.User.ID, kind, false).Order("created_at DESC").Find(&rows).Error; return rows, err
 	case "skills_list":
 		user := p.User; if !p.allows("admin", "") { user.Role = "user" }; return a.ListAssistantSkills(user)
 	case "skill_get":

@@ -3,7 +3,7 @@ import { assetBlob, assetId, assetUrl, getAsset, uploadAsset } from "@/services/
 import { captureSession } from "@/services/api/client";
 
 export type UploadedImage = { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string };
-type ImageReadOptions = { signal?: AbortSignal };
+type ImageReadOptions = { signal?: AbortSignal; workbenchRecordId?: string };
 
 export async function uploadImage(input: string | Blob, options?: ImageReadOptions): Promise<UploadedImage> {
     const assertSession = captureSession();
@@ -14,7 +14,7 @@ export async function uploadImage(input: string | Blob, options?: ImageReadOptio
         if (response && !response.ok) throw new Error(i18n.t("errors.imageReadFailed"));
         const blob = typeof input === "string" ? await response!.blob() : input;
         assertSession();
-        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.imageAsset"), options?.signal);
+        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.imageAsset"), options?.signal, options?.workbenchRecordId);
     }
     if (asset.kind !== "image" || asset.deleteState) throw new Error(asset.deleteState ? i18n.t("errors.assetDeleted") : i18n.t("errors.chooseImage"));
     if (asset.saveState !== "saved") throw new Error(i18n.t("errors.imageNotSaved"));

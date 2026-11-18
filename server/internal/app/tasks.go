@@ -17,6 +17,7 @@ type generationInput struct {
 	ModelID string `json:"modelId"`
 	Capability string `json:"capability"`
 	ProjectID string `json:"projectId"`
+	WorkbenchRecordID string `json:"workbenchRecordId,omitempty"`
 	NodeID string `json:"nodeId"`
 	ProjectVersion uint64 `json:"projectVersion"`
 	ResultSlotID string `json:"resultSlotId,omitempty"`
@@ -47,10 +48,16 @@ func (a *App) CreateTask(userID string, input generationInput) (GenerationTask, 
 	
 	if err := a.validateReferenceMedia(selected, input, userID); err != nil { return GenerationTask{}, err }
 	if err := a.validateScriptInput(userID, selected, input); err != nil { return GenerationTask{}, err }
-	task := GenerationTask{ID: identifier(), UserID: userID, ProjectID: input.ProjectID, NodeID: input.NodeID, ProjectVersion: input.ProjectVersion, ChannelID: input.ChannelID, ModelID: input.ModelID, Capability: input.Capability, Snapshot: encode(selected), Input: encode(input), Status: "queued", AssetIDs: JSON(`[]`), UsageState: "unknown"}
+	task := GenerationTask{ID: identifier(), UserID: userID, ProjectID: input.ProjectID, WorkbenchRecordID: input.WorkbenchRecordID, NodeID: input.NodeID, ProjectVersion: input.ProjectVersion, ChannelID: input.ChannelID, ModelID: input.ModelID, Capability: input.Capability, Snapshot: encode(selected), Input: encode(input), Status: "queued", AssetIDs: JSON(`[]`), UsageState: "unknown"}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := tx.First(&user, "id = ? AND disabled = ?", userID, false).Error; err != nil { return err }
+		if input.WorkbenchRecordID != "" {
+			if input.ProjectID != "" || !includes([]string{"image", "video"}, input.Capability) { return problem(400, "invalid_workbench", "工作台任务仅支持独立图片或视频生成") }
+			var removed int64
+			if err := tx.Model(&WorkbenchRecord{}).Where("user_id = ? AND id = ? AND removed = ?", userID, input.WorkbenchRecordID, true).Count(&removed).Error; err != nil { return err }
+			if removed > 0 { return problem(409, "record_removed", "生成记录已删除，请新建后生成") }
+		}
 		if input.ProjectID != "" {
 			var project Project; if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
 			if !onlyTaskUpdates(tx, project.ID, input.BatchID, input.ProjectVersion, project.Version) { return problem(409, "version_conflict", "项目已更新，请重新读取后提交") }

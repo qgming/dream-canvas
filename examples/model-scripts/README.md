@@ -22,4 +22,11 @@ lib/*.js          可选的包内共享模块
 
 异步接口须将实际提交响应中的任务编号归一为 `upstreamId` 并声明 `query` 阶段；结果状态按契约映射为 `queued/running/completed/failed/cancelled` 等值，查询只构造一次请求。`result` 或 SSE `stream` 可返回供应商真实 `progress`（0–100 数值），没有百分比时省略，不能按等待时间推算。供应商 100% 不代表原件已保存或云同步已完成。发布修订后须主动更新模型绑定，已有任务仍使用原快照。
 
-完整且与当前服务一致的约定在脚本页「变量与适配指南」，外部 MCP 可读取 `admin_script_contract`。内置 `model-api-adapter` Skill 可由全局助手或外部 MCP 读取，指导 AI 按供应商文档生成完整文件草稿。助手不代为真实测试或发布。
+生图与视频工作台根据脚本有效定义显示参数和模式，编写时遵循以下规则：
+
+- 新视频脚本优先声明无条件 `mode` select，只列真实支持的模式，用 `when` 联动参数与素材；图生图可在接口支持时按是否有图片选择生成或编辑路径。不要将文生、仅首帧、仅尾帧、首尾帧和全能参考当作所有模型都支持的固定菜单。
+- 命名首尾帧用 `asset`，在素材数组中按 `parameterKey` 取值；有序参考用 `reference`，通过 `images/videos/audios` 读取，同一时刻每个角色最多一个有效参考控件。声明真实数量、格式、尺寸与毫秒时长，复合条件在 `validate` 检查。
+- 图片 `count` 表示单次返回张数，支持时默认 1，不增加批量请求次数。有限参数用 `select/options`，允许自定义时用 `suggestions`；比例、像素尺寸和分辨率档位分别映射，保留数字与布尔类型。
+- `label/labelEn` 保持简短，说明写入 `description/descriptionEn` 供标题提示使用。工作台专用 `workbench_mode` 不属于脚本参数；历史封面 4:3 只影响展示，不改变生成比例或原件。
+
+完整且与当前服务一致的约定在脚本页「变量与适配指南」，外部 MCP 可读取第 7 版 `admin_script_contract`。内置第 2 版 [model-api-adapter Skill](../../server/internal/app/builtin_skills/model-api-adapter/SKILL.md) 可由全局助手或外部 MCP 读取，指导 AI 按供应商文档生成完整文件草稿；示例仅描述自己的输入，不作为新脚本全部能力的模板。更新内置 Skill 需重新构建并重启后端，不会自动修改现有脚本、发布或模型绑定。助手不代为真实测试或发布。

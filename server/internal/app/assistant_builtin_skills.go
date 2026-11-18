@@ -14,7 +14,7 @@ const modelAdapterSkill = "model-api-adapter"
 
 func builtinSkill(user User, name string) (AssistantSkill, bool) {
 	if user.Role != "admin" || name != modelAdapterSkill { return AssistantSkill{}, false }
-	return AssistantSkill{Name: name, Description: "适配模型 API / Adapt model APIs", Instructions: modelAdapterInstructions, Enabled: true, Version: 1, Interface: encode(map[string]string{"displayName": "模型 API 适配 / Model API adapter", "shortDescription": "编写供应商接口脚本，映射参数、素材与结果 / Adapt inputs, media and results", "defaultPrompt": "$model-api-adapter 请根据供应商文档编写接口脚本草稿。"})}, true
+	return AssistantSkill{Name: name, Description: "适配模型 API、创作模式与参数 / Adapt model APIs, creation modes and parameters", Instructions: modelAdapterInstructions, Enabled: true, Version: 2, Interface: encode(map[string]string{"displayName": "模型 API 适配 / Model API adapter", "shortDescription": "按真实接口定义模式、参数与素材 / Define modes, parameters and media from API docs", "defaultPrompt": "$model-api-adapter 请根据供应商文档编写接口脚本草稿，核实支持的创作模式、参数与素材要求，并映射请求、结果和用量。"})}, true
 }
 
 func builtinSkillView(skill AssistantSkill, detail bool) gin.H {

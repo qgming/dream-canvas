@@ -48,7 +48,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     }, [locale, t]);
 
     return (
-        <AnimateUIProvider reducedMotion="user"><Tooltip.Provider>
+        <AnimateUIProvider reducedMotion="user"><Tooltip.Provider delayDuration={0}>
             <FeedbackProvider>
                 <QueryClientProvider client={queryClient}>
                     <ClientRootInit>{children}</ClientRootInit>

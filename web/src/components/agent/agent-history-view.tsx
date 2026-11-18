@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/controls";
+import { Tooltip } from "@/components/ui/popover";
 import { FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -50,9 +51,9 @@ export function AgentHistoryView({
                 <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
                     <FolderOpen className="size-3.5 shrink-0" />
                     <span className="shrink-0">{t("agent.history.workspace")}</span>
-                    <span className="min-w-0 truncate" title={workspacePath}>
+                    <Tooltip title={workspacePath}><span tabIndex={0} className="min-w-0 truncate">
                         {workspacePath || t("agent.history.defaultWorkspace")}
-                    </span>
+                    </span></Tooltip>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm" style={{ color: theme.node.muted }}>

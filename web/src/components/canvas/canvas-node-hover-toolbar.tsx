@@ -3,6 +3,7 @@ import { useFeedback } from "@/hooks/use-feedback";
 import { Dialog } from "@/components/ui/dialog";
 import { Segmented } from "@/components/ui/controls";
 import { Tooltip } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -294,14 +295,9 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top">
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-destructive" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-accent ${active ? "bg-accent" : ""}`}>
-                    {icon}
-                    {hasText ? <span>{label}</span> : null}
-                </span>
-            </button>
-        </Tooltip>
+        <div className="flex h-12 items-center px-1.5"><Tooltip title={title} placement="top">
+            <Button variant="ghost" size={hasText ? "default" : "icon"} className={`h-8 rounded-lg ${hasText ? "gap-2 px-2.5" : ""} ${active ? "bg-accent" : ""}`} data-destructive={danger || undefined} icon={icon} onClick={onClick} aria-label={title}>{hasText ? label : null}</Button>
+        </Tooltip></div>
     );
 }
 

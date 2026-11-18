@@ -3,11 +3,11 @@ import { Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggler, type ThemeSelection } from "@animate-ui/react/primitives/effects/theme-toggler";
 
-import { cn } from "@/lib/utils";
+import { Button, type ButtonProps } from "./button";
 
 type ThemeMode = "light" | "dark";
 
-interface AnimatedThemeTogglerProps extends React.ComponentPropsWithoutRef<"button"> {
+interface AnimatedThemeTogglerProps extends ButtonProps {
     theme?: ThemeMode;
     targetTheme?: ThemeMode;
     onThemeChange?: (theme: ThemeMode) => void;
@@ -48,9 +48,9 @@ export const AnimatedThemeToggler = ({ children, className, theme, targetTheme, 
     return (
         <ThemeToggler theme={resolvedTheme} resolvedTheme={resolvedTheme} setTheme={setTheme}>
             {({ resolved, toggleTheme }) => (
-                <button
-                    type="button"
-                    className={cn(className)}
+                <Button
+                    variant="ghost" size="icon"
+                    className={className}
                     onClick={(event) => {
                         onClick?.(event);
                         if (event.defaultPrevented) return;
@@ -61,7 +61,7 @@ export const AnimatedThemeToggler = ({ children, className, theme, targetTheme, 
                 >
                     {children ?? (resolved === "dark" ? <Sun /> : <Moon />)}
                     <span className="sr-only">{props["aria-label"] || t("theme.toggle")}</span>
-                </button>
+                </Button>
             )}
         </ThemeToggler>
     );

@@ -7,7 +7,7 @@ import { ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useImageEditorViewport } from "@/components/canvas/use-image-editor-viewport";
-import { readImageMeta } from "@/lib/image-utils";
+import { formatRatio, readImageMeta } from "@/lib/image-utils";
 
 export type CanvasImageCropRect = {
     x: number;
@@ -264,11 +264,3 @@ function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
 }
 
-function formatRatio(width: number, height: number) {
-    const divisor = gcd(width, height);
-    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
-}
-
-function gcd(a: number, b: number): number {
-    return b ? gcd(b, a % b) : Math.max(1, a);
-}

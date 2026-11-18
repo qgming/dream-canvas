@@ -23,7 +23,7 @@ import (
 func (a *App) listAssets(c *gin.Context) {
 	assets := []Asset{}
 	query := a.db.Where("user_id = ?", currentUser(c).ID)
-	if c.Query("deleting") == "true" { query = query.Where("delete_state = ?", "pending") } else { query = query.Where("delete_state = ?", "") }
+	if c.Query("deleting") == "true" { query = query.Where("delete_state = ?", "pending") } else { query = query.Where("delete_state = ? AND workbench_record_id = ?", "", "") }
 	if err := query.Order("created_at DESC").Find(&assets).Error; err != nil { respondError(c, err); return }
 	c.JSON(200, assets)
 }
@@ -47,9 +47,12 @@ func (a *App) uploadAsset(c *gin.Context) {
 	name, err := a.assetPath(id)
 	if err != nil { respondError(c, err); return }
 	title, _ := url.QueryUnescape(c.GetHeader("X-File-Name"))
-	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: strings.Split(mimeType, "/")[0], Title: title, MimeType: mimeType, Path: id, SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
+	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: strings.Split(mimeType, "/")[0], Title: title, MimeType: mimeType, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id, SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
 	if asset.Title == "" { asset.Title = "未命名素材" }
-	if err := a.db.Create(&asset).Error; err != nil { respondError(c, err); return }
+	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		if asset.WorkbenchRecordID != "" { var removed int64; if err := tx.Model(&WorkbenchRecord{}).Where("user_id = ? AND id = ? AND removed = ?", asset.UserID, asset.WorkbenchRecordID, true).Count(&removed).Error; err != nil { return err }; if removed > 0 { return problem(409, "record_removed", "生成记录已删除，请新建后上传") } }
+		return tx.Create(&asset).Error
+	}); err != nil { respondError(c, err); return }
 	defer a.notify(asset.UserID)
 	fail := func(status int, code, message string) {
 		if err := a.db.Model(&Asset{}).Where("id = ? AND save_state = ?", asset.ID, "saving").Updates(map[string]any{"save_state": "failed", "bytes": asset.Bytes, "error": message}).Error; err != nil { respondError(c, problem(500, "metadata_failed", "文件保存未完成，且失败状态记录失败，请检查服务器磁盘与数据库")); return }
@@ -139,7 +142,7 @@ func (a *App) UpdateAsset(userID, id, title string, metadata JSON) error {
 		var asset Asset
 		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "").Error; err != nil { return err }
 		if err := validateAssetMetadata(tx, userID, metadata); err != nil { return err }
-		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(title), "metadata": metadata}).Error
+		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(title), "metadata": metadata, "workbench_record_id": ""}).Error
 	})
 	if err == nil { a.notify(userID) }; return err
 }

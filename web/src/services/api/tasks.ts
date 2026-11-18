@@ -9,11 +9,11 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { inputLabel, inputVisible } from "@/lib/model-inputs";
 import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
 
-export type GenerationTask = { id: string; projectId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; providerStatus?: string; progress?: number; error?: string; text: string; assetIds: string[]; upstreamId?: string; queryRecoveredBy?: string; queryRecoveredAt?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
+export type GenerationTask = { id: string; projectId?: string; workbenchRecordId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; providerStatus?: string; progress?: number; error?: string; text: string; assetIds: string[]; upstreamId?: string; queryRecoveredBy?: string; queryRecoveredAt?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
 export class GenerationStateError extends Error {
     constructor(readonly status: string, message: string, readonly taskId?: string) { super(message); this.name = "GenerationStateError"; }
 }
-export type GenerationOptions = { signal?: AbortSignal; projectId?: string; nodeId?: string; projectVersion?: number; resultSlotId?: string; batchId?: string; onTask?: (task: GenerationTask) => void };
+export type GenerationOptions = { signal?: AbortSignal; projectId?: string; workbenchRecordId?: string; nodeId?: string; projectVersion?: number; resultSlotId?: string; batchId?: string; onTask?: (task: GenerationTask) => void };
 type GenerationInput = { prompt?: string; messages?: AiTextMessage[]; references?: ReferenceImage[]; videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const submittedTasks = new WeakMap<AbortSignal, Set<string>>();
 const cancelledSignals = new WeakSet<AbortSignal>();
@@ -58,7 +58,7 @@ export async function createGeneration(config: AiConfig, capability: ModelCapabi
         }
     }
     // Complete the acceptance request even if the page leaves, so a returned task ID is retained.
-    const task = await apiRequest<GenerationTask>("/tasks", jsonRequest("POST", { channelId: decoded.channelId, modelId: model.id, capability, prompt: input.prompt, messages, references, parameters, projectId: options?.projectId, nodeId: options?.nodeId, projectVersion: options?.projectVersion, resultSlotId: options?.resultSlotId, batchId: options?.batchId }));
+    const task = await apiRequest<GenerationTask>("/tasks", jsonRequest("POST", { channelId: decoded.channelId, modelId: model.id, capability, prompt: input.prompt, messages, references, parameters, projectId: options?.projectId, workbenchRecordId: options?.workbenchRecordId, nodeId: options?.nodeId, projectVersion: options?.projectVersion, resultSlotId: options?.resultSlotId, batchId: options?.batchId }));
     if (options?.signal) { const ids = submittedTasks.get(options.signal) || new Set<string>(); ids.add(task.id); submittedTasks.set(options.signal, ids); if (cancelledSignals.has(options.signal)) await cancelGeneration(task.id); }
     return task;
 }

@@ -6,6 +6,7 @@ import { useDiscardChanges } from "@/hooks/use-discard-changes";
 import { Menu } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/display";
 import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
+import { Button } from "@/components/ui/button";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { Tooltip } from "@/components/ui/popover";
 import { LogOut, PanelLeftClose, PanelLeftOpen, Settings2, UserRound } from "lucide-react";
@@ -48,9 +49,9 @@ export function AppSidebar() {
                         <motion.span layout="position" transition={transition} className={cn("shrink-0 bg-current", collapsed ? "size-[18px]" : "size-6")} style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }} />
                         <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate text-sm font-semibold tracking-tight">{t("meta.title")}</motion.span> : null}</AnimatePresence>
                     </Link>
-                    <motion.button layout="position" transition={transition} type="button" onClick={() => mobile ? setMobileOpen(!mobileOpen) : compact ? setCompactExpanded(!compactExpanded) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("grid shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", collapsed ? collapsedItemClass : "size-7")}>
+                    <Button variant="ghost" size="icon" layout="position" transition={transition} onClick={() => mobile ? setMobileOpen(!mobileOpen) : compact ? setCompactExpanded(!compactExpanded) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground [&_svg]:size-[18px]", collapsed ? collapsedItemClass : "size-7 [&_svg]:size-4")}>
                         {collapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-4" />}
-                    </motion.button>
+                    </Button>
                 </motion.div>
                 <nav className={cn("min-h-0 flex-1 overflow-y-auto", collapsed ? "hide-scrollbar w-[55px] space-y-2" : "space-y-1")} aria-label={t("sidebar.workspace")}>
                     {navigationTools.map(({ slug, icon: Icon }, index) => (
@@ -73,10 +74,10 @@ export function AppSidebar() {
                     <Menu placement="topLeft" items={ [
                         { key: "logout", icon: <LogOut className="size-4" />, label: t("sidebar.signOut"), onClick: signOut },
                     ] }>
-                        <button type="button" aria-label={t("sidebar.accountMenu")} className={cn(itemClass, "text-left text-muted-foreground", collapsed && collapsedItemClass)}>
+                        <Button variant="ghost" size={collapsed ? "icon" : "default"} aria-label={t("sidebar.accountMenu")} className={cn(itemClass, "justify-start text-left font-normal text-muted-foreground [&_svg]:size-[18px]", collapsed && collapsedItemClass)}>
                             <UserRound className="size-[18px] shrink-0" />
                             <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden"><span className="truncate font-medium">{user?.username}</span>{user?.role === "admin" ? <Badge className="shrink-0">{t("sidebar.admin")}</Badge> : null}</motion.span> : null}</AnimatePresence>
-                        </button>
+                        </Button>
                     </Menu>
                 </div>
             </AnimatedSidePanel>

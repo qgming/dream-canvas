@@ -52,6 +52,7 @@ type Asset struct {
 	ProbeError string `json:"probeError,omitempty"`
 	PreviewState string `json:"previewState,omitempty"`
 	PreviewError string `json:"previewError,omitempty"`
+	WorkbenchRecordID string `json:"workbenchRecordId,omitempty" gorm:"index;not null;default:''"`
 	Path string `json:"-"`
 	PreviewPath string `json:"-"`
 	SaveState string `json:"saveState"`
@@ -174,6 +175,7 @@ type WorkbenchRecord struct {
 	Kind string `gorm:"primaryKey"`
 	ID string `json:"id" gorm:"primaryKey"`
 	Version uint64 `json:"version"`
+	Removed bool `json:"-" gorm:"not null;default:false"`
 	Value JSON `json:"value" gorm:"type:blob"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -183,6 +185,7 @@ type GenerationTask struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	UserID string `json:"-" gorm:"index;not null"`
 	ProjectID string `json:"projectId,omitempty" gorm:"index"`
+	WorkbenchRecordID string `json:"workbenchRecordId,omitempty" gorm:"index;not null;default:''"`
 	NodeID string `json:"nodeId,omitempty"`
 	ProjectVersion uint64 `json:"projectVersion"`
 	ChannelID string `json:"channelId"`

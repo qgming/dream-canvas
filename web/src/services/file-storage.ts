@@ -4,7 +4,7 @@ import { captureSession } from "@/services/api/client";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
-export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
+export async function uploadMediaFile(input: string | Blob, prefix = "file", workbenchRecordId?: string): Promise<UploadedFile> {
     const assertSession = captureSession();
     const id = typeof input === "string" ? assetId(input) : undefined;
     let asset = id ? await getAsset(id) : null;
@@ -13,7 +13,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
         if (response && !response.ok) throw new Error(i18n.t("errors.mediaReadFailed"));
         const blob = typeof input === "string" ? await response!.blob() : input;
         assertSession();
-        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.mediaAsset"));
+        asset = await uploadAsset(blob, input instanceof File ? input.name : i18n.t("errors.mediaAsset"), undefined, workbenchRecordId);
     }
     if (asset.deleteState) throw new Error(i18n.t("errors.assetDeleted"));
     if (asset.saveState !== "saved") throw new Error(i18n.t("errors.mediaNotSaved"));

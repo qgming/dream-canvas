@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -41,9 +42,7 @@ export function ConnectionCreateMenu({
                 <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
                     {t("canvas.createMenu.fromNode")}
                 </span>
-                <button type="button" className="grid size-7 place-items-center rounded-md text-base opacity-55 transition hover:bg-accent hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}>
-                    ×
-                </button>
+                <Button variant="ghost" size="icon" className="size-7 opacity-55 hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}><X /></Button>
             </div>
             <div className="grid gap-0.5">
                 <ConnectionCreateOption theme={theme} icon={<List className="size-4" />} title={t("canvas.createMenu.text")} description={t("canvas.createMenu.textDescription")} onClick={() => onCreate(CanvasNodeType.Text)} />
@@ -110,9 +109,9 @@ export function NodeCreateMenu({ position, scale = 1, onCreate, onClose }: { pos
                 <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
                     {t("canvas.createMenu.select")}
                 </span>
-                <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}>
+                <Button variant="ghost" size="icon" className="size-7 rounded-lg opacity-55 hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}>
                     <X className="size-4" />
-                </button>
+                </Button>
             </div>
             <div className="grid gap-0.5">
                 {definitions.map((def) => (

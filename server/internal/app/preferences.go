@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func validPreference(name string) bool { return name == "generation" || name == "prompt-sources" }
@@ -103,7 +104,7 @@ func workbenchKind(c *gin.Context) bool {
 func (a *App) listWorkbenchRecords(c *gin.Context) {
 	if !workbenchKind(c) { return }
 	records := []WorkbenchRecord{}
-	if err := a.db.Where("user_id = ? AND kind = ?", currentUser(c).ID, c.Param("kind")).Order("created_at DESC").Find(&records).Error; err != nil { respondError(c, err); return }
+	if err := a.db.Where("user_id = ? AND kind = ? AND removed = ?", currentUser(c).ID, c.Param("kind"), false).Order("created_at DESC").Find(&records).Error; err != nil { respondError(c, err); return }
 	c.JSON(200, records)
 }
 
@@ -126,6 +127,7 @@ func (a *App) SaveWorkbenchRecord(userID, kind, id string, version uint64, data 
 		err := tx.First(&record, "user_id = ? AND kind = ? AND id = ?", record.UserID, record.Kind, record.ID).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
 		missing := errors.Is(err, gorm.ErrRecordNotFound)
+		if record.Removed { return problem(409, "record_removed", "生成记录已删除，不能重新保存") }
 		var previous any
 		if !missing && json.Unmarshal(record.Value, &previous) != nil { return problem(409, "invalid_record", "原工作台记录损坏，不能覆盖") }
 		oldRefs, err := collectAssetReferences(previous)
@@ -152,6 +154,64 @@ func (a *App) SaveWorkbenchRecord(userID, kind, id string, version uint64, data 
 
 func (a *App) deleteWorkbenchRecord(c *gin.Context) {
 	if !workbenchKind(c) { return }
-	if err := a.db.Delete(&WorkbenchRecord{}, "user_id = ? AND kind = ? AND id = ?", currentUser(c).ID, c.Param("kind"), c.Param("id")).Error; err != nil { respondError(c, err); return }
-	c.Status(204)
+	var input struct { Version uint64 `json:"version"` }
+	if !bind(c, &input) { return }
+	pending, err := a.DeleteWorkbenchRecord(currentUser(c).ID, c.Param("kind"), c.Param("id"), input.Version)
+	if err != nil { respondError(c, err); return }
+	c.JSON(200, gin.H{"removed": true, "cleanupPending": pending})
+}
+
+func (a *App) DeleteWorkbenchRecord(userID, kind, id string, version uint64) (bool, error) {
+	if !includes([]string{"image", "video"}, kind) || strings.TrimSpace(id) == "" { return false, problem(400, "invalid_workbench", "工作台类型或记录编号不正确") }
+	pending := false
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var record WorkbenchRecord
+		if err := tx.First(&record, "user_id = ? AND kind = ? AND id = ?", userID, kind, id).Error; err != nil { return err }
+		if record.Removed {
+			var count int64
+			if err := tx.Model(&Asset{}).Where("user_id = ? AND workbench_record_id = ? AND delete_state = ?", userID, id, "pending").Count(&count).Error; err != nil { return err }; pending = count > 0
+		} else if record.Version != version { return problem(409, "version_conflict", "生成记录已更新，请重新读取后删除") }
+		var value any
+		if json.Unmarshal(record.Value, &value) != nil { return problem(409, "invalid_record", "生成记录损坏，不能确认要清理的文件") }
+		refs, err := collectAssetReferences(value); if err != nil { return err }
+		var owned []string
+		if err := tx.Model(&Asset{}).Where("user_id = ? AND workbench_record_id = ?", userID, id).Pluck("id", &owned).Error; err != nil { return err }
+		if err := tx.Model(&record).Updates(map[string]any{"removed": true, "value": JSON(`{}`), "version": record.Version+1}).Error; err != nil { return err }
+		queued, err := queueWorkbenchMediaCleanup(tx, userID, append(refs, owned...)); if err != nil { return err }; pending = pending || queued
+		var active int64
+		if err := tx.Model(&GenerationTask{}).Where("user_id = ? AND workbench_record_id = ? AND status NOT IN ?", userID, id, []string{"succeeded", "failed", "cancelled", "interrupted"}).Count(&active).Error; err != nil { return err }
+		pending = pending || active > 0; return nil
+	})
+	if err == nil { a.notify(userID); a.signalWork() }; return pending, err
+}
+
+// Only record-owned media is eligible; a manual library save clears its ownership.
+// Shared project/record references protect the same original from local deletion.
+func queueWorkbenchMediaCleanup(tx *gorm.DB, userID string, ids []string) (bool, error) {
+	if len(ids) == 0 { return false, nil }
+	var assets []Asset
+	if err := tx.Where("id IN ? AND user_id = ? AND workbench_record_id <> ? AND delete_state = ?", ids, userID, "", "").Find(&assets).Error; err != nil { return false, err }
+	if len(assets) == 0 { return false, nil }
+	protected := map[string]bool{}
+	activeRecords := map[string]bool{}
+	var records []WorkbenchRecord
+	if err := tx.Where("user_id = ? AND removed = ?", userID, false).Find(&records).Error; err != nil { return false, err }
+	for _, record := range records {
+		activeRecords[record.ID] = true
+		var value any
+		if json.Unmarshal(record.Value, &value) != nil { return false, problem(409, "invalid_record", "其他生成记录损坏，暂时无法安全清理共享文件") }
+		refs, err := collectAssetReferences(value); if err != nil { return false, err }
+		for _, id := range refs { protected[id] = true }
+	}
+	pending := false
+	for _, asset := range assets {
+		if protected[asset.ID] || activeRecords[asset.WorkbenchRecordID] { continue }
+		var count int64
+		if err := tx.Model(&AssetReference{}).Where("asset_id = ?", asset.ID).Count(&count).Error; err != nil { return false, err }
+		if count > 0 { continue }
+		if err := tx.Model(&asset).Updates(map[string]any{"delete_state": "pending", "error": ""}).Error; err != nil { return false, err }
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { return false, err }
+		pending = true
+	}
+	return pending, nil
 }

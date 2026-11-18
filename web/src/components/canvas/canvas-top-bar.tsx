@@ -62,15 +62,15 @@ export function CanvasTopBar({
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between gap-2 pl-1 pr-4">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-2">
                     <Tooltip title={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}>
-                        <button
-                            type="button"
+                        <Button
+                            variant="ghost" size="icon"
                             onClick={toggleSidePanel}
                             aria-label={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}
                             className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-accent"
                             style={{ color: theme.node.text }}
                         >
                             {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
-                        </button>
+                        </Button>
                     </Tooltip>
                     <Menu
                         items={ [
@@ -86,9 +86,9 @@ export function CanvasTopBar({
                                 { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text={t("canvas.redo")} shortcut="⌘ ⇧ Z / ⌘ Y" />, onClick: onRedo },
                             ]
                         }>
-                        <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} aria-label={t("canvas.openMenu")}>
+                        <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} aria-label={t("canvas.openMenu")}>
                             <MenuIcon className="size-4" />
-                        </button>
+                        </Button>
                     </Menu>
 
                     <div className="relative flex min-w-0 items-center gap-2" data-canvas-shortcuts-ignore>
@@ -109,23 +109,22 @@ export function CanvasTopBar({
                                 style={{ color: theme.node.text }}
                             /><Button variant="ghost" size="sm" loading={titleSaving} icon={<Check className="size-4" />} onClick={() => void onFinishTitleEditing()} aria-label={t("canvas.project.saveName")} /><Button variant="ghost" size="sm" disabled={titleSaving} icon={<X className="size-4" />} onClick={onCancelTitleEditing} aria-label={t("canvas.project.cancelRename")} />{titleError ? <p id="canvas-title-error" role="alert" className="absolute left-0 top-full mt-1 max-w-sm rounded-md border border-border bg-popover px-2 py-1 text-xs text-destructive">{titleError}</p> : null}</>
                         ) : (
-                            <button
+                            <Tooltip title={t("canvas.renameHint")}><button
                                 type="button"
                                 className="min-w-0 max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
                                 onDoubleClick={onStartTitleEditing}
                                 onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onStartTitleEditing(); } }}
-                                title={t("canvas.renameHint")}
                             >
                                 {title}
-                            </button>
+                            </button></Tooltip>
                         )}
                     </div>
                     
                 </div>
 
                 <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></button>
-                    <button type="button" className="grid size-7 place-items-center rounded-md transition hover:bg-accent" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></button>
+                    <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></Button>
+                    <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></Button>
                 </div>
             </div>
             <Dialog title={t("canvas.shortcuts")} open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} footer={null}>

@@ -16,6 +16,7 @@ import { cleanupUnusedImages } from "@/services/image-storage";
 import { useConfigStore } from "@/stores/use-config-store";
 import { modelCatalog } from "@/services/api/channels";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { useWorkbenchDraftStore } from "@/stores/use-workbench-draft-store";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
@@ -44,11 +45,12 @@ export default function RequireAuth() {
         usePromptSourceStore.getState().reset();
         useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, editingProjectTitle: "", selectedProjectIds: [], deleteProjectIds: [] });
         useWorkbenchAgentStore.setState({ imageCommand: null, videoCommand: null, tasks: [] });
+        useWorkbenchDraftStore.getState().reset();
         useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", pendingApprovals: [], pendingTool: null, prompt: "", modelParameters: {} });
         useAgentSkillStore.getState().reset();
         void cleanupUnusedImages(null);
         setScope(user?.id || null);
-        if (user) { void useCanvasStore.getState().loadProjects(); void useAssetStore.getState().loadAssets(); void useConfigStore.getState().load(); void usePromptSourceStore.getState().load(); }
+        if (user) { void useCanvasStore.getState().loadProjects(); void useAssetStore.getState().loadAssets(); void useConfigStore.getState().load(); void usePromptSourceStore.getState().load(); void useWorkbenchDraftStore.getState().load(); }
     }, [queryClient, user?.id]);
     useEffect(() => { if (catalog.data && scope === user?.id) useConfigStore.getState().setCatalog(catalog.data); }, [catalog.data, scope, user?.id]);
     useEffect(() => {

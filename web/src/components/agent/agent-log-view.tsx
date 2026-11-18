@@ -137,9 +137,9 @@ export function AgentLogView({
                                     {context.activity}
                                 </span>
                             </div>
-                            <div className="mt-0.5 truncate font-mono text-xs leading-4" style={{ color: theme.node.faint }} title={context.endpoint}>
+                            <Tooltip title={context.endpoint}><div tabIndex={0} className="mt-0.5 truncate font-mono text-xs leading-4" style={{ color: theme.node.faint }}>
                                 {context.endpoint}
-                            </div>
+                            </div></Tooltip>
                         </div>
                         <div className="shrink-0 text-right text-xs leading-4" style={{ color: theme.node.muted }}>
                             <div>{t("agent.logs.messages", { count: context.messages })}</div>

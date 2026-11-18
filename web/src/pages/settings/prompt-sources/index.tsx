@@ -9,6 +9,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { Badge as Tag } from "@/components/ui/display";
+import { Tooltip } from "@/components/ui/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -131,7 +132,7 @@ export default function PromptSourcesPage() {
             <DataTable<PromptSource> rowId="id" rows={sources} loading={!hydrated && !error} failed={Boolean(error)} empty={<EmptyState description={t("settings.sourcesEmpty")} />} columns={[
                 { title: t("config.promptSources.editor.name"), render: (_, source) => <div className="min-w-40 max-w-72">
                     <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium break-words">{source.name}</span>{source.builtIn ? <Tag className="shrink-0">{t("config.promptSources.builtIn")}</Tag> : null}</div>
-                    <a className="mt-1 block truncate text-xs text-muted-foreground hover:text-foreground hover:underline" href={source.homepage || source.url} title={source.homepage || source.url} target="_blank" rel="noreferrer">{source.homepage || source.url}</a>
+                    <Tooltip title={source.homepage || source.url}><a className="mt-1 block truncate text-xs text-muted-foreground hover:text-foreground hover:underline" href={source.homepage || source.url} target="_blank" rel="noreferrer">{source.homepage || source.url}</a></Tooltip>
                 </div> },
                 { title: t("workspace.status"), render: (_, source) => {
                     const status = statusQuery.data?.[source.id];
