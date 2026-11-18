@@ -40,6 +40,17 @@ func (a *App) GetAssistantThread(userID, id string) (gin.H, error) {
 	turns := []AssistantTurn{}
 	if err := a.db.Where("thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Order("sequence").Find(&items).Error; err != nil { return nil, err }
 	if err := a.db.Where("thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Order("created_at").Find(&turns).Error; err != nil { return nil, err }
+	prices := map[string]modelPricing{}
+	for _, turn := range turns {
+		var snapshot assistantSnapshot
+		if json.Unmarshal(turn.Snapshot, &snapshot) == nil { prices[turn.ID], _ = parseModelPricing(snapshot.Execution.Model.Pricing) }
+	}
+	for index := range items {
+		if items[index].Role != "assistant" || len(items[index].Detail) == 0 { continue }
+		var detail map[string]any
+		if json.Unmarshal(items[index].Detail, &detail) != nil { return nil, problem(409, "invalid_history", "历史消息无法读取，未覆盖或丢弃历史") }
+		if usage, exists := detail["usage"]; exists { detail["usage"] = publicUsageValues(object(usage), prices[items[index].TurnID]); items[index].Detail = encode(detail) }
+	}
 	approvals := []Approval{}
 	ids := []string{}
 	for _, turn := range turns { if turn.Status != "waiting_approval" { continue }; var snapshot assistantSnapshot; if json.Unmarshal(turn.Snapshot, &snapshot) == nil { ids = append(ids, snapshot.ApprovalIDs...) } }

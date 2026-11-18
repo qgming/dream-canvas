@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,23 +110,31 @@ func (a *App) dispatch(policy executionPolicy) {
 func (a *App) executeTask(ctx context.Context, id string) {
 	var task GenerationTask
 	if a.db.First(&task, "id = ?", id).Error != nil { return }
+	ctx = withLogContext(ctx, slog.String("task_id", task.ID), slog.String("user_id", task.UserID), slog.String("channel_id", task.ChannelID), slog.String("model_id", task.ModelID))
 	var snapshot executionSnapshot
 	var input generationInput
 	if json.Unmarshal(task.Snapshot, &snapshot) != nil || json.Unmarshal(task.Input, &input) != nil { a.taskProblem(task, "interrupted", "任务快照无法读取，未提交或重提供应商", false); return }
 	if task.Status == "saving" { a.saveTaskResults(ctx, task, snapshot); return }
 	query := task.Status == "running" && (task.UpstreamID != "" || task.RawResponseFile != "")
 	if !query && task.Status != "queued" && task.Status != "waiting_assets" { return }
-	if query && task.StartedAt != nil && time.Since(*task.StartedAt) >= seconds(snapshot.Policy.MaxWaitSeconds) { a.taskProblem(task, "confirmation_required", "等待时长已达配置边界，已暂停查询；可继续核对，不会重新生成", false); return }
+	if query && taskWaitExpired(task, snapshot.Policy) { a.taskProblem(task, "confirmation_required", "等待时长已达配置边界，已暂停查询；可继续核对，不会重新生成", false); return }
 	if !query {
 		var user User
 		if a.db.First(&user, "id = ? AND disabled = ?", task.UserID, false).Error != nil { a.taskProblem(task, "cancelled", "账号已停用，任务未提交", true); return }
 		ready, err := a.prepareTaskAssets(task, snapshot, input)
 		if err != nil { a.taskProblem(task, "failed", "参考素材无法准备，请检查保存和云同步状态", true); return }
 		if !ready { return }
-		if err := a.recordUsage("task:"+task.ID, task, "", nil, snapshot, "unknown"); err != nil { return }
-		result := a.db.Model(&GenerationTask{}).Where("id = ? AND status IN ? AND cancel_requested = ?", task.ID, []string{"queued", "waiting_assets"}, false).Updates(map[string]any{"status": "submitting", "started_at": time.Now(), "next_run_at": nil, "error": ""})
-		if result.Error != nil || result.RowsAffected != 1 { return }
-		now := time.Now(); task.StartedAt = &now
+		startedAt := time.Now()
+		usage := a.usageEntry("task:"+task.ID, task, "", startedAt, nil, snapshot, "unknown")
+		err = a.db.Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&GenerationTask{}).Where("id = ? AND status IN ? AND cancel_requested = ?", task.ID, []string{"queued", "waiting_assets"}, false).Updates(map[string]any{"status": "submitting", "started_at": startedAt, "next_run_at": nil, "error": ""})
+			if result.Error != nil { return result.Error }
+			if result.RowsAffected != 1 { return problem(409, "task_changed", "任务状态已变化，未提交供应商") }
+			return upsertUsage(tx, usage)
+		})
+		if err != nil { return }
+		task.StartedAt = &startedAt
+		a.logEvent(ctx, slog.LevelInfo, "task.started", slog.String("capability", task.Capability))
 		a.notify(task.UserID)
 	}
 	limit := snapshot.Policy.ImageSeconds
@@ -136,6 +145,21 @@ func (a *App) executeTask(ctx context.Context, id string) {
 	var err error
 	result, err = a.callModelScript(callCtx, task, snapshot, input, query)
 	if err != nil {
+		a.logFailure(callCtx, "task.call_failed", err, slog.Bool("query", query))
+		var preparation *scriptPreparationError
+		if !query && errors.As(err, &preparation) {
+			if cleanupErr := a.discardUnsubmittedUsage("task:"+task.ID, task.UserID); cleanupErr != nil { a.taskProblem(task, "confirmation_required", "供应商请求尚未开始，但待确认用量记录无法清理", false); return }
+			var current GenerationTask
+			_ = a.db.First(&current, "id = ?", task.ID)
+			status, message := "failed", providerError(err)
+			if current.CancelRequested {
+				status, message = "cancelled", "任务已在提交供应商前取消"
+			} else if ctx.Err() != nil {
+				status, message = "interrupted", "任务在提交供应商前中断；结果与用量无需待确认"
+			}
+			a.taskProblem(task, status, message, true)
+			return
+		}
 		var parse *scriptParseError; if errors.As(err, &parse) { a.taskProblem(task, "confirmation_required", parse.Error(), false); return }
 		if query { a.queryFailed(task, snapshot, err); return }
 		result.Status, result.Error = "confirmation_required", providerError(err)
@@ -143,18 +167,27 @@ func (a *App) executeTask(ctx context.Context, id string) {
 	}
 	if result.UpstreamID != "" { task.UpstreamID = result.UpstreamID }
 	if !includes([]string{"completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) {
-		if task.UpstreamID == "" { a.taskProblem(task, "confirmation_required", "供应商未返回可靠查询编号，无法恢复；未重新提交", false); return }
+		if task.UpstreamID == "" { a.taskProblem(task, "confirmation_required", "接口脚本未解析出可靠查询编号，请管理员核对响应映射；未重新提交", false); return }
 		next := time.Now().Add(seconds(snapshot.Policy.PollSeconds))
-		if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": "running", "upstream_id": task.UpstreamID, "query_failures": 0, "raw_response_file": "", "next_run_at": next}).Error; err != nil { return }
+		if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": "running", "provider_status": result.Status, "progress": result.Progress, "upstream_id": task.UpstreamID, "query_failures": 0, "raw_response_file": "", "next_run_at": next, "error": ""}).Error; err != nil { return }
+		fields := []slog.Attr{slog.String("provider_status", result.Status), slog.Bool("has_progress", result.Progress != nil)}; if result.Progress != nil { fields = append(fields, slog.Float64("progress", *result.Progress)) }
+		a.logEvent(ctx, slog.LevelDebug, "task.provider_updated", fields...)
 		a.notify(task.UserID); a.signalWork(); return
 	}
-	if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": "saving", "upstream_id": task.UpstreamID, "result": encode(result), "text": result.Text, "save_state": "saving", "next_run_at": nil, "error": result.Error}).Error; err != nil { return }
+	if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": "saving", "provider_status": result.Status, "progress": result.Progress, "upstream_id": task.UpstreamID, "result": encode(result), "text": result.Text, "save_state": "saving", "next_run_at": nil, "error": result.Error}).Error; err != nil { return }
+	a.notifyTopic(task.UserID, "tasks")
 	if a.db.First(&task, "id = ?", task.ID).Error == nil { a.saveTaskResults(ctx, task, snapshot) }
 }
 
+func taskWaitExpired(task GenerationTask, policy executionPolicy) bool {
+	started := task.QueryStartedAt; if started == nil { started = task.StartedAt }
+	return started != nil && time.Since(*started) >= seconds(policy.MaxWaitSeconds)
+}
+
 func (a *App) queryFailed(task GenerationTask, snapshot executionSnapshot, err error) {
+	a.logFailure(a.ctx, "task.query_failed", err, slog.String("task_id", task.ID), slog.Int("attempt", task.QueryFailures+1))
 	failures := task.QueryFailures + 1
-	if failures >= snapshot.Policy.QueryFailures || task.StartedAt != nil && time.Since(*task.StartedAt) >= seconds(snapshot.Policy.MaxWaitSeconds) { a.taskProblem(task, "confirmation_required", "查询失败次数或等待时长已达配置边界，已暂停查询；可继续核对，不会重新生成", false); return }
+	if failures >= snapshot.Policy.QueryFailures || taskWaitExpired(task, snapshot.Policy) { a.taskProblem(task, "confirmation_required", "查询失败次数或等待时长已达配置边界，已暂停查询；可继续核对，不会重新生成", false); return }
 	next := time.Now().Add(seconds(snapshot.Policy.PollSeconds))
 	a.db.Model(&task).Updates(map[string]any{"query_failures": failures, "next_run_at": next, "error": providerError(err)})
 	a.notify(task.UserID); a.signalWork()
@@ -173,10 +206,11 @@ func (a *App) taskProblem(task GenerationTask, status, message string, release b
 		if release { if err := tx.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("response_cleanup_pending", true).Error; err != nil { return err }; return tx.Model(&TaskAsset{}).Where("task_id = ?", task.ID).Update("released", true).Error }
 		return nil
 	})
-	if err == nil { a.notify(task.UserID); a.signalWork() }
+	if err == nil { level := slog.LevelInfo; if status == "failed" || status == "interrupted" || status == "confirmation_required" { level = slog.LevelWarn }; a.logEvent(a.ctx, level, "task.status_changed", slog.String("task_id", task.ID), slog.String("status", status)); a.notify(task.UserID); a.signalWork() } else { a.logFailure(a.ctx, "task.status_save_failed", err, slog.String("task_id", task.ID)) }
 }
 
 func (a *App) taskSaveFailed(task GenerationTask, snapshot executionSnapshot, err error) {
+	a.logFailure(a.ctx, "task.result_save_failed", err, slog.String("task_id", task.ID), slog.Int("attempt", task.TransferAttempts+1))
 	attempt := task.TransferAttempts
 	values := map[string]any{"save_state": "failed", "error": "供应商已返回结果，但原件保存失败；结果尚未可靠保留，请检查磁盘或网络后继续保存", "transfer_attempts": attempt + 1}
 	if attempt < len(snapshot.Policy.DownloadRetrySeconds) { values["next_run_at"] = time.Now().Add(seconds(snapshot.Policy.DownloadRetrySeconds[attempt])) } else { values["status"], values["next_run_at"] = "confirmation_required", nil }

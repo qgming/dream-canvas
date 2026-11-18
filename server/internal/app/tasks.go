@@ -227,7 +227,7 @@ func (a *App) ResumeTask(userID, id string) (GenerationTask, error) {
 	status := "running"
 	var result providerResult
 	if json.Unmarshal(task.Result, &result) == nil && (includes([]string{"completed", "incomplete", "failed", "cancelled"}, result.Status) || result.URL != "" || result.ResponseFile != "") { status = "saving" } else if task.UpstreamID == "" && task.RawResponseFile == "" { return task, problem(409, "no_recovery_basis", "没有可查询的上游编号或已保存结果，不能重新提交；请核对供应商账单") }
-	update := a.db.Model(&GenerationTask{}).Where("id = ? AND status = ?", task.ID, "confirmation_required").Updates(map[string]any{"status": status, "query_failures": 0, "transfer_attempts": 0, "started_at": time.Now(), "next_run_at": time.Now(), "error": ""})
+	update := a.db.Model(&GenerationTask{}).Where("id = ? AND status = ?", task.ID, "confirmation_required").Updates(map[string]any{"status": status, "query_failures": 0, "transfer_attempts": 0, "query_started_at": time.Now(), "next_run_at": time.Now(), "error": ""})
 	if update.Error != nil { return task, update.Error }; if update.RowsAffected != 1 { return task, problem(409, "task_changed", "任务状态已改变，请重新读取") }
 	if err := a.db.First(&task, "id = ?", task.ID).Error; err != nil { return task, err }
 	a.notify(task.UserID); a.signalWork(); return task, nil

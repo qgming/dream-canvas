@@ -110,7 +110,7 @@ export function AgentSkillsView({ clientId }: { clientId: string }) {
         setGeneratingSource(source);
         try {
             if (!connectionIsCurrent(connectionRevision)) return;
-            const config = useConfigStore.getState().config, model = agent.model || config.textModel, selected = decodeChannelModel(model);
+            const config = useConfigStore.getState().config, model = agent.model || config.assistantModel, selected = decodeChannelModel(model);
             const entry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text");
             if (!entry) throw new Error(t("workspace.selectAssistantModel"));
             const parameters = resolveModelParameters(config, model, agent.modelParameters[model]);

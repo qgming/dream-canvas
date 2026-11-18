@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, CircleAlert, LoaderCircle, MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { motion } from "motion/react";
+import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { AssistantPanelContent } from "./assistant-panel-content";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,6 +11,8 @@ import { useAuthStore } from "@/stores/use-auth-store";
 
 export function AgentPanel() {
     const { t } = useTranslation();
+    const tokens = useMotionTokens();
+    const reducedMotion = useShouldReduceMotion();
     const owner = useAuthStore((state) => state.user?.id);
     const width = useAgentStore((state) => state.width);
     const open = useAgentStore((state) => state.panelOpen);
@@ -58,7 +62,7 @@ export function AgentPanel() {
     };
     const status = error ? t("ui.assistantError") : approvals ? t("ui.assistantApproval") : sending || waiting ? t("ui.assistantRunning") : t("ui.assistantReady");
     return <>
-        <aside ref={panel} id="global-assistant" role="dialog" aria-modal="false" aria-label={t("ui.assistant")} aria-hidden={!open} inert={!open} tabIndex={-1} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore className={cn("fixed bottom-20 right-4 z-[100] flex h-[calc(100dvh-96px)] max-h-[800px] max-w-[calc(100vw-32px)] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl outline-none transition-[opacity,transform,visibility] duration-200 motion-reduce:transition-none", open ? "visible translate-y-0 opacity-100" : "invisible pointer-events-none translate-y-3 opacity-0", resizing && "select-none transition-none")} style={{ width }} onKeyDown={(event) => {
+        <motion.aside ref={panel} id="global-assistant" role="dialog" aria-modal="false" aria-label={t("ui.assistant")} aria-hidden={!open} inert={!open} tabIndex={-1} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore initial={false} animate={{ opacity: open ? 1 : 0, y: open || reducedMotion ? 0 : tokens.shift.tabs }} transition={resizing || reducedMotion ? tokens.transition.instant : open ? tokens.transition.sheet : tokens.transition.dismiss} className={cn("fixed bottom-20 right-4 z-[100] flex h-[calc(100dvh-96px)] max-h-[800px] max-w-[calc(100vw-32px)] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl outline-none", !open && "pointer-events-none", resizing && "select-none")} style={{ width }} onKeyDown={(event) => {
             if (event.key !== "Escape" || event.defaultPrevented || !panel.current?.contains(event.target as Node)) return;
             if (document.querySelector('[data-state="open"][data-ui-overlay]:not(#global-assistant)')) return;
             event.stopPropagation();
@@ -72,7 +76,7 @@ export function AgentPanel() {
                 localStorage.setItem("canvas-agent-panel-width", String(next));
             }} />
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">{owner ? <AssistantPanelContent key={owner} /> : null}</div>
-        </aside>
+        </motion.aside>
         <Button ref={launcher} variant="default" size="icon" className="fixed bottom-4 right-4 z-[110] size-12 rounded-2xl shadow-lg" aria-label={`${t(open ? "ui.collapseAssistant" : "ui.openAssistant")} · ${status}`} title={status} aria-expanded={open} aria-controls="global-assistant" data-canvas-shortcuts-ignore onClick={() => useAgentStore.getState().togglePanel()}>
             {sending || waiting ? <LoaderCircle className="size-5 animate-spin" /> : error || approvals ? <CircleAlert className="size-5" /> : open ? <MessageSquare className="size-5" /> : <Bot className="size-5" />}
         </Button>

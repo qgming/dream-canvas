@@ -1,5 +1,5 @@
 import appI18n from "@/i18n";
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
@@ -23,12 +23,16 @@ import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
+import { PointsEstimate } from "@/components/points-estimate";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { AssetMedia } from "@/components/canvas/asset-media";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, waitForVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { GenerationProgress } from "@/components/generation-progress";
+import { GenerationStateError, type GenerationTask } from "@/services/api/tasks";
+import { Link } from "react-router-dom";
 import { captureSession } from "@/services/api/client";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -51,7 +55,9 @@ type GeneratedVideo = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed";
+    status: "pending" | "success" | "failed" | "confirmation_required" | "disconnected";
+    taskState?: GenerationTask;
+    taskId?: string;
     video?: GeneratedVideo;
     error?: string;
 };
@@ -67,7 +73,7 @@ type GenerationLog = {
     config: GenerationLogConfig;
     references: ReferenceImage[];
     durationMs: number;
-    status: "pending" | "success" | "failed";
+    status: "pending" | "success" | "failed" | "confirmation_required" | "disconnected";
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
@@ -123,7 +129,9 @@ export default function VideoPage() {
 
     useEffect(() => () => { watching.current.forEach((controller) => controller.abort()); }, []);
 
-    const model = selectedModel ?? effectiveConfig.videoModel;
+    const initialModel = useRef("");
+    if (!initialModel.current && effectiveConfig.videoModel) initialModel.current = effectiveConfig.videoModel;
+    const model = selectedModel ?? initialModel.current;
     const canGenerate = Boolean(prompt.trim());
 
     useEffect(() => {
@@ -214,12 +222,14 @@ export default function VideoPage() {
             assertSession();
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending", task });
+            setResults([{ id: log.id, taskId: task.id, status: "pending" }]);
             submitted = log;
             const saved = await saveLog(log, false);
             void pollGenerationLog(saved, snapshot.config, agentTaskId);
         } catch (error) {
             if (submitted) {
                 notify.error(appI18n.t("workspace.taskSubmittedRecordFailed"));
+                setResults([{ id: submitted.id, taskId: submitted.task?.id, status: "disconnected", error: appI18n.t("workspace.taskSubmittedRecordFailed") }]);
                 setRunning(false);
                 return;
             }
@@ -309,7 +319,7 @@ export default function VideoPage() {
     };
 
     const draftDirty = JSON.stringify({ prompt, references, parameters, model: selectedModel }) !== savedDraft;
-    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
+    const discardDraft = useCallback(() => { initialModel.current = ""; setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
     useEditGuard(draftDirty || running, discardDraft);
     const createSession = useDiscardChanges(draftDirty, () => {
         discardDraft();
@@ -357,7 +367,7 @@ export default function VideoPage() {
 
     const resumePendingLogs = (items: GenerationLog[]) => {
         for (const log of items) {
-            if (log.status === "pending" && log.task) void pollGenerationLog(log);
+            if (["pending", "confirmation_required", "disconnected"].includes(log.status) && log.task) void pollGenerationLog(log);
         }
     };
 
@@ -370,23 +380,37 @@ export default function VideoPage() {
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = { ...effectiveConfig, ...log.config, model: log.task.model || log.model };
+        const saveOutcome = async (next: GenerationLog) => {
+            try { await saveLog(next, false); }
+            catch (error) { const message = error instanceof Error ? error.message : t("workspace.saveRecordFailed"); setLogsError(message); notify.error(message); }
+        };
         try {
-            const stored = await storeGeneratedVideo(await waitForVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal }));
+            const stored = await storeGeneratedVideo(await waitForVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal, onTask: (taskState) => {
+                setResults((value) => value.map((item) => item.id === log.id ? { ...item, status: "pending", taskId: taskState.id, taskState, error: undefined } : item));
+            } }));
             const nextVideo: GeneratedVideo = { id: nanoid(), url: stored.url, storageKey: stored.storageKey, durationMs: stored.durationMs || 0, width: stored.width || 0, height: stored.height || 0, bytes: stored.bytes, mimeType: stored.mimeType };
-            setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+            setResults((value) => value.map((item) => item.id === log.id ? { id: log.id, status: "success", video: nextVideo } : item));
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
-            await saveLog({ ...log, status: "success", durationMs: Date.now() - log.createdAt, video: nextVideo, error: undefined });
+            await saveOutcome({ ...log, status: "success", durationMs: Date.now() - log.createdAt, video: nextVideo, error: undefined });
             notify.success(t("videoWorkbench.generated"));
         } catch (error) {
             if (controller.signal.aborted) return;
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
-            if (!isVideoTaskFailed(error)) {
-                notify.warning(t("workspace.taskStillPending", { error: errorMessage }));
+            if (error instanceof GenerationStateError && error.status === "confirmation_required") {
+                setResults((value) => value.map((item) => item.id === log.id ? { ...item, taskId: log.task!.id, status: "confirmation_required", error: errorMessage } : item));
+                if (log.status !== "confirmation_required" || log.error !== errorMessage) await saveOutcome({ ...log, status: "confirmation_required", durationMs: Date.now() - log.createdAt, error: errorMessage });
+                notify.warning(errorMessage);
                 return;
             }
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
+            if (!isVideoTaskFailed(error)) {
+                setResults((value) => value.map((item) => item.id === log.id ? { ...item, taskId: log.task!.id, status: "disconnected", error: errorMessage } : item));
+                if (log.status !== "disconnected" || log.error !== errorMessage) await saveOutcome({ ...log, status: "disconnected", durationMs: Date.now() - log.createdAt, error: errorMessage });
+                notify.warning(errorMessage);
+                return;
+            }
+            setResults((value) => value.map((item) => item.id === log.id ? { id: log.id, status: "failed", error: errorMessage } : item));
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
-            await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            await saveOutcome({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
             notify.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -406,7 +430,8 @@ export default function VideoPage() {
         setReferences(log.references || []);
         setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} }, model: log.model }));
         setSelectedModel(log.model);
-        setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
+        setResults(log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: log.status, taskId: log.task?.id, error: log.error }]);
+        if (log.task && ["pending", "confirmation_required", "disconnected"].includes(log.status)) void pollGenerationLog(log);
     });
 
     return (
@@ -498,6 +523,7 @@ export default function VideoPage() {
                         </div>
 
                         <div className="mt-auto pt-6">
+                            <div className="mb-2 flex justify-end"><PointsEstimate model={model} parameters={parameters[model]} prompt={prompt} /></div>
                             <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
@@ -511,7 +537,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : ["confirmation_required", "disconnected"].includes(result.status) ? <div key={result.id} className="flex aspect-video flex-col items-center justify-center gap-4 rounded-lg border border-warning/25 p-5"><GenerationProgress task={{ ...result.taskState, status: result.status, error: result.error }} /><div className="flex gap-3"><Button variant="ghost" size="sm" disabled={running} onClick={() => void refreshLogs()}>{t("workspace.reload")}</Button><Link className="self-center text-xs underline" to={`/tasks?taskId=${encodeURIComponent(result.taskId || "")}`}>{t("workspace.taskDetails")}</Link></div></div> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} task={result.taskState} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center text-center lg:min-h-[480px]">
@@ -591,13 +617,11 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
-    const { t } = useTranslation();
+function PendingVideoCard({ task }: { task?: GenerationTask }) {
     return (
         <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-border bg-muted  ">
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>{t("workbench.generating")}</span>
+                <GenerationProgress task={task} />
             </div>
         </div>
     );
@@ -685,8 +709,8 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     </div>
                 </div>
                 <div className="col-span-2 flex flex-wrap items-center justify-end gap-2">
-                    <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "success" ? "blue" : log.status === "pending" ? "processing" : "red"}>
-                        {t(`workbench.${log.status === "success" ? "success" : log.status === "pending" ? "generating" : "failed"}`)}
+                    <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "success" ? "blue" : log.status === "pending" ? "processing" : log.status === "failed" ? "red" : "warning"}>
+                        {log.status === "confirmation_required" ? t("workspace.confirmationRequired") : log.status === "disconnected" ? t("workspace.progressDisconnected") : t(`workbench.${log.status === "success" ? "success" : log.status === "pending" ? "generating" : "failed"}`)}
                     </Tag>
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
                         {formatDuration(log.durationMs)}

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
+import { motion } from "motion/react";
+import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -15,6 +17,9 @@ import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin"
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { useTranslation } from "react-i18next";
 import { AssetMedia } from "./asset-media";
+import { GenerationProgress } from "@/components/generation-progress";
+import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
+import { useParams } from "react-router-dom";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -298,12 +303,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
-            className={`node-element group/node absolute flex select-none flex-col transition-shadow duration-200 ${isGroup ? "z-[5]" : isSelected ? "z-50" : "z-10"} ${referenceSelectionState === "available" ? "cursor-pointer" : referenceSelectionState ? "cursor-not-allowed" : ""}`}
+            className={`node-element group/node absolute flex select-none flex-col transition-shadow ${isGroup ? "z-[5]" : isSelected ? "z-50" : "z-10"} ${referenceSelectionState === "available" ? "cursor-pointer" : referenceSelectionState ? "cursor-not-allowed" : ""}`}
             style={{
                 transform: `translate(${data.position.x}px, ${data.position.y}px)`,
                 width: data.width,
                 height: data.height,
-                transition: "box-shadow 200ms ease",
                 contain: "layout style",
             }}
             onMouseEnter={() => {
@@ -460,7 +464,7 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot && props.node.type === CanvasNodeType.Image) return <ImageNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Text && props.node.metadata?.texts?.length && (props.node.metadata.status !== "error" || props.node.metadata.texts.some((text) => text.content))) return <TextContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
@@ -499,12 +503,16 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
     );
 }
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
-    const { t } = useTranslation();
+function CanvasGenerationProgress({ nodeId, slotId }: { nodeId: string; slotId?: string }) {
+    const { id } = useParams();
+    const task = useGenerationProgressStore((state) => Object.values(state.tasks).find((task) => task.projectId === id && task.nodeId === nodeId && (!slotId || !task.input.resultSlotId || task.input.resultSlotId === slotId)));
+    return <GenerationProgress task={task} />;
+}
+
+function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-xs tracking-[0.2em]">{t("canvas.node.generating")}</span>
+            <CanvasGenerationProgress nodeId={node.id} />
         </div>
     );
 }
@@ -615,6 +623,8 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNodeData; text: CanvasNodeText; index: number; onSetPrimary: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const tokens = useMotionTokens();
+    const reduceMotion = useShouldReduceMotion();
     const count = node.metadata?.texts?.length || 0;
     const columns = Math.min(count, 4);
     const rows = Math.ceil(count / columns);
@@ -624,22 +634,12 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
     const y = (Math.floor(slot / columns) - rows + 1) * (node.height + 18);
 
     return (
-        <div
+        <motion.div
             className="absolute z-20 overflow-hidden rounded-xl border shadow-lg"
-            style={
-                {
-                    left: x,
-                    top: y,
-                    width: node.width,
-                    height: node.height,
-                    background: theme.node.panel,
-                    borderColor: theme.node.stroke,
-                    "--batch-from-x": `${-x}px`,
-                    "--batch-from-y": `${-y}px`,
-                    "--batch-from-rotate": `${4 + index * 2}deg`,
-                    animation: `canvas-batch-child-in 320ms ${index * 35}ms cubic-bezier(.2,.85,.18,1) both`,
-                } as React.CSSProperties
-            }
+            initial={reduceMotion ? false : { opacity: 0, x: -x, y: -y, rotate: 4 + index * 2, scale: 0.72 }}
+            animate={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
+            transition={reduceMotion ? tokens.transition.instant : { ...tokens.spring.entrance, delay: index * tokens.stagger.stack }}
+            style={{ left: x, top: y, width: node.width, height: node.height, background: theme.node.panel, borderColor: theme.node.stroke }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
         >
@@ -648,7 +648,7 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
                     <div className="thin-scrollbar h-full overflow-y-auto whitespace-pre-wrap break-words px-4 pb-4 pt-14 font-mono text-sm leading-6" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
                         {text.content}
                     </div>
-                    <button type="button" className="pointer-events-none absolute right-2.5 top-2.5 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium opacity-0 transition duration-150 hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onSetPrimary())}>
+                    <button type="button" className="pointer-events-none absolute right-2.5 top-2.5 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium opacity-0 transition hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onSetPrimary())}>
                         <Star className="size-3.5" style={{ color: theme.canvas.selectionStroke }} />
                         {t("canvas.node.setPrimaryText")}
                     </button>
@@ -656,7 +656,7 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
             ) : (
                 <TextSlotStatus text={text} />
             )}
-        </div>
+        </motion.div>
     );
 }
 
@@ -799,7 +799,7 @@ function ImageContent({
                         className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                     />
                 ) : (
-                    <ImageSlotStatus image={primaryImage} />
+                    <ImageSlotStatus nodeId={node.id} image={primaryImage} />
                 )}
             </div>
             {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
@@ -833,6 +833,8 @@ function ImageContent({
 function ExpandedImageCard({ node, image, index, scale, onView, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; scale: number; onView: () => void; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const tokens = useMotionTokens();
+    const reduceMotion = useShouldReduceMotion();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const count = node.metadata?.images?.length || 0;
     const columns = Math.min(count, 4);
@@ -856,22 +858,12 @@ function ExpandedImageCard({ node, image, index, scale, onView, onSetPrimary, on
         : undefined;
 
     return (
-        <div
+        <motion.div
             className={`absolute z-20 overflow-hidden rounded-xl ${image.content ? "" : "border shadow-lg"}`}
-            style={
-                {
-                    left: x,
-                    top: y,
-                    width: node.width,
-                    height: node.height,
-                    background: "transparent",
-                    borderColor: theme.node.stroke,
-                    "--batch-from-x": `${-x}px`,
-                    "--batch-from-y": `${-y}px`,
-                    "--batch-from-rotate": `${4 + index * 2}deg`,
-                    animation: `canvas-batch-child-in 320ms ${index * 35}ms cubic-bezier(.2,.85,.18,1) both`,
-                } as React.CSSProperties
-            }
+            initial={reduceMotion ? false : { opacity: 0, x: -x, y: -y, rotate: 4 + index * 2, scale: 0.72 }}
+            animate={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
+            transition={reduceMotion ? tokens.transition.instant : { ...tokens.spring.entrance, delay: index * tokens.stagger.stack }}
+            style={{ left: x, top: y, width: node.width, height: node.height, background: "transparent", borderColor: theme.node.stroke }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onDoubleClick={(event) => {
@@ -880,9 +872,9 @@ function ExpandedImageCard({ node, image, index, scale, onView, onSetPrimary, on
                 onView();
             }}
         >
-            {image.content ? <AssetMedia src={source} assetKey={image.storageKey} alt={node.title} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <ImageSlotStatus image={image} />}
+            {image.content ? <AssetMedia src={source} assetKey={image.storageKey} alt={node.title} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <ImageSlotStatus nodeId={node.id} image={image} />}
             {image.content ? (
-                <div className="pointer-events-none absolute inset-x-2 top-2 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/node:pointer-events-auto group-hover/node:opacity-100">
+                <div className="pointer-events-none absolute inset-x-2 top-2 flex items-center gap-1 opacity-0 transition-opacity duration-(--motion-fade-duration) ease-(--motion-fade-easing) group-hover/node:pointer-events-auto group-hover/node:opacity-100">
                     <button type="button" className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border px-1.5 text-xs font-medium shadow-lg backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownload())}>
                         <Download className="size-3 shrink-0" />
                         <span className="truncate">{t("common.download")}</span>
@@ -898,7 +890,7 @@ function ExpandedImageCard({ node, image, index, scale, onView, onSetPrimary, on
                 </div>
             ) : null}
             {image.status === "error" ? <BatchImageFailureActions placement="right" onRetry={onRetry} onDelete={onDelete} /> : null}
-        </div>
+        </motion.div>
     );
 }
 
@@ -918,14 +910,13 @@ function BatchImageFailureActions({ placement, onRetry, onDelete }: { placement:
     );
 }
 
-function ImageSlotStatus({ image }: { image?: CanvasNodeImage }) {
+function ImageSlotStatus({ nodeId, image }: { nodeId: string; image?: CanvasNodeImage }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const failed = image?.status === "error";
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: theme.node.fill, color: failed ? theme.node.text : theme.node.activeStroke }}>
-            {failed ? <span className="text-xs leading-5">{image.errorDetails || t("canvas.node.failed")}</span> : <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
-            {!failed ? <span className="text-xs tracking-[0.2em]">{t("canvas.node.generating")}</span> : null}
+            {failed ? <span className="text-xs leading-5">{image.errorDetails || t("canvas.node.failed")}</span> : <CanvasGenerationProgress nodeId={nodeId} slotId={image?.id} />}
         </div>
     );
 }
@@ -954,7 +945,7 @@ function BatchFrame({ batchCount, batchExpanded, children }: { batchCount: numbe
                     {Array.from({ length: Math.min(batchCount - 1, 3) }).map((_, index) => (
                         <div
                             key={index}
-                            className="absolute rounded-[inherit] border shadow-lg transition-all duration-300 group-hover/batch:translate-x-1"
+                            className="absolute rounded-[inherit] border shadow-lg transition-all duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover/batch:translate-x-1"
                             style={{
                                 inset: 0,
                                 background: `linear-gradient(135deg, ${theme.node.panel}, ${theme.node.fill})`,
@@ -987,7 +978,7 @@ function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "r
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
+            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-(--motion-fade-duration) ease-(--motion-fade-easing) ${
                 side === "left" ? "-left-6" : "-right-6"
             } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
             onMouseDown={onMouseDown}

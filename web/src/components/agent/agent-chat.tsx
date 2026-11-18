@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { motion, useSpring, useTransform } from "motion/react";
+import { CountingNumber } from "@animate-ui/react/primitives/texts/counting-number";
+import { useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -34,6 +35,7 @@ export function AgentChatTimeline({
     onApprovalDecision: (approval: AgentPendingApproval, decision: "accept" | "acceptForSession" | "decline") => void;
 }) {
     const { t } = useTranslation();
+    const reduceMotion = useShouldReduceMotion();
     const messages = useAgentStore((state) => state.messages);
     const activeThreadId = useAgentStore((state) => state.activeThreadId);
     const bootstrapStatus = useAgentStore((state) => state.bootstrapStatus);
@@ -59,9 +61,9 @@ export function AgentChatTimeline({
         const list = listRef.current;
         if (!list || !list.clientHeight) return;
         followMessagesRef.current = true;
-        list.scrollTo({ top: list.scrollHeight, behavior });
+        list.scrollTo({ top: list.scrollHeight, behavior: reduceMotion ? "instant" : behavior });
         setShowScrollToBottom(false);
-    }, []);
+    }, [reduceMotion]);
     useLayoutEffect(() => {
         const list = listRef.current;
         if (!visible || !list) return;
@@ -187,15 +189,10 @@ export function AgentUsageBar({ usage, theme }: { usage: AgentTokenUsage; theme:
 }
 
 function UsageNumber({ label, value, color }: { label: string; value: number; color: string }) {
-    const spring = useSpring(value, { stiffness: 110, damping: 24, mass: 0.7 });
-    const text = useTransform(spring, (current) => Math.round(current).toLocaleString());
-    useEffect(() => spring.set(value), [spring, value]);
     return (
         <span className="inline-flex items-baseline gap-1" aria-label={`${label} ${value.toLocaleString()}`}>
             <span>{label}</span>
-            <motion.span aria-hidden className="font-medium" style={{ color }}>
-                {text}
-            </motion.span>
+            <CountingNumber aria-hidden className="font-medium" number={value} thousandSeparator="," initiallyStable style={{ color }} />
         </span>
     );
 }

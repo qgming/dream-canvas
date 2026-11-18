@@ -4,19 +4,20 @@ import localforage from "localforage";
 
 import { ApiError, captureSession } from "@/services/api/client";
 import { getPreference, savePreference } from "@/services/api/preferences";
-import type { ModelCatalog, ModelFeatures, ParameterControl } from "@/services/api/channels";
+import type { ModelCatalog, ModelFeatures, ParameterControl, PointsPricing } from "@/services/api/channels";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { inputVisible } from "@/lib/model-inputs";
 
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
-export type ChannelModel = { id: string; name: string; label: string; features: ModelFeatures; capability: ModelCapability; parameters: ParameterControl[] };
+export type ChannelModel = { id: string; name: string; label: string; version: number; features: ModelFeatures; capability: ModelCapability; parameters: ParameterControl[]; pricing: PointsPricing };
 export type ModelChannel = { id: string; name: string; models: ChannelModel[] };
 export type AiConfig = {
     channelMode: "remote";
     channels: ModelChannel[];
+    orders: Record<string, string[]>;
     models: string[];
-    model: string; imageModel: string; videoModel: string; textModel: string; audioModel: string;
+    model: string; imageModel: string; videoModel: string; textModel: string; audioModel: string; assistantModel: string;
     systemPrompt: string; reasoningEffort: ReasoningEffort;
     count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
@@ -24,7 +25,7 @@ export type AiConfig = {
 };
 export type GenerationPreference = Pick<AiConfig, "count" | "canvasImageCount" | "nodeRegenerateBehavior" | "autoFocusOnSelect">;
 export const defaultConfig: AiConfig = {
-    channelMode: "remote", channels: [], models: [], model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "",
+    channelMode: "remote", channels: [], orders: {}, models: [], model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "", assistantModel: "",
     systemPrompt: "", reasoningEffort: "auto", count: "1", canvasImageCount: "3",
     nodeRegenerateBehavior: "new-node", autoFocusOnSelect: false,
 };
@@ -81,15 +82,9 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
-        const channels = catalog.channels.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, features: model.features, capability: model.capability, parameters: model.parameters })) }));
-        const defaultModel = (capability: ModelCapability) => {
-            for (const channel of channels) {
-                const model = channel.models.find((model) => model.id === catalog.defaults.models[capability] && model.capability === capability);
-                if (model) return encodeChannelModel(channel.id, model.name);
-            }
-            return "";
-        };
-        return { config: { ...state.config, channels, models: modelOptionsFromChannels(channels), imageModel: defaultModel("image"), videoModel: defaultModel("video"), textModel: defaultModel("text"), audioModel: defaultModel("audio") } };
+        const channels = catalog.channels.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, version: model.version, features: model.features, capability: model.capability, parameters: model.parameters, pricing: model.pricing })) }));
+        const next = { ...state.config, channels, orders: catalog.orders, models: modelOptionsFromChannels(channels) };
+        return { config: { ...next, imageModel: firstModel(next, "image"), videoModel: firstModel(next, "video"), textModel: firstModel(next, "text"), audioModel: firstModel(next, "audio"), assistantModel: firstModel(next, "text", true) } };
     }),
     updateConfig: (key, value) => {
         if (!get().hydrated) return;
@@ -138,7 +133,7 @@ export const encodeChannelModel = (channelId: string, model: string) => `${chann
 export function decodeChannelModel(value: string) { const index = value.indexOf("::"); return index < 0 ? null : { channelId: value.slice(0, index), model: value.slice(index + 2) }; }
 export const isChannelModelValue = (value: string) => Boolean(decodeChannelModel(value));
 export const modelOptionName = (value: string) => decodeChannelModel(value)?.model || value;
-function findChannelModel(config: AiConfig, value: string) {
+export function findChannelModel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     const channel = config.channels.find((entry) => entry.id === decoded?.channelId);
     const model = channel?.models.find((entry) => entry.name === decoded?.model);
@@ -148,12 +143,17 @@ export const modelCapabilityOf = (config: AiConfig, value: string) => findChanne
 export const modelMatchesCapability = (config: AiConfig, value: string, capability?: ModelCapability) => !capability || modelCapabilityOf(config, value) === capability;
 export function modelOptionLabel(config: AiConfig, value: string) { const match = findChannelModel(config, value); return match ? `${match.model.label || match.model.name}（${match.channel.name}）` : modelOptionName(value); }
 export const modelOptionsFromChannels = (channels: ModelChannel[]) => channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name)));
-export const selectableModelsByCapability = (config: AiConfig, capability?: ModelCapability) => config.channels.flatMap((channel) => channel.models.filter((model) => !capability || model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
+export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability, toolsOnly = false) {
+    const models = config.channels.flatMap((channel) => channel.models.filter((model) => (!capability || model.capability === capability) && (!toolsOnly || model.features.tools)).map((model) => ({ id: model.id, value: encodeChannelModel(channel.id, model.name) })));
+    const order = config.orders[toolsOnly ? "assistant" : capability || ""] || [];
+    const position = new Map(order.map((id, index) => [id, index]));
+    return models.sort((a, b) => (position.get(a.id) ?? order.length) - (position.get(b.id) ?? order.length)).map((model) => model.value);
+}
+export const firstModel = (config: AiConfig, capability: ModelCapability, toolsOnly = false) => selectableModelsByCapability(config, capability, toolsOnly)[0] || "";
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) { return value && modelOptionsFromChannels(channels).includes(value) ? value : ""; }
 export function resolveModelForCapability(config: AiConfig, current: string | undefined, capability: ModelCapability) {
     const preferred = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
-    for (const value of [current, preferred]) { if (value && (!modelCapabilityOf(config, value) || modelCapabilityOf(config, value) === capability)) return value; }
-    return "";
+    return current || preferred;
 }
 
 export const modelHasParameters = (config: AiConfig, value: string) => Boolean(findChannelModel(config, value));

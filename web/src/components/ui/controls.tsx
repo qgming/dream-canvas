@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode, type ComponentProps } from "react";
-import { Checkbox as CheckboxPrimitive, Switch as SwitchPrimitive, Slider as SliderPrimitive, RadioGroup, ToggleGroup } from "radix-ui";
-import { Check, Minus } from "lucide-react";
+import { Checkbox as CheckboxPrimitive, Switch as SwitchPrimitive, Slider as SliderPrimitive, RadioGroup, ToggleGroup } from "@animate-ui/react/primitives/radix-ui";
+import { Check, LoaderCircle, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Option<T> = T | { value: T; label: ReactNode; disabled?: boolean };
@@ -18,7 +18,7 @@ function CheckboxGroup({ value = [], onChange, options, children, className, ...
 export const Checkbox = Object.assign(CheckboxControl, { Group: CheckboxGroup });
 
 export function Switch({ checked, onChange, disabled, loading, size, className, checkedChildren, unCheckedChildren, ...props }: Omit<ComponentProps<typeof SwitchPrimitive.Root>, "onChange"> & { onChange?: (value: boolean) => void; loading?: boolean; size?: "small"; checkedChildren?: ReactNode; unCheckedChildren?: ReactNode }) {
-    return <SwitchPrimitive.Root {...props} checked={Boolean(checked)} onCheckedChange={onChange} disabled={disabled || loading} className={cn("inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-input p-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-[state=checked]:bg-primary", size === "small" && "h-4 w-7", className)}><SwitchPrimitive.Thumb className={cn("block size-4 rounded-full bg-background shadow-sm transition-transform data-[state=checked]:translate-x-4", size === "small" && "size-3 data-[state=checked]:translate-x-3")} /></SwitchPrimitive.Root>;
+    return <SwitchPrimitive.Root {...props} checked={Boolean(checked)} onCheckedChange={onChange} disabled={disabled || loading} aria-busy={loading || undefined} className={cn("inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-input p-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-[state=checked]:bg-primary", size === "small" && "h-4 w-7", className)}><SwitchPrimitive.Thumb className={cn("grid size-4 place-items-center rounded-full bg-background shadow-sm data-[state=checked]:translate-x-4", size === "small" && "size-3 data-[state=checked]:translate-x-3")}>{loading ? <LoaderCircle className="size-2.5 animate-spin text-muted-foreground motion-reduce:animate-none" /> : null}</SwitchPrimitive.Thumb></SwitchPrimitive.Root>;
 }
 
 export function Slider({ value, onChange, min = 0, max = 100, step = 1, className, ...props }: Omit<ComponentProps<typeof SliderPrimitive.Root>, "value" | "defaultValue" | "onChange"> & { value?: number; onChange?: (value: number) => void }) {

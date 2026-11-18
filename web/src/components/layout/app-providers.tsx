@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Tooltip } from "radix-ui";
+import { Tooltip } from "@animate-ui/react/primitives/radix-ui";
+import { AnimateUIProvider } from "@animate-ui/react/provider";
+import { toCssTiming, motionTokens } from "@animate-ui/react/utils/motion";
 import { Toaster } from "sonner";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
@@ -29,7 +31,14 @@ export function AppProviders({ children }: { children: ReactNode }) {
     const dark = theme === "dark";
     const locale = i18n.resolvedLanguage as AppLocale;
 
-    useLayoutEffect(() => applyAppTheme(theme), [theme]);
+    useLayoutEffect(() => {
+        applyAppTheme(theme);
+        for (const name of ["color", "fade", "reveal", "collapse"] as const) {
+            const timing = toCssTiming(motionTokens.transition[name]);
+            document.documentElement.style.setProperty(`--motion-${name}-duration`, `${timing.duration}ms`);
+            document.documentElement.style.setProperty(`--motion-${name}-easing`, timing.easing);
+        }
+    }, [theme]);
 
     useEffect(() => {
         document.documentElement.lang = locale;
@@ -39,13 +48,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
     }, [locale, t]);
 
     return (
-        <Tooltip.Provider>
+        <AnimateUIProvider reducedMotion="user"><Tooltip.Provider>
             <FeedbackProvider>
                 <QueryClientProvider client={queryClient}>
                     <ClientRootInit>{children}</ClientRootInit>
                 </QueryClientProvider>
-                <Toaster theme={dark ? "dark" : "light"} position="top-right" closeButton toastOptions={{ style: { background: "var(--popover)", color: "var(--foreground)", borderColor: "var(--border)", fontFamily: "var(--font-app)", fontSize: 14 } }} />
+                <Toaster theme={dark ? "dark" : "light"} position="top-right" closeButton toastOptions={{ style: { background: "var(--popover)", color: "var(--foreground)", borderColor: "var(--border)", fontFamily: "var(--font-app)", fontSize: 14, transitionDuration: `${toCssTiming(motionTokens.transition.dismiss).duration}ms`, transitionTimingFunction: toCssTiming(motionTokens.transition.dismiss).easing } }} />
             </FeedbackProvider>
-        </Tooltip.Provider>
+        </Tooltip.Provider></AnimateUIProvider>
     );
 }

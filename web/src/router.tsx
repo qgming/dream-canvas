@@ -18,6 +18,7 @@ const ChannelsPage = lazy(() => import("@/pages/settings/channels"));
 const ModelScriptsPage = lazy(() => import("@/pages/settings/model-scripts"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
 const RuntimePage = lazy(() => import("@/pages/settings/runtime"));
+const LoggingPage = lazy(() => import("@/pages/settings/logging"));
 const StoragePage = lazy(() => import("@/pages/settings/storage"));
 const UsagePage = lazy(() => import("@/pages/settings/usage"));
 import AssetsPage from "@/pages/assets";
@@ -60,6 +61,7 @@ export const router = createBrowserRouter([
                             { path: "model-scripts", element: <ModelScriptsPage /> },
                             { path: "model-scripts/:id", element: <ModelScriptsPage /> },
                             { path: "runtime", element: <RuntimePage /> },
+                            { path: "logging", element: <LoggingPage /> },
                             { path: "storage", element: <StoragePage /> },
                         ] },
                     ] },

@@ -28,7 +28,7 @@ export default function AccountSettingsPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader title={appI18n.t("workspace.account")} description={appI18n.t("settings.accountDescription")} />
+            <PageHeader stickyActions title={appI18n.t("workspace.account")} description={appI18n.t("settings.accountDescription")} actions={<Button type="submit" form="account-password" disabled={!form.formState.isDirty} loading={saving}>{appI18n.t("workspace.changePassword")}</Button>} />
             <dl>
                 <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
                     <dt className="font-medium">{appI18n.t("workspace.username")}</dt>
@@ -37,16 +37,13 @@ export default function AccountSettingsPage() {
             </dl>
             <section>
                 <h2 className="mb-2 text-base font-semibold">{appI18n.t("workspace.changePassword")}</h2>
-                <EditorForm form={form} onSubmit={submit} className="space-y-0">
+                <EditorForm id="account-password" form={form} onSubmit={submit} className="space-y-0">
                     <div>
                         <Field layout="horizontal" name="currentPassword" label={appI18n.t("workspace.currentPassword")} schema={z.string().trim().min(1, appI18n.t("workspace.currentPasswordRequired"))}><PasswordInput autoComplete="current-password" /></Field>
                         <Field layout="horizontal" name="password" label={appI18n.t("workspace.newPassword")} schema={z.string().trim().min(1, appI18n.t("workspace.newPasswordRequired"))}><PasswordInput autoComplete="new-password" /></Field>
                         <Field layout="horizontal" name="confirm" label={appI18n.t("workspace.confirmPassword")} schema={z.string().min(1, appI18n.t("workspace.confirmPasswordRequired"))} validate={(value) => value === form.getValues("password") || appI18n.t("workspace.passwordMismatch")}><PasswordInput autoComplete="new-password" /></Field>
                     </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                        <p className="text-xs leading-5 text-muted-foreground">{appI18n.t("workspace.passwordSessions")}</p>
-                        <Button className="ml-auto" variant="default" type="submit" loading={saving}>{appI18n.t("workspace.changePassword")}</Button>
-                    </div>
+                    <p className="border-t border-border pt-4 text-xs leading-5 text-muted-foreground">{appI18n.t("workspace.passwordSessions")}</p>
                 </EditorForm>
             </section>
         </section>

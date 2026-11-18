@@ -8,6 +8,10 @@ import { useTranslation } from "react-i18next";
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
+import { PointsEstimate } from "@/components/points-estimate";
+import { getGenerationCount } from "@/lib/canvas/canvas-generation-helpers";
+import { buildNodeGenerationContext } from "./canvas-node-generation";
+import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { defaultConfig, resolveModelForCapability, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -15,7 +19,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
 
@@ -30,6 +34,7 @@ type CanvasNodePromptPanelProps = {
     onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
     nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
     onStartReferenceSelection?: (nodeId: string) => void;
@@ -37,7 +42,7 @@ type CanvasNodePromptPanelProps = {
     modeOverride?: CanvasNodeGenerationMode; // Plugin nodes set their generation type through useBuiltinPanel.mode.
 };
 
-export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange, modeOverride }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, nodes, connections, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange, modeOverride }: CanvasNodePromptPanelProps) {
     const { t } = useTranslation();
     const globalConfig = useEffectiveConfig();
     const openModelSettings = useOpenModelSettings();
@@ -49,6 +54,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
+    const requestPrompt = mode === "text" && hasTextContent ? t("canvas.projectPage.editTextPrompt", { source: node.metadata!.content!.trim(), prompt }) : (getNodeDefinition(node.type)?.useBuiltinPanel?.promptPrefix || "") + prompt;
+    const estimatePrompt = buildNodeGenerationContext(node.id, nodes, connections, requestPrompt).prompt;
 
     // Restore prompts only when switching nodes; preserve the current input after generation on the same node.
     useEffect(() => {
@@ -121,7 +128,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         </>
                     )}
                 </div>
-                <Button variant={isRunning ? "destructive" : "default"}
+                <div className="flex shrink-0 items-center gap-2">{!isRunning ? <PointsEstimate model={config.model} parameters={node.metadata?.modelParameters?.[config.model]} prompt={estimatePrompt} requests={mode === "image" ? getGenerationCount(config.count) : mode === "text" ? getGenerationCount(String(node.metadata?.textCount || 1)) : 1} /> : null}<Button variant={isRunning ? "destructive" : "default"}
                     className="!h-8 !min-w-16 shrink-0 !rounded-md !px-3" aria-busy={isRunning}
                     disabled={!isRunning && !prompt.trim()}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
@@ -138,7 +145,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                             <ArrowUp className="size-4" />
                         )}
                     </span>
-                </Button>
+                </Button></div>
             </div>
             <Dialog title={t("canvas.promptPanel.editorTitle")} open={expanded} width={760} footer={null} onClose={() => setExpanded(false)}>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>

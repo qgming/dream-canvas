@@ -39,14 +39,15 @@ export async function result({response, phase, input}) {
     response = response.data;
   }
   const upstreamId = response.id || input.upstreamId, usage = response.usage || {};
+  const progress = typeof response.progress === "number" ? response.progress : undefined;
   const url = response.video_url || response.result_url || response.url || response.content?.video_url || response.content?.url;
   if (response.status === "failed" || response.status === "cancelled") return {status: response.status, upstreamId, url, usage, error: "供应商视频任务失败或已取消 / Provider video task failed or was cancelled"};
   if (response.status === "completed" || url) {
-    if (url) return {status: "completed", upstreamId, url, usage};
+    if (url) return {status: "completed", upstreamId, url, usage, progress};
     if (!upstreamId) throw new Error("Missing video job ID");
-    return {upstreamId, usage, request: {method: "GET", path: `videos/${encodeURIComponent(upstreamId)}/content`, responseType: "binary"}};
+    return {upstreamId, usage, progress, request: {method: "GET", path: `videos/${encodeURIComponent(upstreamId)}/content`, responseType: "binary"}};
   }
-  if (phase === "submit" && upstreamId && !response.status) return {status: "queued", upstreamId, usage};
+  if (phase === "submit" && upstreamId && !response.status) return {status: "queued", upstreamId, usage, progress};
   if (!upstreamId || !["queued", "in_progress", "running"].includes(response.status)) throw new Error("Missing video job ID or unknown status");
-  return {status: response.status === "queued" ? "queued" : "running", upstreamId, usage};
+  return {status: response.status === "queued" ? "queued" : "running", upstreamId, usage, progress};
 }

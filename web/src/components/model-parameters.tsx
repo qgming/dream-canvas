@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
 import appI18n from "@/i18n";
+import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
+import { ChevronDown } from "lucide-react";
 import { Input, Textarea } from "@/components/ui/input";
 import { NumberInput as InputNumber } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
@@ -50,7 +52,7 @@ export function ModelInputFields({ controls, value = {}, resolvedValue, onChange
     };
     return <div className="grid gap-3" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
         {controls.filter((control) => !control.advanced).map(render)}
-        {controls.some((control) => control.advanced && !control.hidden && inputVisible(control, resolved)) ? <details className="space-y-3"><summary className="cursor-pointer text-xs text-muted-foreground">{appI18n.t("modelScripts.advanced")}</summary><div className="mt-3 grid gap-3">{controls.filter((control) => control.advanced).map(render)}</div></details> : null}
+        {controls.some((control) => control.advanced && !control.hidden && inputVisible(control, resolved)) ? <Collapsible.Root><Collapsible.Trigger className="group flex w-full items-center justify-between text-left text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">{appI18n.t("modelScripts.advanced")}<ChevronDown className="size-3.5 transition-transform group-data-[state=open]:rotate-180" /></Collapsible.Trigger><Collapsible.Content><div className="mt-3 grid gap-3">{controls.filter((control) => control.advanced).map(render)}</div></Collapsible.Content></Collapsible.Root> : null}
     </div>;
 }
 

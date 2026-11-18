@@ -1,11 +1,12 @@
 @import "tailwindcss";
-@import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @source "../../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    --default-transition-duration: var(--motion-color-duration);
+    --default-transition-timing-function: var(--motion-color-easing);
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-border: var(--border);
@@ -154,7 +155,7 @@
         pointer-events: none;
         position: absolute;
         right: 12px;
-        transition: opacity 0.18s ease;
+        transition: opacity var(--motion-fade-duration) var(--motion-fade-easing);
     }
 
     .hover-scrollbar-hint:hover::after {
@@ -226,29 +227,6 @@
         }
     }
 
-    @keyframes canvas-batch-child-in {
-        from {
-            opacity: 0;
-            transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
-        }
-
-        72% {
-            opacity: 1;
-            transform: translate(0, 0) rotate(-1deg) scale(1.015);
-        }
-
-        to {
-            opacity: 1;
-            transform: translate(0, 0) rotate(0) scale(1);
-        }
-    }
-
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-    animation: none;
-    mix-blend-mode: normal;
 }
 
 .agent-streamdown {
@@ -315,7 +293,7 @@
     background: transparent;
     box-shadow: none;
     opacity: 0;
-    transition: opacity 150ms ease;
+    transition: opacity var(--motion-fade-duration) var(--motion-fade-easing);
 }
 
 .agent-streamdown [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],

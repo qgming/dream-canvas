@@ -5,6 +5,8 @@ import { Tooltip } from "@/components/ui/popover";
 import copyToClipboard from "copy-to-clipboard";
 import { CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Trash2, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
+import { useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -32,6 +34,7 @@ export function AgentLogView({
     onCopyBlocked: (text: string) => void;
 }) {
     const { t } = useTranslation();
+    const reduceMotion = useShouldReduceMotion();
     const [mode, setMode] = useState<"text" | "json">("text");
     const [filter, setFilter] = useState<LogFilter>("all");
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -66,10 +69,10 @@ export function AgentLogView({
         const list = listRef.current;
         if (!list) return;
         followLogsRef.current = true;
-        list.scrollTo({ top: list.scrollHeight, behavior });
+        list.scrollTo({ top: list.scrollHeight, behavior: reduceMotion ? "instant" : behavior });
         setShowScrollToBottom(false);
         setNewLogCount(0);
-    }, []);
+    }, [reduceMotion]);
     const handleLastLogToggle = useCallback((open: boolean) => {
         if (!open) {
             requestAnimationFrame(updateScrollState);
@@ -227,32 +230,39 @@ function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof ca
     const { t } = useTranslation();
     const tone = item.level === "error" ? "text-destructive" : item.level === "warning" ? "text-warning" : item.success ? "text-success" : "";
     const Icon = item.level === "error" ? CircleAlert : item.level === "warning" ? TriangleAlert : item.success ? CheckCircle2 : CircleDot;
-    return (
-        <details className="group border-b last:border-b-0" style={{ borderColor: theme.node.stroke }} onToggle={(event) => onToggle?.(event.currentTarget.open)}>
-            <summary className="cursor-pointer list-none px-1 py-2.5 transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current/20 dark:hover:bg-white/10 [&::-webkit-details-marker]:hidden">
-                <div className="flex items-start gap-2.5">
-                    <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} style={tone ? undefined : { color: theme.node.muted }} />
-                    <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                            <span className="shrink-0 font-mono text-xs leading-5" style={{ color: theme.node.faint }}>
-                                {item.time}
-                            </span>
-                            <span className="truncate text-sm font-medium leading-5">{item.title}</span>
-                            {item.count > 1 ? (
-                                <span className="shrink-0 text-xs leading-4" style={{ color: theme.node.muted }}>
-                                    {t("agent.logs.repeated", { count: item.count })}
-                                </span>
-                            ) : null}
-                        </div>
-                        {item.displayText !== item.title ? (
-                            <div className="line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5" style={{ color: theme.node.muted }}>
-                                {item.displayText}
-                            </div>
-                        ) : null}
-                    </div>
-                    <ChevronDown className="mt-1 size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.faint }} />
+    const expandable = Boolean(item.detail.trim());
+    const summary = (
+        <div className="flex items-start gap-2.5">
+            <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} style={tone ? undefined : { color: theme.node.muted }} />
+            <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 font-mono text-xs leading-5" style={{ color: theme.node.faint }}>
+                        {item.time}
+                    </span>
+                    <span className="truncate text-sm font-medium leading-5">{item.title}</span>
+                    {item.count > 1 ? (
+                        <span className="shrink-0 text-xs leading-4" style={{ color: theme.node.muted }}>
+                            {t("agent.logs.repeated", { count: item.count })}
+                        </span>
+                    ) : null}
                 </div>
-            </summary>
+                {item.displayText !== item.title ? (
+                    <div className="line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5" style={{ color: theme.node.muted }}>
+                        {item.displayText}
+                    </div>
+                ) : null}
+            </div>
+            {expandable ? <ChevronDown className="mt-1 size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180" style={{ color: theme.node.faint }} /> : null}
+        </div>
+    );
+    if (!expandable) return <div className="border-b px-1 py-2.5 last:border-b-0" style={{ borderColor: theme.node.stroke }}>{summary}</div>;
+    return <Collapsible.Root className="group border-b last:border-b-0" style={{ borderColor: theme.node.stroke }} onOpenChange={(open) => onToggle?.(open)}>
+        <Collapsible.Trigger asChild>
+            <button type="button" className="w-full px-1 py-2.5 text-left transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current/20 dark:hover:bg-white/10">
+                {summary}
+            </button>
+        </Collapsible.Trigger>
+        <Collapsible.Content>
             <div className="pb-3 pl-[34px] pr-2">
                 <div className="mb-1 text-xs font-medium" style={{ color: theme.node.faint }}>
                     {t("agent.logs.details")}
@@ -261,8 +271,8 @@ function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof ca
                     {item.detail}
                 </pre>
             </div>
-        </details>
-    );
+        </Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 function prepareLogs(logs: AgentEventLog[]) {

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Radio, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
+import { ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Logs, Radio, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -25,6 +25,7 @@ export default function SettingsLayout() {
             { path: "/channels", label: "channels", icon: Cpu },
             { path: "/model-scripts", label: "modelScripts", icon: Code2 },
             { path: "/runtime", label: "runtime", icon: SlidersHorizontal },
+            { path: "/logging", label: "logging", icon: Logs },
             { path: "/storage", label: "storage", icon: Database },
         ] }] : []),
     ];

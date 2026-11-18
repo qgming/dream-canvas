@@ -1,6 +1,6 @@
 # 梦想画布节点插件
 
-在浏览器画布内扩展节点类型，使用画布中的「节点插件」管理器加载。Codex 的 MCP 与 Skill 集成见 [Codex 插件](../codex/README.md)。
+在浏览器画布内扩展节点类型，使用画布中的「节点插件」管理器加载。外部 Agent 统一通过业务服务的远程 MCP 接入，配置方式见 [项目说明](../../README.md#快速开始)；画布节点插件与服务端接口脚本分别管理。
 
 给画布扩展自定义节点。每个插件是一个**独立目录**,用 **TypeScript** 编写,自带 `package.json` / `build.mjs` / `src/index.tsx` / `dist/`,互不耦合,可单独构建、发布、升级。
 
@@ -135,9 +135,9 @@ SDK 导出的 hooks(`useState/useEffect/useMemo/useRef/...`)运行时转发宿�
 
 > `metadata` 的**内置字段**(content、status、model…)是强类型;插件写入的**自定义字段**读出为 `unknown`,按需 `as` 断言(参考 `sticky-note` 的 `pluginColor`)。
 
-`ctx.ai.generateImage` 的 `images` 返回当前账号可访问的稳定资产地址；无需转换成 Base64，可直接预览并保存到节点。生成前会保存目标节点并检查项目版本，保存失败或发生冲突时不提交供应商。完整后端化范围与当前限制见 [Unreleased](../../CHANGELOG.md#已确认的后端化规划待实施)。
+`ctx.ai.generateImage` 的 `images` 返回当前账号可访问的稳定资产地址；无需转换成 Base64，可直接预览并保存到节点。生成前会保存目标节点并检查项目版本，保存失败或发生冲突时不提交供应商。完整后端化范围与当前限制见 [Unreleased](../../CHANGELOG.md#后端化规划实施与验收)。
 
-生成选项统一使用 `parameters` 传递当前渠道模型声明的参数，例如 `ctx.ai.generateVideo(prompt, { model, parameters: { duration: 6 } })`。参数名和类型以管理员配置为准，尺寸、时长与供应商单次返回张数均放在此对象中；不支持未声明参数。缺省值依次取节点已保存值、个人模型默认值、管理员模型默认值，提交前固定到节点与任务记录中。
+生成选项统一使用 `parameters` 传递当前渠道模型声明的参数，例如默认 `/videos` 适配的 `ctx.ai.generateVideo(prompt, { model, parameters: { seconds: 6 } })`。参数名和类型以该模型的有效输入定义为准，尺寸、时长与供应商单次返回张数均放在此对象中；不支持未声明参数。本次明确参数覆盖节点已保存值，仍缺省时依次取管理员模型默认值和脚本默认值，提交前固定到节点与任务记录中。个人偏好不保存默认模型或参数；没有已有选择的入口采用管理员排序中首个启用适用模型，已有失效选择须重新选择，不自动切换渠道。
 
 ### 画布指令集(ctx.applyOps)
 

@@ -10,7 +10,7 @@ import { captureSession } from "./client";
 type VideoMediaOptions = GenerationOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 export type VideoGenerationResult = { assetId: string };
 export type VideoGenerationTask = { id: string; provider: "server"; model: string };
-export type VideoGenerationTaskState = { status: "pending"; error?: string } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
+export type VideoGenerationTaskState = { status: "pending"; error?: string; progress?: number; providerStatus?: string } | { status: "completed"; result: VideoGenerationResult } | { status: "failed" | "confirmation_required"; error: string };
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions) {
     return waitForVideoGenerationTask(config, await createVideoGenerationTask(config, prompt, references, options), options);
@@ -31,8 +31,8 @@ export async function pollVideoGenerationTask(_config: AiConfig, task: VideoGene
     const record = await getGeneration(task.id, options?.signal);
     if (record.status === "succeeded" && record.assetIds[0]) return { status: "completed", result: { assetId: record.assetIds[0] } };
     if (["failed", "cancelled", "interrupted"].includes(record.status)) return { status: "failed", error: record.error || i18n.t("errors.taskIncomplete") };
-    if (record.status === "confirmation_required") return { status: "pending", error: record.error || i18n.t("errors.taskUnconfirmed") };
-    return { status: "pending" };
+    if (record.status === "confirmation_required") return { status: "confirmation_required", error: record.error || i18n.t("errors.taskUnconfirmed") };
+    return { status: "pending", progress: record.progress, providerStatus: record.providerStatus };
 }
 export function isVideoTaskFailed(error: unknown) { return error instanceof GenerationStateError && ["failed", "cancelled", "interrupted"].includes(error.status); }
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {

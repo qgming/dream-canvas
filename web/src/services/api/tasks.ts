@@ -7,12 +7,13 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { inputLabel, inputVisible } from "@/lib/model-inputs";
+import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
 
-export type GenerationTask = { id: string; projectId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; error?: string; text: string; assetIds: string[]; upstreamId?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
+export type GenerationTask = { id: string; projectId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; providerStatus?: string; progress?: number; error?: string; text: string; assetIds: string[]; upstreamId?: string; queryRecoveredBy?: string; queryRecoveredAt?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
 export class GenerationStateError extends Error {
-    constructor(readonly status: string, message: string) { super(message); this.name = "GenerationStateError"; }
+    constructor(readonly status: string, message: string, readonly taskId?: string) { super(message); this.name = "GenerationStateError"; }
 }
-export type GenerationOptions = { signal?: AbortSignal; projectId?: string; nodeId?: string; projectVersion?: number; resultSlotId?: string; batchId?: string };
+export type GenerationOptions = { signal?: AbortSignal; projectId?: string; nodeId?: string; projectVersion?: number; resultSlotId?: string; batchId?: string; onTask?: (task: GenerationTask) => void };
 type GenerationInput = { prompt?: string; messages?: AiTextMessage[]; references?: ReferenceImage[]; videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const submittedTasks = new WeakMap<AbortSignal, Set<string>>();
 const cancelledSignals = new WeakSet<AbortSignal>();
@@ -65,16 +66,21 @@ export const getGeneration = (id: string, signal?: AbortSignal) => apiRequest<Ge
 export const listGenerations = () => apiRequest<GenerationTask[]>("/tasks");
 export const cancelGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 export const resumeGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
+export const recoverGenerationQuery = (task: GenerationTask, upstreamId: string) => apiRequest<GenerationTask>(`/admin/tasks/${encodeURIComponent(task.id)}/recover-query`, jsonRequest("POST", { upstreamId, expectedUpdatedAt: task.updatedAt, confirmed: true }));
 export async function waitForGeneration(task: GenerationTask, options?: GenerationOptions & { onText?: (text: string) => void }): Promise<GenerationTask> {
     const assertSession = captureSession();
     return new Promise((resolve, reject) => {
         let text = "";
+        let latest = task;
         let source: EventSource | undefined;
         let finishing = false;
-        const stop = () => { source?.close(); options?.signal?.removeEventListener("abort", abort); };
+        const stop = () => { source?.close(); options?.signal?.removeEventListener("abort", abort); useGenerationProgressStore.getState().remove(task.id); };
         const abort = () => { stop(); reject(new DOMException(i18n.t("errors.waitStopped"), "AbortError")); };
         const receive = (record: GenerationTask) => {
             try { assertSession(); } catch (error) { stop(); reject(error); return true; }
+            latest = record;
+            useGenerationProgressStore.getState().receive(record);
+            options?.onTask?.(record);
             if (record.text !== text) { options?.onText?.(record.text); text = record.text; }
             if (record.status === "succeeded") {
                 if (finishing) return true;
@@ -91,7 +97,7 @@ export async function waitForGeneration(task: GenerationTask, options?: Generati
             if (["failed", "cancelled", "interrupted", "confirmation_required"].includes(record.status)) {
                 if (finishing) return true;
                 finishing = true; stop();
-                void (async () => { if (record.applied && record.projectId && record.nodeId) await useCanvasStore.getState().acceptTaskVersion(record.id, record.projectId, record.nodeId); throw new GenerationStateError(record.status, record.error || i18n.t("errors.taskNotCompleted")); })().catch(reject);
+                void (async () => { if (record.applied && record.projectId && record.nodeId) await useCanvasStore.getState().acceptTaskVersion(record.id, record.projectId, record.nodeId); throw new GenerationStateError(record.status, record.error || i18n.t("errors.taskNotCompleted"), record.id); })().catch(reject);
                 return true;
             }
             return false;
@@ -100,7 +106,13 @@ export async function waitForGeneration(task: GenerationTask, options?: Generati
         if (receive(task)) return;
         options?.signal?.addEventListener("abort", abort, { once: true });
         source = new EventSource(`/api/tasks/${encodeURIComponent(task.id)}/events`);
-        source.addEventListener("snapshot", (event) => { try { receive(JSON.parse((event as MessageEvent<string>).data) as GenerationTask); } catch { stop(); reject(new Error(i18n.t("errors.taskStateFailed"))); } });
-        source.onerror = () => { if (source?.readyState === EventSource.CLOSED) { stop(); reject(new Error(i18n.t("errors.taskDisconnected"))); } };
+        source.addEventListener("snapshot", (event) => { try { receive(JSON.parse((event as MessageEvent<string>).data) as GenerationTask); } catch { stop(); reject(new GenerationStateError("disconnected", i18n.t("errors.taskStateFailed"), task.id)); } });
+        source.onerror = () => {
+            if (finishing) return;
+            try { assertSession(); } catch (error) { stop(); reject(error); return; }
+            const disconnected = { ...latest, status: "disconnected", error: i18n.t("errors.taskDisconnected") };
+            useGenerationProgressStore.getState().receive(disconnected); options?.onTask?.(disconnected);
+            if (source?.readyState === EventSource.CLOSED) { stop(); reject(new GenerationStateError("disconnected", disconnected.error, task.id)); }
+        };
     });
 }

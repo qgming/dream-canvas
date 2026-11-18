@@ -61,6 +61,30 @@ func (a *App) listModelScripts(c *gin.Context) {
 
 func (a *App) ListModelScripts() ([]ModelScript, error) { rows := []ModelScript{}; err := a.db.Order("builtin DESC, created_at").Find(&rows).Error; return rows, err }
 
+func (a *App) deleteModelScript(c *gin.Context) {
+	var input struct { Version uint64 `json:"version"`; Confirmed bool `json:"confirmed"` }
+	if !bind(c, &input) { return }
+	if err := a.DeleteModelScript(c.Param("adapterId"), input.Version, input.Confirmed); err != nil { respondError(c, err); return }
+	c.Status(204)
+}
+
+func (a *App) DeleteModelScript(adapterID string, version uint64, confirmed bool) error {
+	if !confirmed { return problem(400, "confirmation_required", "请确认删除自建接口脚本及其草稿、发布版本") }
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var script ModelScript
+		if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return err }
+		if script.Builtin { return problem(403, "builtin_readonly", "内置接口脚本不允许删除") }
+		if script.Version != version { return problem(409, "version_conflict", "接口脚本已更新，请重新读取后删除") }
+		var count int64
+		if err := tx.Model(&ChannelModel{}).Where("adapter_id = ?", script.ID).Count(&count).Error; err != nil { return err }
+		if count > 0 { return problem(409, "script_in_use", "仍有渠道模型引用此脚本（含停用模型），请先更换模型使用的脚本后删除") }
+		if err := tx.Delete(&ScriptDraft{}, "adapter_id = ?", script.ID).Error; err != nil { return err }
+		if err := tx.Delete(&ScriptVersion{}, "adapter_id = ?", script.ID).Error; err != nil { return err }
+		return tx.Delete(&script).Error
+	})
+	if err == nil { a.notifyCatalog() }; return err
+}
+
 func (a *App) attachModelScript(snapshot *executionSnapshot) error {
 	if snapshot.Model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "请选择已发布的接口脚本版本") }
 	snapshot.Script = &ScriptVersion{}

@@ -118,9 +118,12 @@ export default function PromptSourcesPage() {
 
     return (
         <section className="space-y-6">
-            <PageHeader title={t("settings.promptSources")} description={t("settings.promptSourcesDescription")} actions={<>
+            <PageHeader stickyActions title={t("settings.promptSources")} description={t("settings.promptSourcesDescription")} actions={<>
+                <span role="status" className="text-xs text-muted-foreground">{saving ? t("settings.savingChanges") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
+                <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
                 <Button variant="ghost" disabled={!hydrated} icon={<RefreshCw className="size-4" />} loading={refreshingAll} onClick={() => void handleRefreshAll()}>{t("config.promptSources.refreshAll")}</Button>
                 <Button variant="default" disabled={!hydrated || saving} icon={<Plus className="size-4" />} onClick={() => setEditingSource(addSource())}>{t("config.promptSources.add")}</Button>
+                <Button type="submit" form="prompt-source-schedule" disabled={!dirty || !hydrated} loading={saving}>{appI18n.t("workspace.saveSources")}</Button>
             </>} />
             {error ? <Alert type="error" title={error} description={appI18n.t("workspace.sourceDraftDescription")} action={<Button disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
             {statusQuery.error ? <Alert type="error" title={statusQuery.error.message} action={<Button onClick={() => void statusQuery.refetch()}>{t("common.retry")}</Button>} /> : null}
@@ -151,21 +154,13 @@ export default function PromptSourcesPage() {
 
             <section>
                 <h2 className="mb-2 text-base font-semibold">{t("config.promptSources.schedule")}</h2>
-                <EditorForm disabled={!hydrated || saving} className="space-y-0">
+                <EditorForm id="prompt-source-schedule" disabled={!hydrated || saving} className="space-y-0" onSubmit={() => usePromptSourceStore.getState().save()}>
                     <Field layout="horizontal" label={t("config.promptSources.interval")} description={t("config.promptSources.scheduleDescription")}>
                         <Choice value={schedule.intervalMinutes} options={intervalOptions} onChange={(value) => updateSchedule("intervalMinutes", value)} />
                     </Field>
                 </EditorForm>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{Object.values(statusQuery.data || {}).some((row) => row.lastSuccessAt) ? t("config.promptSources.lastFetched", { time: formatTime(Object.values(statusQuery.data || {}).map((row) => row.lastSuccessAt || "").sort().at(-1)!, i18n.resolvedLanguage) }) : t("config.promptSources.neverScheduled")}</p>
             </section>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                <span role="status" className="text-xs text-muted-foreground">{saving ? t("settings.savingChanges") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
-                <div className="ml-auto flex items-center gap-2">
-                    <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
-                    <Button variant="default" disabled={!dirty || !hydrated} loading={saving} onClick={() => void usePromptSourceStore.getState().save()}>{appI18n.t("workspace.saveSources")}</Button>
-                </div>
-            </div>
 
             <PromptSourceEditorDrawer open={Boolean(editingSource)} source={editingSource} onSave={handleSave} onClose={() => setEditingSource(null)} />
             <PromptSourceContentModal source={viewingSource} onClose={() => setViewingId("")} />

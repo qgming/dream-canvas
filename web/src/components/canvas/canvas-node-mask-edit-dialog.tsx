@@ -10,6 +10,11 @@ import { useTranslation } from "react-i18next";
 
 import { readImageMeta } from "@/lib/image-utils";
 import { useImageEditorViewport } from "@/components/canvas/use-image-editor-viewport";
+import { PointsEstimate } from "@/components/points-estimate";
+import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
+import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { useEffectiveConfig } from "@/stores/use-config-store";
+import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
@@ -26,8 +31,10 @@ const defaultBrushSize = 100;
 const maskOverlayColor = "#2563eb";
 const maskOverlayAlpha = 0.4;
 
-export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void | Promise<unknown> }) {
+export function CanvasNodeMaskEditDialog({ node, open, onClose, onConfirm }: { node: CanvasNodeData; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void | Promise<unknown> }) {
     const { t } = useTranslation();
+    const config = buildGenerationConfig(useEffectiveConfig(), node, "image");
+    const dataUrl = node.metadata?.content || "";
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement>(null);
@@ -229,7 +236,11 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
     };
 
     return (
-        <Dialog title={t("canvas.editors.maskTitle")} open={open && Boolean(dataUrl)} onClose={onClose} busy={saving} dirty={Boolean(prompt || historySize)} footer={null} width={980}>
+        <Dialog title={t("canvas.editors.maskTitle")} open={open && Boolean(dataUrl)} onClose={onClose} busy={saving} dirty={Boolean(prompt || historySize)} footer={<>
+            <PointsEstimate model={config.model} parameters={config.modelParameters} prompt={t("canvas.projectPage.maskPrompt", { source: imageReferenceLabel(0), mask: imageReferenceLabel(1), prompt: prompt.trim() })} />
+            <Button disabled={saving || !image} icon={<ImagePlus className="size-4" />} onClick={() => void submit(false)}>{t("canvas.editors.maskExport")}</Button>
+            <Button variant="default" disabled={!image} loading={saving} icon={<WandSparkles className="size-4" />} onClick={() => void submit(true)}>{t("canvas.editors.maskGenerate")}</Button>
+        </>} width={980}>
             {readError ? <p role="alert" className="mb-4 text-sm text-destructive">{readError}</p> : null}
             <div className="grid gap-5 lg:grid-cols-[minmax(360px,1fr)_320px]" data-canvas-no-zoom>
                 <div
@@ -338,18 +349,10 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                         {error ? <div role="alert" className="text-xs font-medium text-destructive">{error}</div> : null}
                     </div>
 
-                    <div className="mt-auto flex items-center justify-between gap-2">
+                    <div className="mt-auto">
                         <Button icon={<RotateCcw className="size-4" />} onClick={resetMask}>
                             {t("canvas.editors.reset")}
                         </Button>
-                        <div className="flex items-center gap-2">
-                            <Button disabled={saving || !image} icon={<ImagePlus className="size-4" />} onClick={() => void submit(false)}>
-                                {t("canvas.editors.maskExport")}
-                            </Button>
-                            <Button variant="default" disabled={!image} loading={saving} icon={<WandSparkles className="size-4" />} onClick={() => void submit(true)}>
-                                {t("canvas.editors.maskGenerate")}
-                            </Button>
-                        </div>
                     </div>
                 </div>
             </div>

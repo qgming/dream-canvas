@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -102,7 +104,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 }
 
 func assistantToolAllowed(name string) bool {
-	return !includes([]string{"approval_decide", "asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_runtime_save", "admin_script_test", "admin_script_publish", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
+	return !includes([]string{"approval_decide", "asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_runtime_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
 }
 
 func assistantTools(principal Principal) []map[string]any {
@@ -125,10 +127,12 @@ func (a *App) approvalReady(turn AssistantTurn) bool {
 }
 
 func (a *App) finishAssistant(turn AssistantTurn, status, message string) {
-	a.db.Transaction(func(tx *gorm.DB) error {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Updates(map[string]any{"status": status, "error": message}).Error; err != nil { return err }
 		return tx.Model(&TaskAsset{}).Where("task_id = ?", "turn:"+turn.ID).Update("released", true).Error
 	})
+	fields := []slog.Attr{slog.String("turn_id", turn.ID), slog.String("thread_id", turn.ThreadID), slog.String("status", status), slog.Int("step", turn.Step)}
+	if err != nil { a.logFailure(a.ctx, "assistant.status_save_failed", err, fields...) } else { level := slog.LevelInfo; if status == "failed" || status == "interrupted" { level = slog.LevelWarn }; a.logEvent(a.ctx, level, "assistant.finished", fields...) }
 	a.notify(turn.UserID); a.signalWork()
 }
 
@@ -136,6 +140,7 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	var turn AssistantTurn; var user User
 	if a.db.First(&turn, "id = ?", id).Error != nil { return }
 	if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未开始新模型调用"); return }
+	ctx = withLogContext(ctx, slog.String("turn_id", turn.ID), slog.String("thread_id", turn.ThreadID), slog.String("user_id", turn.UserID))
 	var snapshot assistantSnapshot
 	if json.Unmarshal(turn.Snapshot, &snapshot) != nil { a.finishAssistant(turn, "interrupted", "轮次快照无法读取"); return }
 	if turn.CancelRequested { a.finishAssistant(turn, "cancelled", "轮次已停止"); return }
@@ -152,6 +157,7 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	if err != nil { a.finishAssistant(turn, "failed", "助手参考素材无法准备，请检查私有存储与同步状态；本次未调用模型"); return }
 	if !ready { if turn.Error == "" { a.db.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("error", "等待私有参考素材同步；本次尚未调用模型"); a.notifyTopic(turn.UserID, "assistant") }; return }
 	if a.db.Model(&AssistantTurn{}).Where("id = ? AND status IN ?", turn.ID, []string{"queued", "waiting_approval", "waiting_tasks"}).Updates(map[string]any{"status": "running", "error": ""}).RowsAffected != 1 { return }
+	a.logEvent(ctx, slog.LevelInfo, "assistant.started", slog.Int("step", turn.Step), slog.String("channel_id", turn.ChannelID), slog.String("model_id", turn.ModelID))
 	ctx, cancel := context.WithTimeout(ctx, seconds(snapshot.Execution.Policy.TextSeconds)); defer cancel()
 	if len(snapshot.ApprovalIDs) > 0 {
 		for _, id := range snapshot.ApprovalIDs { var approval Approval
@@ -168,22 +174,41 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 		item := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: identifier(), UserID: turn.UserID, Role: "assistant"}
 		if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &item) }); err != nil { a.finishAssistant(turn, "interrupted", "消息持久保存失败，模型未提交"); return }
 		usageID := fmt.Sprintf("turn:%s:%d", turn.ID, turn.Step)
-		if err := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, nil, snapshot.Execution, "unknown"); err != nil { a.finishAssistant(turn, "interrupted", "用量记录无法建立，模型未提交"); return }
+		usageStartedAt := time.Now()
+		if err := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, nil, snapshot.Execution, "unknown"); err != nil { a.finishAssistant(turn, "interrupted", "用量记录无法建立，模型未提交"); return }
 		principal.User = user
 		tools := assistantTools(principal); if snapshot.Purpose == "skill-draft" { tools = nil }
 		allowedTools := map[string]bool{}; for _, tool := range tools { allowedTools[text(object(tool["function"])["name"])] = true }
-		result, err := a.callText(ctx, turn, snapshot.Execution, messages, parameters, snapshot.Media, tools, func(content string) error {
+		callCtx := withLogContext(ctx, slog.Int("step", turn.Step))
+		a.logEvent(callCtx, slog.LevelDebug, "assistant.model_started", slog.Int("messages", len(messages)), slog.Int("tools", len(tools)))
+		callStarted := time.Now()
+		result, err := a.callText(callCtx, turn, snapshot.Execution, messages, parameters, snapshot.Media, tools, func(content string) error {
 			if content == item.Text { return nil }; item.Text = content
 			if err := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Update("text", content).Error; err != nil { return err }
 			a.notifyTopic(turn.UserID, "assistant"); return nil
 		})
+		fields := []slog.Attr{slog.Int64("duration_ms", time.Since(callStarted).Milliseconds()), slog.Int("text_bytes", len(result.Text)), slog.Int("reasoning_bytes", len(result.Reasoning)), slog.Int("tool_calls", len(result.ToolCalls))}
+		if err != nil { a.logFailure(callCtx, "assistant.model_failed", err, fields...) } else { a.logEvent(callCtx, slog.LevelDebug, "assistant.model_completed", fields...) }
 		if result.Text == "" && item.Text != "" { result.Text = item.Text }
-		usageState := result.UsageState; if usageState == "" { usageState = "actual" }; if err != nil { usageState = "unknown" }
-		detail := map[string]any{"usage": result.Usage, "usageState": usageState, "usageId": usageID, "usageRecordPending": true, "toolCalls": result.ToolCalls, "reasoning": result.Reasoning, "responseItems": result.ResponseItems}
-		if saveErr := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Updates(map[string]any{"text": result.Text, "detail": encode(detail)}).Error; saveErr != nil { a.finishAssistant(turn, "interrupted", "模型响应持久保存失败，用量仍待确认，未重提模型或执行工具"); return }
-		if usageErr := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, result.Usage, snapshot.Execution, usageState); usageErr != nil { a.finishAssistant(turn, "interrupted", "模型已调用，但用量账本保存失败；用量依据已保存并等待后台补记，未执行后续工具或重提模型"); return }
-		detail["usageRecordPending"] = false
-		if saveErr := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Update("detail", encode(detail)).Error; saveErr != nil { a.finishAssistant(turn, "interrupted", "用量确认记录保存失败，未执行后续工具"); return }
+		usageState := result.UsageState; if usageState == "" { usageState = "actual" }; if err != nil || len(result.Usage) == 0 { usageState = "unknown" }; usageState = normalizedUsageState(usageState)
+		var preparation *scriptPreparationError
+		unsubmitted := err != nil && errors.As(err, &preparation)
+		detail := map[string]any{"usage": result.Usage, "usageState": usageState, "usageId": usageID, "usageStartedAt": usageStartedAt, "usageRecordPending": true, "usageUnsubmitted": unsubmitted, "toolCalls": result.ToolCalls, "reasoning": result.Reasoning, "responseItems": result.ResponseItems}
+		saveDetail := func() bool {
+			if saveErr := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Updates(map[string]any{"text": result.Text, "detail": encode(detail)}).Error; saveErr != nil { return false }
+			return true
+		}
+		if unsubmitted {
+			if !saveDetail() { a.finishAssistant(turn, "interrupted", "模型未提交，响应记录保存失败"); return }
+			if usageErr := a.discardUnsubmittedUsage(usageID, turn.UserID); usageErr != nil { a.finishAssistant(turn, "interrupted", "未提交供应商，但用量待确认记录无法清理"); return }
+			detail["usageRecordPending"] = false
+			if !saveDetail() { a.finishAssistant(turn, "interrupted", "未提交供应商，用量标记无法更新"); return }
+		} else {
+			if !saveDetail() { a.finishAssistant(turn, "interrupted", "模型响应持久保存失败，用量仍待确认，未重提模型或执行工具"); return }
+			if usageErr := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, result.Usage, snapshot.Execution, usageState); usageErr != nil { a.finishAssistant(turn, "interrupted", "模型已调用，但用量账本保存失败；用量依据已保存并等待后台补记，未执行后续工具或重提模型"); return }
+			detail["usageRecordPending"] = false
+			if !saveDetail() { a.finishAssistant(turn, "interrupted", "用量确认记录保存失败，未执行后续工具"); return }
+		}
 		if err != nil { if ctx.Err() != nil { a.stopAssistant(turn) } else { a.finishAssistant(turn, "interrupted", providerError(err)) }; return }
 		if result.Status != "completed" { a.finishAssistant(turn, "failed", result.Error); return }
 		callIDs := map[string]bool{}
@@ -205,10 +230,14 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 			if ctx.Err() != nil { a.finishAssistant(turn, "interrupted", "轮次已停止，未执行后续工具"); return }
 			if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未执行后续工具"); return }
 			function := object(call["function"]); arguments := map[string]any{}
+			toolStarted := time.Now()
 			var value any; var toolErr error
 			if !allowedTools[text(function["name"])] { toolErr = problem(403, "tool_not_allowed", "本轮未授权此工具，未执行操作")
 			} else if json.Unmarshal([]byte(text(function["arguments"])), &arguments) != nil { toolErr = errors.New("工具参数不是有效 JSON")
 			} else { principal.User = user; value, toolErr = a.CallBusiness(ctx, principal, text(function["name"]), arguments) }
+			toolFields := []slog.Attr{slog.Int("step", turn.Step), slog.String("tool_call_id_hash", digest(text(call["id"]))), slog.Int64("duration_ms", time.Since(toolStarted).Milliseconds()), slog.Bool("allowed", allowedTools[text(function["name"])])}
+			if allowedTools[text(function["name"])] { toolFields = append(toolFields, slog.String("tool", text(function["name"]))) }
+			if toolErr != nil { a.logFailure(ctx, "assistant.tool_failed", toolErr, toolFields...) } else { a.logEvent(ctx, slog.LevelDebug, "assistant.tool_completed", toolFields...) }
 			if toolErr != nil { value = map[string]any{"error": "工具执行失败，请核对权限、版本与参数"}; var p *Problem; if errors.As(toolErr, &p) { value = map[string]any{"code": p.Code, "error": p.Message} } }
 			created, newProject := value.(Project); newProject = newProject && toolErr == nil && function["name"] == "project_create" && turn.ProjectID == ""
 			if newProject { turn.ProjectID, principal.TargetProjectID = created.ID, created.ID }
@@ -228,7 +257,7 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 		update := a.db.Model(&AssistantTurn{}).Where("id = ? AND status = ? AND cancel_requested = ?", turn.ID, "running", false).Updates(map[string]any{"snapshot": encode(snapshot), "step": turn.Step, "status": nextStatus})
 		if update.Error != nil { a.finishAssistant(turn, "interrupted", "轮次状态保存失败，未重复执行"); return }; if update.RowsAffected != 1 { a.stopAssistant(turn); return }
 		a.notify(turn.UserID)
-		if nextStatus != "running" { return }
+		if nextStatus != "running" { a.logEvent(ctx, slog.LevelInfo, "assistant.waiting", slog.String("status", nextStatus), slog.Int("step", turn.Step)); return }
 		if len(result.ToolCalls) == 0 { a.finishAssistant(turn, "succeeded", result.Error); return }
 	}
 }

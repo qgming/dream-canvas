@@ -109,10 +109,10 @@ type ChannelModel struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-type ModelDefaults struct {
+type ModelOrdering struct {
 	ID uint `json:"-" gorm:"primaryKey"`
 	Version uint64 `json:"version"`
-	Models JSON `json:"models" gorm:"type:blob"`
+	Orders JSON `json:"orders" gorm:"type:blob"`
 }
 
 type ScriptDraft struct {
@@ -193,6 +193,11 @@ type GenerationTask struct {
 	Input JSON `json:"input" gorm:"type:blob"`
 	Status string `json:"status" gorm:"index"`
 	UpstreamID string `json:"upstreamId,omitempty"`
+	ProviderStatus string `json:"providerStatus,omitempty"`
+	Progress *float64 `json:"progress,omitempty"`
+	QueryStartedAt *time.Time `json:"-"`
+	QueryRecoveredBy string `json:"queryRecoveredBy,omitempty"`
+	QueryRecoveredAt *time.Time `json:"queryRecoveredAt,omitempty"`
 	Text string `json:"text"`
 	AssetIDs JSON `json:"assetIds" gorm:"type:blob"`
 	SaveState string `json:"saveState"`
@@ -336,6 +341,7 @@ type UsageEntry struct {
 	Currency string `json:"currency"`
 	CostState string `json:"costState"`
 	PointsMilli *int64 `json:"pointsMilli"`
+	StartedAt time.Time `json:"startedAt" gorm:"index"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

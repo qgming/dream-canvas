@@ -17,6 +17,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { decodeChannelModel, resolveModelParameters, useEffectiveConfig } from "@/stores/use-config-store";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
+import { PointsEstimate } from "@/components/points-estimate";
 import { Popover } from "@/components/ui/popover";
 import { AgentPanelTabs } from "./agent-panel-tabs";
 import { AgentChatTimeline } from "./agent-chat";
@@ -66,7 +67,8 @@ export function AssistantPanelContent() {
     const prompt = useAgentStore((state) => state.prompt);
     const model = useAgentStore((state) => state.model);
     const modelParameters = useAgentStore((state) => state.modelParameters);
-    const selectedModel = model || config.textModel;
+    const selectedModel = model || config.assistantModel;
+    useEffect(() => { if (!useAgentStore.getState().model && config.assistantModel) useAgentStore.setState({ model: config.assistantModel }); }, [config.assistantModel]);
     const selected = decodeChannelModel(selectedModel);
     const modelEntry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text" && entry.features.tools);
     const attachments = useAgentStore((state) => state.attachments);
@@ -205,7 +207,7 @@ export function AssistantPanelContent() {
                 {!snapshot && !loading ? <p className="px-5 pt-8 text-sm leading-6" style={{ color: theme.node.muted }}>{appI18n.t("workspace.assistantBoundary")}</p> : null}
                 {snapshot?.approvals.map((approval) => <Alert key={approval.id} type="warning" className="mx-4 mt-3" title={appI18n.t(approval.action === "delete_asset" ? "workspace.globalDeleteAsset" : "workspace.deleteProject")} description={approval.targetId} action={<div className="flex gap-2"><Button size="sm" disabled={Boolean(deciding)} onClick={async () => { setDeciding(approval.id); try { await decideApproval(approval.id, false); await openThread(activeId, false); } catch (error) { showError(error); } finally { setDeciding(""); } }}>{appI18n.t("workspace.reject")}</Button><Button size="sm" variant="destructive" disabled={Boolean(deciding)} loading={deciding === approval.id} onClick={async () => { setDeciding(approval.id); try { await decideApproval(approval.id, true); await openThread(activeId, false); } catch (error) { showError(error); } finally { setDeciding(""); } }}>{appI18n.t("workspace.confirm")}</Button></div>} />)}
                 <AgentChatTimeline visible={tab === "chat"} theme={theme} pendingTool={null} pendingApprovals={[]} sending={submitting} waiting={Boolean(running)} onRejectTool={() => {}} onApproveTool={() => {}} onApprovalDecision={() => {}} />
-                <AgentChatComposer theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={loading} placeholder={appI18n.t("workspace.assistantPrompt")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined} onAddFiles={async (files) => {
+                <AgentChatComposer estimate={<PointsEstimate model={selectedModel} parameters={modelParameters[selectedModel]} prompt={prompt} />} theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={loading} placeholder={appI18n.t("workspace.assistantPrompt")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined} onAddFiles={async (files) => {
                     const assertSession = captureSession();
                     try { for (const file of Array.from(files || [])) { assertSession(); const image = await uploadImage(file); assertSession(); useAgentStore.setState((state) => ({ attachments: [...state.attachments, { id: nanoid(), name: file.name, type: image.mimeType, size: image.bytes, width: image.width, height: image.height, url: image.url, dataUrl: image.url }] })); } }
                     catch (error) { showError(error); }

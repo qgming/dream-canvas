@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"io"
+	"log/slog"
 	"mime"
 	"math/big"
 	"net/http"
@@ -82,9 +83,10 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 	var result providerResult
 	if json.Unmarshal(task.Result, &result) != nil { a.taskProblem(task, "confirmation_required", "供应商结果记录无法读取，不能重新生成", false); return }
 	if task.Capability != "text" && includes([]string{"failed", "cancelled", "confirmation_required"}, result.Status) && result.URL == "" && result.ResponseFile == "" {
-		usageState := result.UsageState; if usageState == "" { usageState = "actual" }; if result.Status == "confirmation_required" { usageState = "unknown" }
+		usageState := result.UsageState; if usageState == "" { usageState = "actual" }; usageState = normalizedUsageState(usageState); if result.Status == "confirmation_required" { usageState = "unknown" }
 		if len(result.Usage) == 0 { usageState = "unknown" }
-		if err := a.recordUsage("task:"+task.ID, task, "", result.Usage, snapshot, usageState); err != nil { a.taskSaveFailed(task, snapshot, err); return }
+		startedAt := time.Now(); if task.StartedAt != nil { startedAt = *task.StartedAt }
+		if err := a.recordUsage("task:"+task.ID, task, "", startedAt, result.Usage, snapshot, usageState); err != nil { a.taskSaveFailed(task, snapshot, err); return }
 		if err := a.db.Model(&task).Updates(map[string]any{"usage_state": usageState, "save_state": "", "sync_state": ""}).Error; err != nil { a.taskSaveFailed(task, snapshot, err); return }
 		a.taskProblem(task, result.Status, result.Error, result.Status != "confirmation_required"); return
 	}
@@ -112,13 +114,17 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 				if err != nil { a.taskSaveFailed(task, snapshot, err); return }
 				usage, decodeErr := readImageResults(file, save); file.Close(); err = decodeErr
 				if err != nil { a.taskSaveFailed(task, snapshot, err); return }
-				if len(usage) > 0 { result.Usage = usage }
+				if len(usage) > 0 {
+					requests := result.Usage["requests"]
+					result.Usage = usage
+					if requests != nil { result.Usage["requests"] = requests }
+				}
 			}
 		}
 		if len(ids) == 0 { a.taskProblem(task, "confirmation_required", "供应商没有提供可保存成品，未重新生成", false); return }
 	}
 	if result.Usage == nil { result.Usage = map[string]any{} }
-	usageState := result.UsageState; if usageState == "" { usageState = "actual" }
+	usageState := result.UsageState; if usageState == "" { usageState = "actual" }; usageState = normalizedUsageState(usageState)
 	if task.Capability == "image" { result.Usage["images"] = len(ids) }
 	if task.Capability == "video" && result.Usage["seconds"] == nil {
 		duration := int64(0); known := len(ids) > 0
@@ -126,7 +132,8 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 		if known { result.Usage["seconds"] = new(big.Rat).SetFrac(big.NewInt(duration), big.NewInt(1000)).FloatString(3) } else { var input generationInput; _ = json.Unmarshal(task.Input, &input); var p map[string]any; _ = json.Unmarshal(input.Parameters, &p); value := p["seconds"]; if value == nil { value = p["duration"] }; if value != nil { result.Usage["seconds"] = value; usageState = "estimated" } }
 	}
 	if len(result.Usage) == 0 { usageState = "unknown" }
-	if err := a.recordUsage("task:"+task.ID, task, "", result.Usage, snapshot, usageState); err != nil { a.taskSaveFailed(task, snapshot, err); return }
+	startedAt := time.Now(); if task.StartedAt != nil { startedAt = *task.StartedAt }
+	if err := a.recordUsage("task:"+task.ID, task, "", startedAt, result.Usage, snapshot, usageState); err != nil { a.taskSaveFailed(task, snapshot, err); return }
 	status := "succeeded"; if result.Status == "incomplete" { status = "failed" } else if includes([]string{"failed", "cancelled", "confirmation_required"}, result.Status) { status = result.Status }
 	if status != "succeeded" { task.Status, task.Error = status, result.Error }
 	if status != "confirmation_required" && !task.Applied { if err := a.applyTaskResult(task, ids, result.Text); err != nil { a.taskSaveFailed(task, snapshot, err); return } }
@@ -135,6 +142,7 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 		if terminalTask(status) { return tx.Model(&TaskAsset{}).Where("task_id = ?", task.ID).Update("released", true).Error }; return nil
 	})
 	if err != nil { return }
+	a.logEvent(ctx, slog.LevelInfo, "task.finished", slog.String("task_id", task.ID), slog.String("status", status), slog.Int("assets", len(ids)), slog.String("usage_state", usageState))
 	if len(ids) > 0 { a.refreshTaskSync(ids[0]) }
 	a.notify(task.UserID); a.signalWork()
 }

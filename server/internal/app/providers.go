@@ -31,6 +31,7 @@ type executionSnapshot struct {
 type providerResult struct {
 	UpstreamID string `json:"upstreamId,omitempty"`
 	Status string `json:"status"`
+	Progress *float64 `json:"progress,omitempty"`
 	Text string `json:"text,omitempty"`
 	URL string `json:"url,omitempty"`
 	ResponseFile string `json:"responseFile,omitempty"`
@@ -137,12 +138,10 @@ func definitiveRejection(err error) bool {
 }
 
 func (a *App) callText(ctx context.Context, turn AssistantTurn, snapshot executionSnapshot, messages []map[string]any, parameters map[string]any, references []assetInput, tools []map[string]any, onText func(string) error) (providerResult, error) {
-    parameters, err := resolveParameters(snapshot.Model.Parameters, parameters); if err != nil { return providerResult{}, err }
     input := assistantInput(assistantSnapshot{Execution: snapshot, Messages: messages, Parameters: parameters, Media: references})
-    if err := a.validateScriptInput(turn.UserID, snapshot, input, tools); err != nil { return providerResult{}, err }
     task := GenerationTask{UserID: turn.UserID, Capability: "text"}
-    arguments, err := a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, err }; arguments["tools"] = tools
-    return a.executeModelScript(ctx, task, "turn:"+turn.ID, snapshot, arguments, false, onText)
+    arguments, err := a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, &scriptPreparationError{cause: err} }; arguments["tools"] = tools
+    return a.executeModelScript(ctx, task, "turn:"+turn.ID, snapshot, arguments, false, func(state map[string]any) error { if onText == nil { return nil }; return onText(text(state["text"])) })
 }
 
 func (a *App) persistProviderResponse(id string, body io.ReadCloser) (providerResult, error) {

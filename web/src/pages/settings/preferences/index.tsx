@@ -34,9 +34,13 @@ export default function PreferencesPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader title={t("settings.preferences")} description={t("settings.preferencesDescription")} />
+            <PageHeader stickyActions title={t("settings.preferences")} description={t("settings.preferencesDescription")} actions={<>
+                <span role="status" className="text-xs text-muted-foreground">{saving ? appI18n.t("workspace.savePreferences") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
+                <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
+                <Button type="submit" form="preferences-form" disabled={!hydrated || !dirty || conflict} loading={saving}>{t("common.save")}</Button>
+            </>} />
             {error ? <Alert type="error" title={error} action={<Button onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
-            <EditorForm disabled={!hydrated || saving} className="space-y-8">
+            <EditorForm id="preferences-form" disabled={!hydrated || saving} className="space-y-8" onSubmit={() => useConfigStore.getState().save()}>
                 <section>
                     <h2 className="mb-2 text-base font-semibold">{t("config.preferences.generation")}</h2>
                     <div>
@@ -65,13 +69,6 @@ export default function PreferencesPage() {
                     </div>
                 </section>
             </EditorForm>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                <span role="status" className="text-xs text-muted-foreground">{saving ? appI18n.t("workspace.savePreferences") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
-                <div className="ml-auto flex items-center gap-2">
-                    <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
-                    <Button variant="default" disabled={!hydrated || !dirty || conflict} loading={saving} onClick={() => void useConfigStore.getState().save()}>{t("common.save")}</Button>
-                </div>
-            </div>
         </section>
     );
 }

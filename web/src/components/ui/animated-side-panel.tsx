@@ -1,6 +1,7 @@
-import { motion, useReducedMotion, type HTMLMotionProps } from "motion/react";
+import { motion, type HTMLMotionProps } from "motion/react";
+import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { cn } from "@/lib/utils";
-import { SIDE_PANEL_ENTER_X, SIDE_PANEL_EXIT_X, sidePanelTransition } from "@/lib/side-panel-motion";
+import { SIDE_PANEL_ENTER_X, SIDE_PANEL_EXIT_X } from "@/lib/side-panel-motion";
 
 type Props = Omit<HTMLMotionProps<"aside">, "initial" | "animate" | "transition"> & {
     open: boolean;
@@ -12,8 +13,9 @@ type Props = Omit<HTMLMotionProps<"aside">, "initial" | "animate" | "transition"
 };
 
 export function AnimatedSidePanel({ open, width, collapsedWidth = 0, animateOnMount = false, resizing, className, panelClassName, children, ...props }: Props) {
-    const reducedMotion = useReducedMotion();
-    const transition = { ...sidePanelTransition, duration: resizing || reducedMotion ? 0 : sidePanelTransition.duration };
+    const reducedMotion = useShouldReduceMotion();
+    const tokens = useMotionTokens();
+    const transition = resizing || reducedMotion ? tokens.transition.instant : tokens.transition.collapse;
     const hidden = !open && collapsedWidth === 0;
     const enter = animateOnMount && !reducedMotion;
     return <motion.div

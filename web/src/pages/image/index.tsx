@@ -1,5 +1,5 @@
 import appI18n from "@/i18n";
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, LoaderCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, PanelLeftClose, PanelLeftOpen, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
@@ -23,6 +23,7 @@ import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
+import { PointsEstimate } from "@/components/points-estimate";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
@@ -31,6 +32,9 @@ import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
+import { GenerationProgress } from "@/components/generation-progress";
+import { GenerationStateError, type GenerationOptions, type GenerationTask } from "@/services/api/tasks";
+import { Link } from "react-router-dom";
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -52,7 +56,9 @@ type GeneratedImage = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed";
+    status: "pending" | "success" | "failed" | "confirmation_required" | "disconnected";
+    taskState?: GenerationTask;
+    taskId?: string;
     image?: GeneratedImage;
     error?: string;
 };
@@ -70,8 +76,10 @@ type GenerationLog = {
     durationMs: number;
     successCount: number;
     failCount: number;
+    pendingCount?: number;
+    taskIds?: string[];
     imageCount: number;
-    status: "success" | "failed";
+    status: "success" | "failed" | "confirmation_required";
     images: GeneratedImage[];
 };
 
@@ -127,10 +135,12 @@ export default function ImagePage() {
     const agentTaskIdRef = useRef<string | undefined>(undefined);
     const assertSession = useRef(captureSession()).current;
     const draftDirty = JSON.stringify({ prompt, references, parameters, model: selectedModel }) !== savedDraft;
-    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
+    const initialModel = useRef("");
+    const discardDraft = useCallback(() => { initialModel.current = ""; setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
     useEditGuard(draftDirty || running, discardDraft);
 
-    const model = selectedModel ?? effectiveConfig.imageModel;
+    if (!initialModel.current && effectiveConfig.imageModel) initialModel.current = effectiveConfig.imageModel;
+    const model = selectedModel ?? initialModel.current;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
@@ -218,14 +228,16 @@ export default function ImagePage() {
         try { assertSession(); } catch { return; }
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage[]> => item.status === "fulfilled").flatMap((item) => item.value);
         const successCount = successImages.length;
-        const failCount = result.filter((item) => item.status === "rejected").length;
+        const pendingTask = (item: PromiseSettledResult<GeneratedImage[]>): item is PromiseRejectedResult => item.status === "rejected" && item.reason instanceof GenerationStateError && ["confirmation_required", "disconnected"].includes(item.reason.status);
+        const pendingTasks = result.filter(pendingTask);
+        const failCount = result.filter((item) => item.status === "rejected" && !pendingTask(item)).length;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
         const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? t("workbench.generationFailed") : undefined;
         if (agentTaskId) updateAgentTask(agentTaskId, { status: successCount ? "succeeded" : "failed", successCount, failCount, error: successCount ? undefined : error });
 
         try {
-            saveLog(
-                buildLog({
+            saveLog({
+                ...buildLog({
                     prompt: text,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
@@ -233,11 +245,14 @@ export default function ImagePage() {
                     durationMs: performance.now() - batchStartedAt,
                     successCount,
                     failCount,
-                    status: successCount ? "success" : "failed",
+                    status: pendingTasks.length ? "confirmation_required" : successCount ? "success" : "failed",
                     images: successImages,
                 }),
-            );
-            successCount ? notify.success(t("imageWorkbench.generated")) : notify.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+                pendingCount: pendingTasks.length,
+                imageCount: successImages.length + failCount + pendingTasks.length,
+                taskIds: pendingTasks.map((item) => (item.reason as GenerationStateError).taskId).filter((id): id is string => Boolean(id)),
+            });
+            pendingTasks.length ? notify.warning(t("workspace.confirmationRequired")) : successCount ? notify.success(t("imageWorkbench.generated")) : notify.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
         } finally {
             runRef.current = false;
             setRunning(false);
@@ -339,7 +354,7 @@ export default function ImagePage() {
         setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} }, model: log.model }));
         setSelectedModel(log.model);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setResults([...log.images.map((image): GenerationResult => ({ id: image.id, status: "success", image })), ...(log.taskIds || []).map((taskId): GenerationResult => ({ id: taskId, taskId, status: "confirmation_required", error: t("workspace.pendingOutcome") }))]);
     });
 
     const buildRequestSnapshot = () => {
@@ -360,7 +375,8 @@ export default function ImagePage() {
         const itemStartedAt = performance.now();
         try {
             assertSession();
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const options: GenerationOptions = { onTask: (taskState) => setResults((value) => updateResult(value, slotId, { taskState, taskId: taskState.id })) };
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, options) : await requestGeneration(snapshot.config, snapshot.text, options);
             if (!result.length) throw new Error(t("imageWorkbench.missingResult"));
             const images: GeneratedImage[] = [];
             for (const image of result) {
@@ -371,7 +387,8 @@ export default function ImagePage() {
             setResults((value) => value.flatMap((slot) => slot.id === slotId ? images.map((image, index) => ({ id: index === 0 ? slotId : image.id, status: "success" as const, image })) : [slot]));
             return images;
         } catch (error) {
-            setResults((value) => updateResult(value, slotId, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            const status = error instanceof GenerationStateError && ["confirmation_required", "disconnected"].includes(error.status) ? error.status as "confirmation_required" | "disconnected" : "failed";
+            setResults((value) => updateResult(value, slotId, { status, error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
             throw error;
         }
     };
@@ -380,7 +397,7 @@ export default function ImagePage() {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
         setPreviewLog(null);
-        setResults((value) => updateResult(value, slotId, { status: "pending", error: undefined, image: undefined }));
+        setResults((value) => updateResult(value, slotId, { status: "pending", error: undefined, image: undefined, taskState: undefined, taskId: undefined }));
         const retryStartedAt = performance.now();
         try {
             const images = await runGenerationSlot(slotId, snapshot);
@@ -524,6 +541,7 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
+                            <div className="mb-2 flex justify-end"><PointsEstimate model={model} parameters={parameters[model]} prompt={prompt} requests={generationCount} /></div>
                             <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
@@ -542,10 +560,12 @@ export default function ImagePage() {
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                    ) : ["confirmation_required", "disconnected"].includes(result.status) ? (
+                                        <div key={result.id} className="flex aspect-square flex-col items-center justify-center gap-4 rounded-lg border border-warning/25 p-5"><GenerationProgress task={{ ...result.taskState, status: result.status, error: result.error }} /><Link className="text-xs underline" to={`/tasks?taskId=${encodeURIComponent(result.taskId || "")}`}>{t("workspace.taskDetails")}</Link></div>
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(result.id)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} task={result.taskState} />
                                     ),
                                 )}
                             </div>
@@ -661,8 +681,7 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
-    const { t } = useTranslation();
+function PendingImageCard({ task }: { task?: GenerationTask }) {
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-border bg-muted  ">
             <div
@@ -673,8 +692,7 @@ function PendingImageCard() {
                 }}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>{t("workbench.generating")}</span>
+                <GenerationProgress task={task} />
             </div>
         </div>
     );
@@ -798,6 +816,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                                 {t("workbench.failCount", { count: log.failCount })}
                             </Tag>
                         ) : null}
+                        {log.pendingCount ? <Tag color="warning">{t("workspace.confirmationRequired")} {log.pendingCount}</Tag> : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{t("workbench.itemCount", { count: log.imageCount })}</Tag>

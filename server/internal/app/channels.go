@@ -51,15 +51,20 @@ func (a *App) listChannels(c *gin.Context) {
 }
 
 func (a *App) ListChannels() ([]gin.H, error) {
-	channels := []Channel{}
-	models := []ChannelModel{}
-	if err := a.db.Order("created_at").Find(&channels).Error; err != nil { return nil, err }
-	if err := a.db.Order("created_at").Find(&models).Error; err != nil { return nil, err }
-	for index := range models { if err := hydrateModel(a.db, &models[index]); err != nil { return nil, err } }
+	ordering, data, err := readModelOrdering(a.db)
+	if err != nil { return nil, err }
+	channels := make([]Channel, 0, len(data.channels))
+	channelByID := map[string]Channel{}; for _, channel := range data.channels { channelByID[channel.ID] = channel }
+	for _, id := range ordering.Orders["channels"] { if channel, ok := channelByID[id]; ok { channels = append(channels, channel) } }
+	modelByID := map[string]ChannelModel{}; for _, model := range data.models { modelByID[model.ID] = model }
 	result := []gin.H{}
 	for _, channel := range channels {
-		entries := []ChannelModel{}
-		for _, model := range models { if model.ChannelID == channel.ID { entries = append(entries, model) } }
+		entries := []gin.H{}
+		for _, id := range ordering.Orders["channel:"+channel.ID] {
+			model, ok := modelByID[id]; if !ok || model.ChannelID != channel.ID { continue }
+			if err := hydrateModel(a.db, &model); err != nil { return nil, err }
+			entries = append(entries, gin.H{"id": model.ID, "channelId": model.ChannelID, "model": model.Model, "name": model.Name, "capability": model.Capability, "adapterId": model.AdapterID, "adapterVersionId": model.AdapterVersionID, "enabled": model.Enabled, "version": model.Version, "parameterOverrides": model.ParameterOverrides, "parameters": model.Parameters, "pricing": model.Pricing, "features": modelFeatures(a.db, model), "createdAt": model.CreatedAt, "updatedAt": model.UpdatedAt})
+		}
 		result = append(result, gin.H{"channel": channel, "hasCredential": channel.Secret != "", "models": entries})
 	}
 	return result, nil
@@ -101,28 +106,45 @@ func (a *App) modelCatalog(c *gin.Context) {
 }
 
 func (a *App) ModelCatalog() (gin.H, error) {
-	var defaults ModelDefaults
 	result := []gin.H{}
+	var ordering modelOrderingView
 	err := a.db.Transaction(func(tx *gorm.DB) error {
-		channels := []Channel{}
-		models := []ChannelModel{}
-		if err := tx.Where("enabled = ?", true).Order("created_at").Find(&channels).Error; err != nil { return err }
-		if err := tx.Where("enabled = ?", true).Order("created_at").Find(&models).Error; err != nil { return err }
-		for index := range models { if err := hydrateModel(tx, &models[index]); err != nil { return err } }
+		var data modelOrderingData
 		var err error
-		defaults, err = readModelDefaults(tx)
-		if err != nil { return err }
-		for _, channel := range channels {
-			if channel.Secret == "" { continue }
+		ordering, data, err = readModelOrdering(tx); if err != nil { return err }
+		pointsRatio := pointsRatioFromDB(tx)
+		channelByID := map[string]Channel{}; for _, channel := range data.channels { if channel.Enabled && channel.Secret != "" { channelByID[channel.ID] = channel } }
+		modelByID := map[string]ChannelModel{}; features := map[string]JSON{}
+		for _, model := range data.models {
+			if !model.Enabled || model.AdapterVersionID == "" { continue }
+			if _, ok := channelByID[model.ChannelID]; !ok { continue }
+			if err := hydrateModel(tx, &model); err != nil { continue }
+			modelByID[model.ID] = model; features[model.ID] = modelFeatures(tx, model)
+		}
+		visible := map[string][]string{"channels": []string{}, "image": []string{}, "video": []string{}, "text": []string{}, "audio": []string{}, "assistant": []string{}}
+		for _, channelID := range ordering.Orders["channels"] {
+			if _, ok := channelByID[channelID]; !ok { continue }
+			models := []string{}; for _, id := range ordering.Orders["channel:"+channelID] { if _, ok := modelByID[id]; ok { models = append(models, id) } }
+			if len(models) == 0 { continue }
+			visible["channels"] = append(visible["channels"], channelID)
+			visible["channel:"+channelID] = models
+		}
+		for _, capability := range []string{"image", "video", "text", "audio", "assistant"} {
+			for _, id := range ordering.Orders[capability] { if _, ok := modelByID[id]; ok { visible[capability] = append(visible[capability], id) } }
+		}
+		ordering.Orders = visible
+		for _, channelID := range visible["channels"] {
+			channel := channelByID[channelID]
 			entries := []gin.H{}
-			for _, model := range models {
-				if model.ChannelID == channel.ID && model.AdapterVersionID != "" { entries = append(entries, gin.H{"id": model.ID, "model": model.Model, "name": model.Name, "adapterId": model.AdapterID, "capability": model.Capability, "features": modelFeatures(tx, model), "parameters": model.Parameters, "pricing": model.Pricing, "version": model.Version}) }
+			for _, id := range visible["channel:"+channel.ID] {
+				model := modelByID[id]
+				entries = append(entries, gin.H{"id": model.ID, "model": model.Model, "name": model.Name, "adapterId": model.AdapterID, "capability": model.Capability, "features": features[id], "parameters": model.Parameters, "pricing": projectPublicModelPricing(model.Pricing, pointsRatio), "version": model.Version})
 			}
 			if len(entries) > 0 { result = append(result, gin.H{"id": channel.ID, "name": channel.Name, "models": entries}) }
 		}
 		return nil
 	})
-	return gin.H{"channels": result, "defaults": defaults}, err
+	return gin.H{"version": ordering.Version, "orders": ordering.Orders, "channels": result}, err
 }
 
 type channelInput struct { Name string `json:"name"`; BaseURL string `json:"baseUrl"`; Credential *string `json:"credential"`; Enabled bool `json:"enabled"`; Version uint64 `json:"version"` }
@@ -292,7 +314,7 @@ func (a *App) prepareChannelModel(input ChannelModel) (ChannelModel, error) {
     if len(input.Pricing) == 0 { input.Pricing = JSON(`{}`) }
     var pricing map[string]any
     if json.Unmarshal(input.Pricing, &pricing) != nil || pricing == nil { return input, problem(400, "invalid_pricing", "价格定义需要对象") }
-    if err := validatePricing(pricing); err != nil { return input, err }
+    if err := validatePricing(input.Pricing, input.Parameters); err != nil { return input, err }
     input.Model, input.Name = strings.TrimSpace(input.Model), strings.TrimSpace(input.Name)
     return input, nil
 }
@@ -300,6 +322,8 @@ func (a *App) prepareChannelModel(input ChannelModel) (ChannelModel, error) {
 func writeChannelModel(tx *gorm.DB, channelID, modelID string, input ChannelModel) (ChannelModel, error) {
     var channel Channel; var model ChannelModel
     if err := tx.First(&channel, "id = ?", channelID).Error; err != nil { return model, err }
+    var selected ScriptVersion
+    if err := tx.First(&selected, "id = ? AND adapter_id = ?", input.AdapterVersionID, input.AdapterID).Error; err != nil { if errors.Is(err, gorm.ErrRecordNotFound) { return model, problem(409, "script_version_missing", "接口脚本已删除或发布版本不可用，请重新选择") }; return model, err }
     var count int64
     if err := tx.Model(&ChannelModel{}).Where("channel_id = ? AND model = ? AND id <> ?", channel.ID, input.Model, modelID).Count(&count).Error; err != nil { return model, err }
     if count > 0 { return model, problem(409, "model_exists", "同一渠道不能重复配置相同模型 ID："+input.Model) }

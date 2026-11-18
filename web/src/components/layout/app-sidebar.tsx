@@ -1,5 +1,6 @@
 import { useContext, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { EditGuardContext } from "@/hooks/use-edit-guard";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
 import { Menu } from "@/components/ui/popover";
@@ -13,7 +14,6 @@ import { useTranslation } from "react-i18next";
 
 import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
-import { sidePanelTransition } from "@/lib/side-panel-motion";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -29,8 +29,9 @@ export function AppSidebar() {
     const sidebarCollapsed = useAppUiStore((state) => state.sidebarCollapsed);
     const toggleSidebar = useAppUiStore((state) => state.toggleSidebar);
     const user = useAuthStore((state) => state.user);
-    const reducedMotion = useReducedMotion();
-    const transition = { ...sidePanelTransition, duration: reducedMotion ? 0 : sidePanelTransition.duration };
+    const reducedMotion = useShouldReduceMotion();
+    const tokens = useMotionTokens();
+    const transition = reducedMotion ? tokens.transition.instant : tokens.transition.collapse;
     const mobile = useMediaQuery("(max-width: 767px)");
     const compact = useMediaQuery("(max-width: 1199px)");
     const collapsed = mobile ? !mobileOpen : compact ? !compactExpanded : sidebarCollapsed;

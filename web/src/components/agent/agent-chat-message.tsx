@@ -1,5 +1,7 @@
 import appI18n from "@/i18n";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
+import { motionTokens, toCssTiming, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/ui/media-preview";
@@ -26,7 +28,7 @@ const streamdownProps = () => ({
         close: tr("close"), copied: tr("copied"), copyCode: tr("copyCode"), copyLink: tr("copyLink"), externalLinkWarning: tr("externalWarning"), openExternalLink: tr("openExternal"), openLink: tr("continueOpen"),
     },
 } as const);
-const streamdownAnimation = { duration: 20, stagger: 0, sep: "word" } as const;
+const streamdownAnimation = { ...toCssTiming(motionTokens.transition.fade), stagger: 0, sep: "word" } as const;
 
 function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProps) {
     const { t } = useTranslation();
@@ -93,6 +95,7 @@ export type AgentChatMessageItem = {
 
 export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
     useTranslation();
+    const reducedMotion = useShouldReduceMotion();
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "var(--destructive)" : item.role === "tool" ? "var(--info)" : theme.node.text;
@@ -119,7 +122,7 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
                 {isUser ? (
                     <AgentUserMessageContent text={item.text} references={item.canvasReferences || []} skill={item.skill} theme={theme} />
                 ) : (
-                    <Streamdown {...streamdownProps()} animated={streamdownAnimation} isAnimating={!!item.streamId}>{item.text}</Streamdown>
+                    <Streamdown {...streamdownProps()} animated={reducedMotion ? false : streamdownAnimation} isAnimating={!!item.streamId}>{item.text}</Streamdown>
                 )}
                 {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} alignRight={isUser} /> : null}
                 {item.meta ? <div className={`mt-1 text-xs tabular-nums opacity-55 ${isUser ? "text-right" : ""}`}>{item.meta}</div> : null}
@@ -178,19 +181,24 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
     const { t } = useTranslation();
     const view = userDetail(detail);
+    const heading = (
+        <>
+            <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-5">
+                <CircleAlert className="size-4 shrink-0 text-warning" />
+                <span className="min-w-0 flex-1">{t("agent.notify.awaitingConfirmation")}</span>
+                {view ? <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180" style={{ color: theme.node.muted }} /> : null}
+            </div>
+            <div className="mt-1 pl-6 text-sm leading-5" style={{ color: theme.node.muted }}>{summary}</div>
+        </>
+    );
     return (
         <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "color-mix(in srgb, var(--warning) 25%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
-            <details className="group">
-                <summary className={`list-none ${view ? "cursor-pointer" : "cursor-default"}`} onClick={(event) => { if (!view) event.preventDefault(); }}>
-                    <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-5">
-                        <CircleAlert className="size-4 shrink-0 text-warning" />
-                        <span className="min-w-0 flex-1">{t("agent.notify.awaitingConfirmation")}</span>
-                        {view ? <ChevronDown className="size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} /> : null}
-                    </div>
-                    <div className="mt-1 pl-6 text-sm leading-5" style={{ color: theme.node.muted }}>{summary}</div>
-                </summary>
-                {view ? <div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div> : null}
-            </details>
+            <Collapsible.Root className="group">
+                {view ? <Collapsible.Trigger asChild>
+                    <button type="button" className="block w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{heading}</button>
+                </Collapsible.Trigger> : <div>{heading}</div>}
+                {view ? <Collapsible.Content><div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div></Collapsible.Content> : null}
+            </Collapsible.Root>
             {onReject || onApprove ? (
                 <div className="mt-3 flex justify-end gap-2 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
                     <Button variant="ghost" data-destructive className="!h-8" icon={<XCircle className="size-3.5" />} onClick={() => onReject?.()}>
@@ -248,7 +256,7 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
                 <span className="shrink-0" style={{ color: state.color }}>{toolIcon(kind, state.icon)}</span>
                 <span className="min-w-0 truncate font-medium">{title}</span>
                 <span className="shrink-0 text-xs" style={{ color: state.color }}>{state.label}</span>
-                {view ? <ChevronDown className="ml-auto size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} /> : null}
+                {view ? <ChevronDown className="ml-auto size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180" style={{ color: theme.node.muted }} /> : null}
             </div>
             {showText ? (
                 <div className={`mt-1 whitespace-pre-wrap break-words pl-6 text-sm leading-5 ${kind === "command" ? "font-mono text-xs" : ""}`} style={{ color: state.isError ? state.color : theme.node.muted }}>
@@ -258,32 +266,36 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
         </>
     );
     if (!view) return <div className={className} style={style}>{content}</div>;
-    return (
-        <details className={className} style={style}>
-            <summary className="list-none cursor-pointer">{content}</summary>
-            <div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div>
-        </details>
-    );
+    return <Collapsible.Root className={className} style={style}>
+        <Collapsible.Trigger asChild>
+            <button type="button" className="block w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{content}</button>
+        </Collapsible.Trigger>
+        <Collapsible.Content><div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div></Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();
+    const reducedMotion = useShouldReduceMotion();
     const status = String(objectField(detail, "status") || "");
     const running = ["inProgress", "in_progress", "running", "started", "pending"].includes(status);
-    return (
-        <details className="group min-w-0 text-left">
-            <summary className="cursor-pointer list-none py-1 text-sm" style={{ color: theme.node.muted }}>
-                <div className="flex min-w-0 items-center gap-2">
-                    {running ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <Brain className="size-4 shrink-0" />}
-                    <span>{t(running ? "agent.notify.thinking" : "agent.events.reasoning")}</span>
-                    <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-                </div>
-            </summary>
+    const expandable = Boolean(text.trim());
+    const heading = <div className="flex min-w-0 items-center gap-2">
+        {running ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <Brain className="size-4 shrink-0" />}
+        <span>{t(running ? "agent.notify.thinking" : "agent.events.reasoning")}</span>
+        {expandable ? <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" /> : null}
+    </div>;
+    if (!expandable) return <div className="min-w-0 py-1 text-sm" style={{ color: theme.node.muted }}>{heading}</div>;
+    return <Collapsible.Root className="group min-w-0 text-left">
+        <Collapsible.Trigger asChild>
+            <button type="button" className="block w-full rounded-sm py-1 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ color: theme.node.muted }}>{heading}</button>
+        </Collapsible.Trigger>
+        <Collapsible.Content>
             <div className="break-words pb-1 pl-6 pr-2 text-xs leading-5 [&_code]:rounded [&_code]:px-1 [&_p]:my-1 [&_pre]:my-2" style={{ color: theme.node.muted }}>
-                <Streamdown {...streamdownProps()} animated={streamdownAnimation} isAnimating={running}>{text}</Streamdown>
+                <Streamdown {...streamdownProps()} animated={reducedMotion ? false : streamdownAnimation} isAnimating={running}>{text}</Streamdown>
             </div>
-        </details>
-    );
+        </Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 type AgentCommandItem = Pick<AgentChatItem, "id" | "text" | "detail" | "threadId" | "turnId" | "itemId">;
@@ -300,19 +312,21 @@ export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[];
         <div className="flex min-w-0 items-center gap-2 text-sm" style={{ color }}>
             {running ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <TerminalSquare className="size-4 shrink-0" />}
             <span className="font-medium">{label}</span>
-            {expandable ? <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" /> : null}
+            {expandable ? <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" /> : null}
         </div>
     );
     if (!expandable) return <div className="min-w-0 py-1 text-left">{header}</div>;
-    return (
-        <details className="group min-w-0 text-left">
-            <summary className="cursor-pointer list-none py-1">{header}</summary>
+    return <Collapsible.Root className="group min-w-0 text-left">
+        <Collapsible.Trigger asChild>
+            <button type="button" className="block w-full rounded-sm py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{header}</button>
+        </Collapsible.Trigger>
+        <Collapsible.Content>
             {items.length === 1
                 ? <AgentSingleCommand item={items[0]} theme={theme} />
                 : <div className="ml-6 mt-1">{items.map((item, index) => <AgentCommandEntry key={`${item.threadId}:${item.turnId}:${item.itemId || item.id}`} item={item} index={index} theme={theme} />)}</div>
             }
-        </details>
-    );
+        </Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 function AgentSingleCommand({ item, theme }: { item: AgentCommandItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
@@ -329,7 +343,6 @@ function AgentSingleCommand({ item, theme }: { item: AgentCommandItem; theme: (t
 function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; index: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
-    const detailId = useId();
     const view = userDetail(item.detail);
     const state = commandViewState(item.detail);
     const status = t(state.failed ? "agent.notify.failed" : state.running ? "agent.notify.running" : "agent.notify.completed");
@@ -341,17 +354,16 @@ function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; ind
             <span className="shrink-0" style={{ color }} title={status} aria-label={status}>
                 {state.running ? <LoaderCircle className="size-3.5 animate-spin" /> : state.failed ? <XCircle className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
             </span>
-            {view ? <ChevronRight className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} style={{ color: theme.node.muted }} /> : null}
+            {view ? <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" style={{ color: theme.node.muted }} /> : null}
         </>
     );
-    return (
-        <div className={index ? "border-t" : ""} style={{ borderColor: theme.node.stroke }}>
-            {view
-                ? <button type="button" className="flex w-full min-w-0 items-center gap-2 py-2 text-left" aria-expanded={open} aria-controls={detailId} onClick={() => setOpen((value) => !value)}>{content}</button>
-                : <div className="flex min-w-0 items-center gap-2 py-2 text-left">{content}</div>}
-            {view && open ? <div id={detailId} className="pb-2 pl-6"><AgentDetailBlock detail={view} theme={theme} /></div> : null}
-        </div>
-    );
+    if (!view) return <div className={index ? "border-t" : ""} style={{ borderColor: theme.node.stroke }}><div className="flex min-w-0 items-center gap-2 py-2 text-left">{content}</div></div>;
+    return <Collapsible.Root open={open} onOpenChange={setOpen} className={`group ${index ? "border-t" : ""}`} style={{ borderColor: theme.node.stroke }}>
+        <Collapsible.Trigger asChild>
+            <button type="button" className="flex w-full min-w-0 items-center gap-2 rounded-sm py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{content}</button>
+        </Collapsible.Trigger>
+        <Collapsible.Content><div className="pb-2 pl-6"><AgentDetailBlock detail={view} theme={theme} /></div></Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 function commandViewState(detail: unknown) {
@@ -367,30 +379,34 @@ function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail
     const [open, setOpen] = useState(true);
     const completed = plan.tasks.filter((item) => item.status === "completed").length;
     const state = planCardState(plan, completed);
-    return (
-        <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)} className="group min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-left" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
-            <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2.5">
+    return <Collapsible.Root open={open} onOpenChange={setOpen} className="group min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-left" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
+        <Collapsible.Trigger asChild>
+            <button type="button" className="flex w-full min-w-0 rounded-sm items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <ListChecks className="size-4 shrink-0" style={{ color: state.color }} />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
                 <span className="shrink-0 text-xs" style={{ color: state.color }}>{state.label}</span>
                 <span aria-live="polite" className="shrink-0 text-xs tabular-nums" style={{ color: theme.node.muted }}>{completed}/{plan.tasks.length}</span>
-                <ChevronDown className="size-3.5 shrink-0 transition-transform group-open:rotate-180" style={{ color: theme.node.muted }} />
-            </summary>
-            {plan.explanation ? <div className="mt-1.5 text-xs leading-5" style={{ color: theme.node.muted }}>{plan.explanation}</div> : null}
-            <div className="mt-2.5 space-y-2 border-t pt-2.5" style={{ borderColor: theme.node.stroke }}>
-                {plan.tasks.map((item, index) => {
-                    const task = planTaskState(item.status, theme.node.muted);
-                    return (
-                        <div key={`${index}-${item.step}`} className="flex items-start gap-2 text-sm leading-5">
-                            <span className="mt-0.5 shrink-0" style={{ color: task.color }}>{task.icon}</span>
-                            <span className={`min-w-0 flex-1 ${item.status === "completed" ? "opacity-55" : item.status === "inProgress" ? "font-medium" : ""}`} style={{ color: item.status === "inProgress" ? theme.node.text : theme.node.muted }}>{item.step}</span>
-                            <span className="shrink-0 text-xs" style={{ color: task.color }}>{task.label}</span>
-                        </div>
-                    );
-                })}
+                <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180" style={{ color: theme.node.muted }} />
+            </button>
+        </Collapsible.Trigger>
+        <Collapsible.Content>
+            <div>
+                {plan.explanation ? <div className="mt-1.5 text-xs leading-5" style={{ color: theme.node.muted }}>{plan.explanation}</div> : null}
+                <div className="mt-2.5 space-y-2 border-t pt-2.5" style={{ borderColor: theme.node.stroke }}>
+                    {plan.tasks.map((item, index) => {
+                        const task = planTaskState(item.status, theme.node.muted);
+                        return (
+                            <div key={`${index}-${item.step}`} className="flex items-start gap-2 text-sm leading-5">
+                                <span className="mt-0.5 shrink-0" style={{ color: task.color }}>{task.icon}</span>
+                                <span className={`min-w-0 flex-1 ${item.status === "completed" ? "opacity-55" : item.status === "inProgress" ? "font-medium" : ""}`} style={{ color: item.status === "inProgress" ? theme.node.text : theme.node.muted }}>{item.step}</span>
+                                <span className="shrink-0 text-xs" style={{ color: task.color }}>{task.label}</span>
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
-        </details>
-    );
+        </Collapsible.Content>
+    </Collapsible.Root>;
 }
 
 export function AgentWorkingMessage({ text, detail, status = "running", mcpStatuses = [], activityKey, theme }: { text: string; detail?: string; status?: "running" | "ready" | "error"; mcpStatuses?: Array<{ name: string; status: "running" | "ready" | "error"; detail: string }>; activityKey: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Tooltip } from "@/components/ui/popover";
 import { useTranslation } from "react-i18next";
-import { Tabs } from "radix-ui";
+import { Tabs } from "@animate-ui/react/primitives/radix-ui";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 

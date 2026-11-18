@@ -60,10 +60,11 @@ type EvalOption struct {
 	bytecodeLen int
 	flags       uint64
 
-	// QuickJS value handles for memory management
-	fileValue     *Value
-	codeValue     *Value
-	byteCodeValue *Value
+	// These are malloc buffers, not JavaScript values.
+	fileValue     *Handle
+	codeValue     *Handle
+	byteCodeValue *Handle
+	optionValue   *Handle
 }
 
 // EvalOptionFunc configures evaluation behavior using functional option pattern.
@@ -175,15 +176,15 @@ func FlagBacktraceBarrier() EvalOptionFunc {
 func (o *EvalOption) Handle() (handle uint64) {
 	codeHandle := uint64(0)
 	byteCodeHandle := uint64(0)
-	o.fileValue = o.c.NewStringHandle(o.file)
+	o.fileValue = o.c.NewStringHandle(o.file).Handle()
 
 	if o.code != "" {
-		o.codeValue = o.c.NewStringHandle(o.code)
+		o.codeValue = o.c.NewStringHandle(o.code).Handle()
 		codeHandle = o.codeValue.Raw()
 	}
 
 	if o.bytecode != nil {
-		o.byteCodeValue = o.c.NewBytes(o.bytecode)
+		o.byteCodeValue = o.c.NewBytes(o.bytecode).Handle()
 		byteCodeHandle = o.byteCodeValue.Raw()
 	}
 
@@ -197,23 +198,17 @@ func (o *EvalOption) Handle() (handle uint64) {
 		o.flags,
 	)
 
-	return option.Raw()
+	o.optionValue = option.Handle()
+	return o.optionValue.Raw()
 }
 
-// Free releases QuickJS value handles to prevent memory leaks.
+// Free releases the malloc buffers and evaluation option allocated by Handle.
 // Must be called after Handle() to clean up WASM memory.
 func (o *EvalOption) Free() {
-	if o.fileValue.Raw() != 0 {
-		o.c.Call("JS_FreeValue", o.c.Raw(), o.fileValue.Raw())
-	}
-
-	if o.codeValue != nil && o.codeValue.Raw() != 0 {
-		o.c.Call("JS_FreeValue", o.c.Raw(), o.codeValue.Raw())
-	}
-
-	if o.byteCodeValue != nil && o.byteCodeValue.Raw() != 0 {
-		o.c.Call("JS_FreeValue", o.c.Raw(), o.byteCodeValue.Raw())
-	}
+	o.optionValue.Free()
+	o.fileValue.Free()
+	o.codeValue.Free()
+	o.byteCodeValue.Free()
 }
 
 func getRuntimeOption(registry *ProxyRegistry, options ...Option) (option Option, err error) {

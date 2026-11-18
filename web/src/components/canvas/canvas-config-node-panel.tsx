@@ -7,15 +7,20 @@ import { useTranslation } from "react-i18next";
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
-import { defaultConfig, resolveModelForCapability, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { PointsEstimate } from "@/components/points-estimate";
+import { getGenerationCount } from "@/lib/canvas/canvas-generation-helpers";
+import { buildNodeGenerationContext } from "./canvas-node-generation";
+import { defaultConfig, firstModel, modelMatchesCapability, resolveModelForCapability, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
-import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
+import type { CanvasConnection, CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
     isRunning: boolean;
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
@@ -24,7 +29,7 @@ type CanvasConfigNodePanelProps = {
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, nodes, connections, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const { t } = useTranslation();
     const globalConfig = useEffectiveConfig();
     const openModelSettings = useOpenModelSettings();
@@ -35,6 +40,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const canGenerate = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const estimatePrompt = buildNodeGenerationContext(node.id, nodes, connections, node.metadata?.composerContent ?? node.metadata?.prompt ?? "").prompt;
 
     return (
         <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
@@ -45,7 +51,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         size="small"
                         className="canvas-config-mode !rounded-md !p-0.5"
                         value={mode}
-                        onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode })}
+                        onChange={(value) => { const nextMode = value as CanvasGenerationMode; onConfigChange(node.id, { generationMode: nextMode, model: modelMatchesCapability(config, config.model, nextMode) ? config.model : firstModel(config, nextMode) }); }}
                         options={[
                             {
                                 value: "image",
@@ -109,6 +115,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </div>
 
             <div className="thin-scrollbar mb-2 max-h-60 overflow-y-auto"><ModelParameters config={config} model={config.model} value={node.metadata?.modelParameters?.[config.model]} disabled={isRunning} onChange={(value) => onConfigChange(node.id, { modelParameters: { ...node.metadata?.modelParameters, [config.model]: value } })} /></div>
+            <div className="mt-auto mb-2 flex justify-end">{!isRunning ? <PointsEstimate model={config.model} parameters={node.metadata?.modelParameters?.[config.model]} prompt={estimatePrompt} requests={mode === "image" ? getGenerationCount(config.count) : mode === "text" ? getGenerationCount(String(node.metadata?.textCount || 1)) : 1} /> : null}</div>
             <Button variant={isRunning ? "destructive" : "default"}
                 className="mt-auto !h-8 !w-full !cursor-pointer !rounded-lg" aria-busy={isRunning}
                 disabled={!isRunning && !canGenerate}

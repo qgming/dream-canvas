@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -201,6 +202,8 @@ func (a *App) dispatchFiles() {
 }
 
 func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
+	ctx = withLogContext(ctx, slog.String("operation_id", operation.ID), slog.String("asset_id", operation.AssetID), slog.String("operation", operation.Kind))
+	a.logEvent(ctx, slog.LevelDebug, "asset.operation_started", slog.Int("attempt", operation.Attempts+1))
 	policy, err := a.executionPolicy(); if err != nil { return }
 	ctx, cancel := context.WithTimeout(ctx, seconds(policy.TransferSeconds)); defer cancel()
 	var asset Asset
@@ -220,8 +223,9 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 			if err == nil { err = a.db.Model(&Asset{}).Where("id = ? AND delete_state <> ?", asset.ID, "deleted").Updates(map[string]any{"sync_state": "synced", "error": ""}).Error }
 		}
 	}
-	if err == nil { if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() }
+	if err == nil { a.logEvent(ctx, slog.LevelInfo, "asset.operation_completed"); if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() }
 	} else {
+		a.logFailure(ctx, "asset.operation_failed", err, slog.Int("attempt", operation.Attempts+1))
 		index := operation.Attempts
 		if index >= len(policy.StorageRetrySeconds) { index = len(policy.StorageRetrySeconds)-1 }
 		next := time.Now().Add(seconds(policy.StorageRetrySeconds[index]))

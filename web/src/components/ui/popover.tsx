@@ -1,4 +1,4 @@
-import { Popover as Primitive, Tooltip as Tip, DropdownMenu } from "radix-ui";
+import { Popover as Primitive, Tooltip as Tip, DropdownMenu } from "@animate-ui/react/primitives/radix-ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 

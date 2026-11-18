@@ -7,20 +7,26 @@ import { Notice as Alert } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { Details } from "@/components/ui/data-table";
-import { Sheet } from "@/components/ui/dialog";
+import { Dialog, Sheet } from "@/components/ui/dialog";
+import { EditorForm, Field, useEditorForm, validateForm } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { z } from "zod";
 import { EmptyState as Empty, Spinner } from "@/components/ui/display";
 import { Choice } from "@/components/ui/choice";
 import { DataTable } from "@/components/ui/data-table";
 import { Badge as Tag } from "@/components/ui/display";
-import { RefreshCw } from "lucide-react";
-import { Link } from "react-router-dom";
+import { ChevronDown, RefreshCw } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
 
 import { AssetMedia } from "@/components/canvas/asset-media";
 import { assetUrl } from "@/services/api/assets";
-import { cancelGeneration, getGeneration, listGenerations, resumeGeneration, type GenerationTask } from "@/services/api/tasks";
+import { cancelGeneration, getGeneration, listGenerations, recoverGenerationQuery, resumeGeneration, type GenerationTask } from "@/services/api/tasks";
+import { GenerationProgress } from "@/components/generation-progress";
 import { captureSession } from "@/services/api/client";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useConfigStore } from "@/stores/use-config-store";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 
 export default function TasksPage() {
@@ -38,8 +44,12 @@ export default function TasksPage() {
     const syncStates: Record<string, string> = { local: appI18n.t("workspace.local"), pending: appI18n.t("workspace.syncPending"), syncing: appI18n.t("workspace.syncing"), synced: appI18n.t("workspace.synced"), failed: appI18n.t("workspace.syncFailed") };
     const queryClient = useQueryClient();
     const query = useQuery({ queryKey: ["generation-tasks"], queryFn: listGenerations });
+    const [searchParams] = useSearchParams();
+    const admin = useAuthStore((state) => state.user?.role === "admin");
     const [filter, setFilter] = useState("");
-    const [selectedId, setSelectedId] = useState("");
+    const [selectedId, setSelectedId] = useState(searchParams.get("taskId") || "");
+    const [recovery, setRecovery] = useState<GenerationTask | null>(null);
+    const recoveryForm = useEditorForm<{ upstreamId: string }>({ upstreamId: "" });
     const [cancelling, setCancelling] = useState("");
     const cancellingRef = useRef(false);
     const projects = useCanvasStore((state) => state.projects);
@@ -74,7 +84,7 @@ export default function TasksPage() {
                     { title: appI18n.t("workspace.type"), render: (_, task) => kinds[task.capability] },
                     { title: appI18n.t("workspace.project"), render: (_, task) => task.projectId ? <Link to={`/canvas/${encodeURIComponent(task.projectId)}`}>{projects.find((item) => item.id === task.projectId)?.title || appI18n.t("workspace.targetProject")}</Link> : appI18n.t("workspace.workbench") },
                     { title: appI18n.t("workspace.channelModel"), render: (_, task) => <span className="break-all text-xs">{modelLabel(task)}</span> },
-                    { title: appI18n.t("workspace.status"), render: (_, task) => <Tag color={states[task.status]?.color}>{states[task.status]?.label || task.status}</Tag> },
+                    { title: appI18n.t("workspace.status"), render: (_, task) => <div className="space-y-1"><Tag color={states[task.status]?.color}>{task.status === "running" && task.providerStatus === "queued" ? appI18n.t("workspace.providerQueued") : states[task.status]?.label || task.status}</Tag>{typeof task.progress === "number" ? <div className="text-xs text-muted-foreground">{appI18n.t("workspace.providerProgress", { percent: task.progress })}</div> : null}</div> },
                     { title: appI18n.t("workspace.original"), render: (_, task) => saveStates[task.saveState] || appI18n.t("workspace.noSaveResult") },
                     { title: appI18n.t("workspace.cloudSync"), render: (_, task) => syncStates[task.syncState] || appI18n.t("workspace.noSyncRecord") },
                     { title: appI18n.t("workspace.submittedAt"), render: (_, task) => new Date(task.createdAt).toLocaleString(appI18n.resolvedLanguage) },
@@ -85,12 +95,14 @@ export default function TasksPage() {
                 {detail.isLoading ? <Spinner /> : null}
                 {detail.error ? <Alert type="error" title={detail.error.message} action={<Button onClick={() => void detail.refetch()}>{appI18n.t("workspace.reload")}</Button>} /> : null}
                 {task ? <div className="space-y-6">
+                    <GenerationProgress task={task} />
                     <Details   items={[
                         { key: "id", label: appI18n.t("workspace.taskId"), children: <span className="break-all">{task.id}</span> },
                         { key: "status", label: appI18n.t("workspace.generationStatus"), children: states[task.status]?.label || task.status },
                         { key: "save", label: appI18n.t("workspace.originalSave"), children: saveStates[task.saveState] || appI18n.t("workspace.noSaveResult") },
                         { key: "sync", label: appI18n.t("workspace.cloudSync"), children: syncStates[task.syncState] || appI18n.t("workspace.noSyncRecord") },
                         { key: "upstream", label: appI18n.t("workspace.upstreamId"), children: task.upstreamId || appI18n.t("workspace.notRecorded") },
+                        ...(task.queryRecoveredAt ? [{ key: "queryRecovered", label: appI18n.t("workspace.queryRecoveredAt"), children: new Date(task.queryRecoveredAt).toLocaleString(appI18n.resolvedLanguage) }] : []),
                         { key: "version", label: appI18n.t("workspace.submittedProjectVersion"), children: task.projectId ? task.projectVersion : appI18n.t("workspace.workbenchTask") },
                         { key: "cancel", label: appI18n.t("workspace.cancelRequest"), children: task.cancelRequested ? appI18n.t("workspace.cancelRequested") : appI18n.t("workspace.notRequested") },
                     ]} />
@@ -100,16 +112,35 @@ export default function TasksPage() {
                     {task.responseCleanupError ? <Alert type="warning" title={task.responseCleanupError} /> : null}
                     {task.status === "confirmation_required" ? <p className="text-sm text-muted-foreground">{appI18n.t("workspace.pendingOutcome")}</p> : null}
                     {task.status === "confirmation_required" ? <Button loading={Boolean(cancelling)} onClick={async () => {
-                        const assertSession = captureSession(); setCancelling(task.id);
+                        if (cancellingRef.current) return;
+                        const assertSession = captureSession(); cancellingRef.current = true; setCancelling(task.id);
                         try { await resumeGeneration(task.id); assertSession(); await Promise.all([detail.refetch(), query.refetch()]); }
                         catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.operationFailed")); }
-                        finally { setCancelling(""); }
+                        finally { cancellingRef.current = false; setCancelling(""); }
                     }}>{appI18n.t("execution.resumeTask")}</Button> : null}
+                    {admin && task.status === "confirmation_required" && !task.upstreamId ? <Button disabled={Boolean(cancelling)} onClick={() => { recoveryForm.reset({ upstreamId: "" }); setRecovery(task); }}>{appI18n.t("workspace.queryRecovery")}</Button> : null}
                     {task.text ? <pre className="whitespace-pre-wrap break-words text-sm leading-6">{task.text}</pre> : null}
                     {(task.assetIds || []).map((id) => <div key={id} className="space-y-2">{task.capability !== "text" ? <AssetMedia kind={task.capability} src={assetUrl(id)} alt={appI18n.t("workspace.taskOutput")} controls className="max-h-96 max-w-full object-contain" /> : null}<a href={assetUrl(id)} target="_blank" rel="noreferrer" className="text-sm underline">{appI18n.t("workspace.viewOriginal")}</a></div>)}
-                    <details><summary className="cursor-pointer text-sm">{appI18n.t("workspace.submittedContent")}</summary><pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5">{JSON.stringify(task.input, null, 2)}</pre></details>
+                    {task.input == null ? <div className="text-sm">{appI18n.t("workspace.submittedContent")}</div> : <Collapsible.Root className="group">
+                        <Collapsible.Trigger asChild>
+                            <button type="button" className="flex w-full items-center justify-between gap-3 rounded-sm text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                {appI18n.t("workspace.submittedContent")}
+                                <ChevronDown className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+                            </button>
+                        </Collapsible.Trigger>
+                        <Collapsible.Content><pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5">{JSON.stringify(task.input, null, 2)}</pre></Collapsible.Content>
+                    </Collapsible.Root>}
                 </div> : null}
             </Sheet>
+            <Dialog open={Boolean(recovery)} title={appI18n.t("workspace.queryRecovery")} description={appI18n.t("workspace.queryRecoveryHint")} onClose={() => setRecovery(null)} dirty={recoveryForm.formState.isDirty} confirmText={appI18n.t("workspace.queryRecoveryConfirm")} onConfirm={async () => {
+                if (!recovery) return;
+                const values = await validateForm(recoveryForm), assertSession = captureSession();
+                const updated = await recoverGenerationQuery(recovery, values.upstreamId.trim());
+                assertSession();
+                queryClient.setQueryData(["generation-task", recovery.id], updated);
+                recoveryForm.reset(values); setRecovery(null);
+                await query.refetch(); notify.success(appI18n.t("workspace.queryRecovered"));
+            }}><EditorForm form={recoveryForm}><Field name="upstreamId" label={appI18n.t("workspace.upstreamId")} schema={z.string().trim().min(1, appI18n.t("workspace.required"))}><Input autoComplete="off" /></Field></EditorForm></Dialog>
         </main>
     );
 }

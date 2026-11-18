@@ -1,4 +1,4 @@
-import { Popover } from "radix-ui";
+import { Popover } from "@animate-ui/react/primitives/radix-ui";
 import { Command } from "cmdk";
 import { Check, ChevronDown, X } from "lucide-react";
 import { useState, type ComponentProps, type ReactNode } from "react";

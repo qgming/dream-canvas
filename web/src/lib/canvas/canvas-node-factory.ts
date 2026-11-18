@@ -1,13 +1,15 @@
 import { getNodeSpec } from "@/constant/canvas";
-import { resolveModelParameters, type AiConfig } from "@/stores/use-config-store";
+import { resolveModelParameters, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
-import type { CanvasImageGenerationType, CanvasNodeData, CanvasNodeMetadata, CanvasNodeTypeId, Position } from "@/types/canvas";
+import { CanvasNodeType, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasNodeTypeId, type Position } from "@/types/canvas";
 
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const config = useConfigStore.getState().config;
+    const initialModel = type === CanvasNodeType.Image || type === CanvasNodeType.Config ? config.imageModel : type === CanvasNodeType.Video ? config.videoModel : type === CanvasNodeType.Audio ? config.audioModel : type === CanvasNodeType.Text ? config.textModel : "";
 
     return {
         id,
@@ -19,7 +21,7 @@ export function createCanvasNode(type: CanvasNodeTypeId, position: Position, met
         },
         width: spec.width,
         height: spec.height,
-        metadata: { ...spec.metadata, ...metadata },
+        metadata: { ...spec.metadata, ...(initialModel ? { model: initialModel } : {}), ...metadata },
     };
 }
 

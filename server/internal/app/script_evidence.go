@@ -22,13 +22,13 @@ func (a *App) ModelScriptEvidence(userID, adapterID, taskID string) (any, error)
 	var script ModelScript
 	if err := a.db.First(&script, "id = ?", adapterID).Error; err != nil { return nil, err }
 	tasks := []GenerationTask{}
-	if err := a.db.Where("user_id = ? AND debug_revision > ? AND json_extract(snapshot, '$.script.adapterId') = ?", userID, 0, adapterID).Order("created_at DESC").Find(&tasks).Error; err != nil { return nil, err }
+	if err := a.db.Where("user_id = ? AND json_extract(snapshot, '$.script.adapterId') = ?", userID, adapterID).Order("created_at DESC").Find(&tasks).Error; err != nil { return nil, err }
 	view := gin.H{"tasks": tasks, "task": nil, "responseState": "none"}
 	if taskID == "" && len(tasks) > 0 { taskID = tasks[0].ID }
 	if taskID == "" { return view, nil }
 	var selected *GenerationTask
 	for index := range tasks { if tasks[index].ID == taskID { selected = &tasks[index]; break } }
-	if selected == nil { return nil, problem(404, "debug_task_missing", "此脚本的调试任务不存在或无权读取") }
+	if selected == nil { return nil, problem(404, "debug_task_missing", "此脚本的任务不存在或无权读取") }
 	var snapshot executionSnapshot
 	if json.Unmarshal(selected.Snapshot, &snapshot) != nil { return nil, problem(409, "invalid_snapshot", "调试任务快照无法读取，未覆盖原记录") }
 	configuration := gin.H{"channelId": snapshot.ChannelID, "channelVersion": snapshot.ChannelVersion, "baseUrl": snapshot.BaseURL, "model": snapshot.Model, "scriptVersionId": snapshot.Model.AdapterVersionID, "draftRevision": selected.DebugRevision, "input": selected.Input}

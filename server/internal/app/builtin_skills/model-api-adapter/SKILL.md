@@ -21,7 +21,7 @@ description: 为梦想画布创建或修订供应商模型的接口脚本，将�
 - 精确列出供应商接受的参数，不盲目展开 params。保留显式 false、0 与空值语义；说明秒/毫秒、像素、采样率等单位。不要将个人资产写入共享默认值。
 - 请求 path 相对完整 API Base URL；不自动补 /v1，前导 / 表示域名根路径。认证由平台注入，不在代码和非秘密 headers 中写 key。
 - 图片区分生成与编辑；multipart 使用 assetId，让平台流式读取原件并处理 boundary。不要转码或压缩输入。
-- 视频 submit 返回供应商编号；query 每次只发一个查询，平台持久轮询。result 映射 running/completed/failed 等真实状态。需要取文件时返回只读后续请求，并在该结果提供 usage / usageState，后续通过 input.previousResult 取回并带入最终结果；不在脚本中长时间等待或重复提交。
+- 异步图片或视频的 submit 只映射请求；必须分别核对提交响应和查询响应的结构，在 result 中把真实编号归一为 upstreamId（例如提交为顶层 task_id、查询为 task.id），排队 / 运行时不能遗漏，并声明 query。query 每次只发一个查询，平台持久轮询。result 映射 running/completed/failed 等真实状态。供应商提供百分比时将其按文档单位映射为 progress（0–100 数值），stream 也可累计该字段；不提供时省略，不按时间伪造。需要取文件时返回只读后续请求，并在该结果提供 usage / usageState，后续通过 input.previousResult 取回并带入最终结果；不在脚本中长时间等待或重复提交。
 - 音频仅内置 OpenAI TTS，输入 voice / format / speed / instructions，默认 alloy / mp3 / 1 / 无指令；format 映射 audio/speech 的 response_format，不保留旧参数别名，不自动使用参考音频或注册音色覆盖 voice。读取 binary MIME，PCM 原件标为 audio/pcm，不改成音乐生成。
 - 文本保留完整 messages 与 tools，规范化工具编号、函数名和 JSON 字符串参数。只有真实支持工具调用时才声明 features.tools。流式阶段累计文本、推理、工具与用量；只有真实终止事件才设置 complete=true，断流不能伪装完成。非流式响应不要伪称流式。
 - 用量只写有依据的数据；区分实际、估算、未知，不按返回次数猜 token 或成本。保留供应商任务编号和可恢复依据。

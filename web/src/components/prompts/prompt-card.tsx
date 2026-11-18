@@ -29,7 +29,7 @@ export function PromptCard({
     return (
         <article className={compact ? "group overflow-hidden rounded-xl border border-border bg-card" : "flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card"}>
                 <button type="button" className="block w-full cursor-pointer text-left" onClick={onOpen}>
-                    {item.coverUrl ? <img src={item.coverUrl} alt={item.title} className={compact ? "aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" : "aspect-[4/3] w-full object-cover"} loading="lazy" /> : <span className={compact ? "grid aspect-square w-full place-items-center bg-muted text-muted-foreground  " : "grid aspect-[4/3] w-full place-items-center bg-muted text-muted-foreground  "}><FileText className="size-8" /></span>}
+                    {item.coverUrl ? <img src={item.coverUrl} alt={item.title} className={compact ? "aspect-square w-full object-cover transition-transform duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover:scale-[1.03]" : "aspect-[4/3] w-full object-cover"} loading="lazy" /> : <span className={compact ? "grid aspect-square w-full place-items-center bg-muted text-muted-foreground  " : "grid aspect-[4/3] w-full place-items-center bg-muted text-muted-foreground  "}><FileText className="size-8" /></span>}
                 </button>
             <button type="button" className={compact ? "block w-full cursor-pointer text-left" : "block w-full flex-1 cursor-pointer text-left"} onClick={onOpen}>
                 <div className={compact ? "px-3 py-2.5" : "p-4"}>

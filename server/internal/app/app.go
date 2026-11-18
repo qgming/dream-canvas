@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +40,7 @@ type App struct {
 	previewMu sync.Mutex
 	promptMu sync.Mutex
 	clients clientRegistry
+	logs *appLogger
 }
 
 type Problem struct { Status int; Code, Message string }
@@ -55,7 +57,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelDefaults{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -68,6 +70,7 @@ func Open(root string) (*App, error) {
 	ctx, stop := context.WithCancel(context.Background())
 	service := &App{db: db, root: root, transfers: newFileGate(), previews: newFileGate(), credentials: credentials, events: map[string]map[chan string]bool{}, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), active: map[string]context.CancelFunc{}}
 	service.clients.entries = map[string]onlineClient{}
+	if err := service.openLogger(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := service.installBuiltinScripts(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := db.Model(&Asset{}).Where("save_state = ?", "saving").Updates(map[string]any{"save_state": "failed", "error": "服务在文件保存完成前停止，原件尚未可靠保留，请重新上传"}).Error; err != nil { conn.Close(); return nil, err }
 	var pending []Asset
@@ -76,10 +79,11 @@ func Open(root string) (*App, error) {
 	if err := service.recoverExecution(); err != nil { stop(); conn.Close(); return nil, err }
 	service.workers.Add(1)
 	go service.schedule()
+	service.logEvent(ctx, slog.LevelInfo, "service.ready")
 	return service, nil
 }
 
-func (a *App) Close() { a.stop(); a.workers.Wait(); if db, err := a.db.DB(); err == nil { db.Close() } }
+func (a *App) Close() { a.stop(); a.workers.Wait(); a.logEvent(a.ctx, slog.LevelInfo, "service.stopped"); if db, err := a.db.DB(); err == nil { db.Close() } }
 
 func identifier() string {
 	value := make([]byte, 32)
@@ -90,6 +94,7 @@ func identifier() string {
 func digest(value string) string { hash := sha256.Sum256([]byte(value)); return hex.EncodeToString(hash[:]) }
 
 func respondError(c *gin.Context, err error) {
+	c.Set("request_error", err)
 	status, code, message := http.StatusInternalServerError, "internal_error", "操作失败，请重试"
 	var p *Problem
 	if errors.As(err, &p) { status, code, message = p.Status, p.Code, p.Message
@@ -109,7 +114,7 @@ func (a *App) Router(web string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	if err := r.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil { panic(err) }
-	r.Use(gin.Recovery(), func(c *gin.Context) {
+	r.Use(a.requestLogger(), gin.CustomRecoveryWithWriter(nil, a.recoverRequest), func(c *gin.Context) {
 		if policy, err := a.executionPolicy(); err == nil && policy.JSONBytes > 0 && strings.Contains(c.GetHeader("Content-Type"), "application/json") { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.JSONBytes) }
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("Referrer-Policy", "same-origin")
@@ -164,6 +169,8 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/tasks/:id/resume", a.resumeTask)
 	authed.POST("/tasks/:id/project-version", a.taskProjectVersion)
 	authed.GET("/usage", a.listUsage)
+	authed.POST("/usage/quote", a.quoteUsage)
+	authed.GET("/usage/:id/corrections", a.usageCorrectionsForUser)
 	authed.GET("/assistant/threads", a.listAssistantThreads)
 	authed.POST("/assistant/threads", a.createAssistantThread)
 	authed.GET("/assistant/threads/:id", a.getAssistantThread)
@@ -200,15 +207,19 @@ func (a *App) Router(web string) *gin.Engine {
 		c.Next()
 	})
 	admin.GET("/users", a.listUsers)
+	admin.POST("/tasks/:id/recover-query", a.recoverTaskQuery)
 	admin.POST("/users", a.createUser)
 	admin.PATCH("/users/:id", a.updateUser)
 	admin.POST("/users/:id/password", a.resetPassword)
 	admin.GET("/channels", a.listChannels)
-	admin.PUT("/model-defaults", a.saveModelDefaults)
+	admin.GET("/model-ordering", a.getModelOrdering)
+	admin.PUT("/model-ordering", a.saveModelOrdering)
 	admin.GET("/channel-templates", a.listChannelTemplates)
 	admin.POST("/channel-templates/:template", a.installChannelTemplate)
 	admin.GET("/runtime", a.getRuntimeSettings)
 	admin.PUT("/runtime", a.saveRuntimeSettings)
+	admin.GET("/logging", a.getLogSettings)
+	admin.PUT("/logging", a.saveLogSettings)
 	admin.GET("/storages", a.listStorages)
 	admin.POST("/storages", a.saveStorage)
 	admin.PUT("/storages/:id", a.saveStorage)
@@ -229,6 +240,7 @@ func (a *App) Router(web string) *gin.Engine {
     admin.POST("/model-scripts/check", a.checkModelScript)
     admin.POST("/model-scripts", a.createModelScript)
     admin.GET("/model-scripts/:adapterId", a.getModelScript)
+    admin.DELETE("/model-scripts/:adapterId", a.deleteModelScript)
     admin.PUT("/model-scripts/:adapterId/draft", a.saveScriptDraft)
     admin.POST("/model-scripts/:adapterId/publish", a.publishModelScript)
     admin.POST("/model-scripts/:adapterId/test", a.testModelScript)

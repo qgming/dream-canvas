@@ -1,95 +1,72 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Cpu } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
+import { Popover } from "@animate-ui/react/primitives/radix-ui";
+import { Command } from "cmdk";
 import i18n from "@/i18n";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { inputClass } from "@/components/ui/input";
+import { ModelPrice } from "@/components/model-price";
 import { cn } from "@/lib/utils";
-import { modelOptionLabel, modelOptionName, modelSupportsTools, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { findChannelModel, modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
-    config: AiConfig;
-    value?: string;
-    onChange: (model: string) => void;
-    capability?: ModelCapability;
-    toolsOnly?: boolean;
-    className?: string;
-    fullWidth?: boolean;
-    placeholder?: string;
-    onMissingConfig?: () => void;
-    id?: string;
-    "aria-label"?: string;
-    "aria-describedby"?: string;
+    config: AiConfig; value?: string; onChange: (model: string) => void; capability?: ModelCapability; toolsOnly?: boolean;
+    className?: string; fullWidth?: boolean; placeholder?: string; onMissingConfig?: () => void; id?: string;
+    "aria-label"?: string; "aria-describedby"?: string;
 };
 
 export function ModelPicker({ config, value, onChange, capability, toolsOnly = false, className, fullWidth = false, placeholder, onMissingConfig, id, "aria-label": ariaLabel, "aria-describedby": ariaDescription }: ModelPickerProps) {
     const { t } = useTranslation();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => selectableModelsByCapability(config, capability).filter((model) => !toolsOnly || modelSupportsTools(config, model)), [capability, config, toolsOnly]);
+    const [query, setQuery] = useState("");
+    const [listId, setListId] = useState<string>();
+    const options = useMemo(() => selectableModelsByCapability(config, capability, toolsOnly), [capability, config, toolsOnly]);
+    const groups = useMemo(() => {
+        const result: { channelId: string; name: string; models: string[] }[] = [];
+        for (const value of options) {
+            const match = findChannelModel(config, value)!;
+            if (result.at(-1)?.channelId !== match.channel.id) result.push({ channelId: match.channel.id, name: match.channel.name, models: [] });
+            result.at(-1)!.models.push(value);
+        }
+        return result;
+    }, [config, options]);
     const current = value || "";
+    const invalid = Boolean(current && !options.includes(current));
     const pickerPlaceholder = placeholder || t("settingsPanels.model.select");
-
     useEffect(() => {
-        const closeOtherPicker = (event: Event) => {
-            if ((event as CustomEvent<string>).detail !== pickerId) setOpen(false);
-        };
+        const closeOtherPicker = (event: Event) => { if ((event as CustomEvent<string>).detail !== pickerId) setOpen(false); };
         window.addEventListener("model-picker-open", closeOtherPicker);
         return () => window.removeEventListener("model-picker-open", closeOtherPicker);
     }, [pickerId]);
 
-    return (
-        <Select
-            open={open}
-            value={current}
-            onOpenChange={(nextOpen) => {
-                if (nextOpen && !options.length) onMissingConfig?.();
-                if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
-                setOpen(nextOpen);
-            }}
-            onValueChange={onChange}
-        >
-            <SelectTrigger
-                id={id}
-                aria-label={ariaLabel || t("workbench.model")}
-                aria-describedby={ariaDescription}
-                className={cn(
-                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-md border border-input bg-transparent px-3 text-sm font-normal shadow-none transition-colors",
-                    fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
-                    "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
-                    className,
-                )}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : pickerPlaceholder}
-            >
-                <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : pickerPlaceholder}</span>
-            </SelectTrigger>
-            <SelectContent
-                data-canvas-no-zoom
-                className="w-80 max-w-[calc(100vw-32px)] border border-border bg-popover p-1"
-                position="popper"
-                align="start"
-                side="bottom"
-                sideOffset={6}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                {options.length ? (
-                    options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} />
-                        </SelectItem>
-                    ))
-                ) : (
-                    <SelectItem value="__empty__" disabled>
-                        {emptyModelLabel(config, capability)}
-                    </SelectItem>
-                )}
-            </SelectContent>
-        </Select>
-    );
+    return <Popover.Root open={open} onOpenChange={(next) => {
+        if (next && !options.length) onMissingConfig?.();
+        if (next) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
+        setQuery(""); setOpen(next);
+    }}>
+        <Popover.Trigger asChild><button type="button" role="combobox" id={id} aria-label={ariaLabel || t("workbench.model")} aria-describedby={ariaDescription} aria-expanded={open} aria-controls={open ? listId : undefined} aria-haspopup="listbox" aria-invalid={invalid || undefined} className={cn("canvas-composer-model-picker flex h-8 w-fit max-w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm font-normal outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-ring aria-invalid:border-destructive aria-invalid:text-destructive", fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start", className)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} title={invalid ? t("points.unavailableModel") : current ? modelOptionLabel(config, current) : pickerPlaceholder}>
+            {invalid ? <CircleAlert className="size-4 shrink-0" /> : <ModelIcon model={current} />}
+            <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : pickerPlaceholder}</span><ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </button></Popover.Trigger>
+        <Popover.Portal><Popover.Content data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore sideOffset={6} align="start" className="z-[1500] w-96 max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg outline-none" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+            {invalid ? <p role="alert" className="border-b border-border px-3 py-2 text-xs text-destructive">{t("points.unavailableModel")}</p> : null}
+            <Command label={ariaLabel || t("workbench.model")} loop>
+                <Command.Input value={query} onValueChange={setQuery} aria-label={t("workspace.searchModels")} placeholder={t("workspace.searchModels")} className={cn(inputClass, "rounded-none border-0 border-b px-3")} />
+                <Command.List ref={(element) => { if (element) setListId(element.id); }} className="thin-scrollbar max-h-80 overflow-y-auto p-1" aria-label={ariaLabel || t("workbench.model")}>
+                    <Command.Empty className="px-3 py-4 text-sm text-muted-foreground">{options.length ? t("ui.noMatches") : emptyModelLabel(config, capability)}</Command.Empty>
+                    {groups.map((group, index) => <Command.Group key={`${group.channelId}:${index}`} heading={group.name} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
+                        {group.models.map((model) => {
+                            const selected = findChannelModel(config, model)!.model;
+                            return <Command.Item key={model} value={model} keywords={[selected.label, selected.name, group.name]} onSelect={() => { onChange(model); setOpen(false); setQuery(""); }} className="flex cursor-default items-center gap-2 rounded-md px-2 py-2 text-sm outline-none data-[selected=true]:bg-accent">
+                                <ModelIcon model={model} /><span className="min-w-0 flex-1"><span className="block truncate">{selected.label || selected.name}</span><span className="block truncate text-xs text-muted-foreground">{selected.name}</span></span><ModelPrice pricing={selected.pricing} parameters={selected.parameters} />{current === model ? <Check className="size-4 shrink-0" /> : null}
+                            </Command.Item>;
+                        })}
+                    </Command.Group>)}
+                </Command.List>
+            </Command>
+        </Popover.Content></Popover.Portal>
+    </Popover.Root>;
 }
 
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
@@ -98,27 +75,8 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     return config.models.length ? i18n.t("settingsPanels.model.noMatch", { capability: label }) : i18n.t("settingsPanels.model.addFirst");
 }
 
-function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
-    return (
-        <span className="flex min-w-0 items-center gap-2">
-            <ModelIcon model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
-        </span>
-    );
-}
-
 function ModelIcon({ model }: { model: string }) {
-    const icon = resolveModelIcon(modelOptionName(model));
-    return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
-}
-
-function resolveModelIcon(model: string) {
-    const name = model.toLowerCase();
-    if (name.includes("claude") || name.includes("anthropic")) return "/icons/claude.svg";
-    if (name.includes("gemini") || name.includes("google")) return "/icons/gemini.svg";
-    if (name.includes("gpt") || name.includes("openai")) return "/icons/openai.svg";
-    if (name.includes("grok") || name.includes("grok")) return "/icons/grok.svg";
-    if (name.includes("deepseek") || name.includes("deepseek")) return "/icons/deepseek.svg";
-    if (name.includes("glm") || name.includes("glm")) return "/icons/glm.svg";
-    return "";
+    const name = modelOptionName(model).toLowerCase();
+    const icon = name.includes("claude") || name.includes("anthropic") ? "claude" : name.includes("gemini") || name.includes("google") ? "gemini" : name.includes("gpt") || name.includes("openai") ? "openai" : name.includes("grok") ? "grok" : name.includes("deepseek") ? "deepseek" : name.includes("glm") ? "glm" : "";
+    return icon ? <img src={`/icons/${icon}.svg`} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
 }

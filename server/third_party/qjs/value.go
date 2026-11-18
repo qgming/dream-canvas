@@ -593,6 +593,10 @@ func (v *Value) Bytes() []byte {
 func (v *Value) String() string {
 	result := v.Call("QJS_ToCString", v.Ctx(), v.Raw())
 	defer result.handle.Free()
+	if result.Raw() != 0 {
+		address, _ := v.context.runtime.Mem().UnpackPtr(result.Raw())
+		defer v.Call("JS_FreeCString", v.Ctx(), uint64(address))
+	}
 
 	return result.handle.String()
 }

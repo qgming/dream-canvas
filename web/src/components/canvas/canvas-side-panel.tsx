@@ -10,6 +10,7 @@ import { AnimatedSidePanel } from "@/components/ui/animated-side-panel";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, LayoutGrid, ListChecks, Music2, Plus, Rows3, Search, Settings2, Square, Trash2, Type, Video, X } from "lucide-react";
 import { motion } from "motion/react";
+import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
@@ -96,10 +97,12 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreview
 
 function TabButton({ label, active, theme, onClick }: { label: string; active: boolean; theme: CanvasTheme; onClick: () => void }) {
     useTranslation();
+    const tokens = useMotionTokens();
+    const reducedMotion = useShouldReduceMotion();
     return (
         <button type="button" onClick={onClick} title={label} className="relative min-w-0 truncate pb-1.5 text-sm font-semibold transition-opacity" style={{ color: theme.node.text, opacity: active ? 1 : 0.45 }}>
             {label}
-            {active ? <motion.span layoutId="sidePanelTabIndicator" className="absolute inset-x-0 -bottom-px h-0.5 rounded-full" style={{ background: theme.toolbar.activeText }} transition={{ type: "spring", stiffness: 500, damping: 34 }} /> : null}
+            {active ? <motion.span layoutId="sidePanelTabIndicator" className="absolute inset-x-0 -bottom-px h-0.5 rounded-full" style={{ background: theme.toolbar.activeText }} transition={reducedMotion ? tokens.transition.instant : tokens.spring.selection} /> : null}
         </button>
     );
 }
@@ -481,9 +484,9 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onI
 function AssetCard({ asset, theme, onInsert, onRemove }: { asset: Asset; theme: CanvasTheme; onInsert: () => void; onRemove: () => void }) {
     const { t } = useTranslation();
     return (
-        <div className="group relative aspect-square overflow-hidden rounded-xl border transition duration-200 hover:-translate-y-0.5 hover:shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
+        <div className="group relative aspect-square overflow-hidden rounded-xl border transition hover:-translate-y-0.5 hover:shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
             <AssetCover asset={asset} />
-            <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+            <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 transition duration-(--motion-fade-duration) ease-(--motion-fade-easing) group-hover:opacity-100 group-focus-within:opacity-100">
                 <button
                     type="button"
                     onClick={onInsert}
@@ -510,10 +513,10 @@ function AssetCover({ asset }: { asset: Asset }) {
     if (asset.kind === "audio") return <div className="grid size-full place-items-center"><Music2 className="size-8 opacity-50" /></div>;
     if (asset.kind === "text") return <div className="size-full overflow-hidden whitespace-pre-wrap break-words p-2.5 text-xs leading-snug opacity-80">{asset.data.content}</div>;
     if (asset.kind === "video") {
-        if (asset.coverUrl) return <img src={asset.coverUrl} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" />;
-        return <video src={`${asset.data.url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" />;
+        if (asset.coverUrl) return <img src={asset.coverUrl} alt="" className="size-full object-cover transition duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover:scale-[1.04]" />;
+        return <video src={`${asset.data.url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover transition duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover:scale-[1.04]" />;
     }
-    return <img src={asset.coverUrl || asset.data.dataUrl} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" />;
+    return <img src={asset.coverUrl || asset.data.dataUrl} alt="" className="size-full object-cover transition duration-(--motion-reveal-duration) ease-(--motion-reveal-easing) group-hover:scale-[1.04]" />;
 }
 
 // ---------------------------------------------------------------------------

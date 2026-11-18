@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { modelCatalog, type CatalogChannel } from "@/services/api/channels";
 import { DataTable } from "@/components/ui/data-table";
 import { useAuthStore } from "@/stores/use-auth-store";
+import { ModelPrice } from "@/components/model-price";
 
 export default function ModelsPage() {
     const { t } = useTranslation();
@@ -30,6 +31,7 @@ export default function ModelsPage() {
                     { title: t("workspace.name"), render: (_, model) => <span className="font-medium break-words">{model.name || model.model}</span> },
                     { title: t("workspace.modelId"), dataIndex: "model", render: (model) => <span className="break-all text-muted-foreground">{model}</span> },
                     { title: t("workspace.type"), dataIndex: "capability", render: (value: keyof typeof capabilities) => <Tag>{capabilities[value]}</Tag> },
+                    { title: t("usage.pricing"), render: (_, model) => <ModelPrice pricing={model.pricing} parameters={model.parameters} /> },
                 ]} />
             </section>)}
         </section>

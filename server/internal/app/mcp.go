@@ -7,9 +7,11 @@ import (
 	"errors"
 	"math"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gorm.io/gorm"
@@ -45,7 +47,7 @@ func businessTools() []toolDefinition {
 		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
 		{"asset_voice_save", "关联已注册音色编号；不会调用供应商克隆或注册音色", "edit", toolSchema(map[string]any{"assetId": stringField("音频资产 ID"), "channelId": stringField("渠道 ID"), "voiceId": stringField("已注册编号"), "version": numberField("现有版本，新建为 0")}, "assetId", "channelId", "voiceId", "version")},
-		{"catalog_list", "读取可用渠道模型目录与管理员配置的各能力默认模型 ID；parameters 包含管理员及脚本默认值，不含真实凭据", "read", toolSchema(map[string]any{})},
+		{"catalog_list", "读取按管理员排序返回的可用渠道模型目录；parameters 包含管理员及脚本默认值，pricing 只返回积分投影，不含真实凭据或成本", "read", toolSchema(map[string]any{})},
 		{"prompts_search", "搜索已保存来源的服务端提示词，读取失败明确报错", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "sourceId": stringField("可选来源 ID")} )},
 		{"workbench_records", "读取图片或视频工作台展示记录，与生成任务分开管理", "read", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}}, "kind")},
 		{"workbench_record_save", "按版本保存工作台展示记录，不提交生成或记账", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取的版本，新建为 0"), "value": map[string]any{"type": "object"}}, "kind", "recordId", "version", "value")},
@@ -55,12 +57,13 @@ func businessTools() []toolDefinition {
 		{"skill_save", "创建或按版本修改个人 Skill；不执行模型调用", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "description": stringField("说明"), "instructions": stringField("指令"), "interface": map[string]any{"type": "object"}, "expectedRevision": stringField("读取的版本，新建时留空"), "enabled": map[string]any{"type": "boolean"}}, "name")},
 		{"skill_delete", "按读取版本删除个人 Skill，不删除对话或项目", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "expectedRevision": stringField("读取的版本")}, "name", "expectedRevision")},
 		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
+		{"generation_quote", "按明确渠道、模型和有效参数预估积分，不调用供应商；未知单位或 token 用量返回 unknown 和 null，不猜测为 0", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "parameters": map[string]any{"type": "object", "description": "与生成提交相同的模型参数；省略字段采用管理员及脚本默认值"}, "prompt": stringField("可选提示词，用于字符数计价"), "messages": map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "可选消息数组，用于字符数计价"}, "requests": map[string]any{"type": "integer", "minimum": 1, "description": "可选请求次数，默认 1"}}, "channelId", "modelId", "parameters")},
 		{"tasks_wait", "读取明确任务是否均已结束或需人工核对；ready=false 返回待等待任务。云端助手会持久等待并让出执行名额，完成后自动续行；外部 MCP 返回同一状态快照，不阻塞 HTTP，也不重新生成", "read", toolSchema(map[string]any{"taskIds": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": stringField("明确生成任务 ID")}}, "taskIds")},
 		{"tasks_list", "读取授权项目内的生成任务和保存、同步状态", "read", toolSchema(map[string]any{})},
 		{"task_get", "读取生成任务、成品资产及待确认状态", "read", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_cancel", "取消未提交任务，已提交任务记录取消意愿并继续核对实际结果", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_resume", "仅继续查询已有上游编号或保存已收到结果，不重新提交供应商", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
-		{"usage_list", "读取授权项目内的实际、估算或未知用量及汇总，可按日期和渠道模型筛选", "read", toolSchema(map[string]any{"userId": stringField("用户 ID"), "projectId": stringField("项目 ID"), "channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": stringField("能力"), "from": stringField("含时区的起始时间"), "to": stringField("含时区的结束时间")})},
+		{"usage_list", "读取授权项目内的积分用量及汇总，可按开始执行时间和渠道模型筛选；未知积分单独计入 pendingCount，不暴露成本", "read", toolSchema(map[string]any{"userId": stringField("用户 ID"), "projectId": stringField("项目 ID"), "channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": stringField("能力"), "from": stringField("含时区的起始时间"), "to": stringField("含时区的结束时间")})},
 		{"approval_request", "为项目删除或全局资产删除创建持久确认请求，返回 pending 后等待用户明确确认", "delete", toolSchema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"delete_project", "delete_asset"}}, "targetId": stringField("目标 ID"), "version": numberField("删除项目时的版本")}, "action", "targetId", "version")},
 		{"approvals_list", "读取授权范围内的持久确认状态", "read", toolSchema(map[string]any{})},
 		{"approval_decide", "仅在用户明确确认后确认或拒绝删除，禁止自行批准", "delete", toolSchema(map[string]any{"approvalId": stringField("确认请求 ID"), "accept": map[string]any{"type": "boolean", "description": "用户明确确认后才可设为 true"}}, "approvalId", "accept")},
@@ -98,7 +101,15 @@ func toolResult(value any, err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}
 }
 
-func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input map[string]any) (any, error) {
+func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input map[string]any) (output any, failure error) {
+	started := time.Now()
+	defer func() {
+		if !a.logEnabled(slog.LevelInfo) { return }
+		known := false; for _, tool := range businessTools() { if tool.Name == name { known = true; break } }
+		fields := []slog.Attr{slog.String("user_id", p.User.ID), slog.Bool("assistant", p.FixedProject), slog.Int64("duration_ms", time.Since(started).Milliseconds())}
+		if known { fields = append(fields, slog.String("tool", name)) }
+		if failure != nil { a.logFailure(ctx, "business.tool_failed", failure, fields...) } else { a.logEvent(ctx, slog.LevelDebug, "business.tool_completed", fields...) }
+	}()
 	if err := ctx.Err(); err != nil { return nil, err }
 	if err := a.db.First(&p.User, "id = ? AND disabled = ?", p.User.ID, false).Error; err != nil { return nil, problem(403, "account_disabled", "账号已停用或不存在") }
 	text := func(key string) string { value, _ := input[key].(string); return value }
@@ -197,6 +208,10 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if len(p.Projects) > 0 && !includes(p.Projects, request.ProjectID) { return nil, problem(403, "project_scope", "任务需要令牌范围内的明确目标项目") }
 		for _, reference := range request.References { if err := a.checkTokenAsset(p, reference.AssetID); err != nil { return nil, err } }
 		return a.CreateTask(p.User.ID, request)
+	case "generation_quote":
+		var request generationQuoteInput
+		if err := json.Unmarshal(encode(input), &request); err != nil { return nil, problem(400, "invalid_input", "积分预估参数不正确") }
+		return a.GenerationQuote(p, request)
 	case "tasks_list":
 		tasks := []GenerationTask{}
 		query := a.db.Where("user_id = ?", p.User.ID)
