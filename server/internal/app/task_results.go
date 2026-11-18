@@ -99,9 +99,9 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 		}
 		if result.URL != "" { if err := save(map[string]any{"url": result.URL}); err != nil { a.taskSaveFailed(task, snapshot, err); return } }
 		if result.ResponseFile != "" {
-			if result.ResponseFile != task.ID+".json" && result.ResponseFile != task.ID+".audio" && result.ResponseFile != task.ID+".media" { a.taskProblem(task, "confirmation_required", "结果文件标识无效", false); return }
+			if result.ResponseFile != task.ID+".json" && result.ResponseFile != task.ID+".media" { a.taskProblem(task, "confirmation_required", "结果文件标识无效", false); return }
 			name := filepath.Join(a.root, "results", result.ResponseFile)
-			if strings.HasSuffix(result.ResponseFile, ".audio") || strings.HasSuffix(result.ResponseFile, ".media") {
+			if strings.HasSuffix(result.ResponseFile, ".media") {
 				file, err := os.Open(name)
 				if err != nil { a.taskSaveFailed(task, snapshot, err); return }
 				asset, err := a.saveGeneratedAsset(ctx, task, 0, file, result.MimeType, snapshot.Policy)
@@ -144,7 +144,7 @@ func (a *App) cleanupTaskResponses(task GenerationTask) {
 	if !terminalTask(task.Status) { return }
 	if _, err := a.assetPath(task.ID); err != nil { return }
 	var failure error
-	for _, suffix := range []string{".json", ".media", ".audio", ".script.json", ".pending", ".json.pending", ".media.pending"} { if err := os.Remove(filepath.Join(a.root, "results", task.ID+suffix)); err != nil && !errors.Is(err, os.ErrNotExist) { failure = err; break } }
+	for _, suffix := range []string{".json", ".media", ".script.json", ".pending", ".json.pending", ".media.pending"} { if err := os.Remove(filepath.Join(a.root, "results", task.ID+suffix)); err != nil && !errors.Is(err, os.ErrNotExist) { failure = err; break } }
 	values := map[string]any{"response_cleanup_pending": false, "response_cleanup_error": "", "raw_response_file": "", "next_run_at": nil}
 	if failure != nil {
 		var snapshot executionSnapshot; if json.Unmarshal(task.Snapshot, &snapshot) != nil || len(snapshot.Policy.StorageRetrySeconds) == 0 { return }

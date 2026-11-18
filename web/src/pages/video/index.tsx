@@ -24,9 +24,6 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/a
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoModeLabel, videoSizeLabel } from "@/components/video-settings-panel";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { clampVideoSeconds } from "@/lib/media-size";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { AssetMedia } from "@/components/canvas/asset-media";
@@ -35,8 +32,7 @@ import { createVideoGenerationTask, waitForVideoGenerationTask, isVideoTaskFaile
 import { captureSession } from "@/services/api/client";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { boolConfig, modelHasParameters, modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
@@ -71,16 +67,13 @@ type GenerationLog = {
     config: GenerationLogConfig;
     references: ReferenceImage[];
     durationMs: number;
-    size: string;
-    resolution: string;
-    seconds: string;
     status: "pending" | "success" | "failed";
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "modelParameters">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "modelParameters">;
 
 type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
 
@@ -277,7 +270,7 @@ export default function VideoPage() {
             openModelSettings();
             return null;
         }
-        return { text, config: buildVideoConfig({ ...effectiveConfig, modelParameters: resolveModelParameters(effectiveConfig, model, parameters[model]) }, model), references: [...references] };
+        return { text, config: { ...effectiveConfig, model, modelParameters: resolveModelParameters(effectiveConfig, model, parameters[model]) }, references: [...references] };
     };
 
     const retryResult = () => {
@@ -380,7 +373,7 @@ export default function VideoPage() {
         setRunning(true);
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
-        const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        const taskConfig = { ...effectiveConfig, ...log.config, model: log.task.model || log.model };
         try {
             const stored = await storeGeneratedVideo(await waitForVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal }));
             const nextVideo: GeneratedVideo = { id: nanoid(), url: stored.url, storageKey: stored.storageKey, durationMs: stored.durationMs || 0, width: stored.width || 0, height: stored.height || 0, bytes: stored.bytes, mimeType: stored.mimeType };
@@ -417,12 +410,6 @@ export default function VideoPage() {
         setReferences(log.references || []);
         setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.vquality) updateConfig("vquality", log.config.vquality);
-        if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
-        if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
-        if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
-        if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
     });
 
@@ -501,7 +488,7 @@ export default function VideoPage() {
 
                             <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
                                 <span className="truncate text-muted-foreground ">
-                                    {modelOptionLabel(effectiveConfig, model)}{!modelHasParameters(effectiveConfig, model) ? ` · ${normalizeResolution(effectiveConfig.vquality)}p · ${videoSizeLabel(effectiveConfig.size)} · ${normalizeVideoSeconds(effectiveConfig.videoSeconds)}s · ${videoModeLabel(effectiveConfig.videoMode)}` : ""}
+                                    {modelOptionLabel(effectiveConfig, model)}
                                 </span>
                                 <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -570,7 +557,6 @@ export default function VideoPage() {
 
 function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
     const openModelSettings = useOpenModelSettings();
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
     return (
@@ -579,9 +565,6 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={openModelSettings} />
             </label>
-            {!modelHasParameters(config, model) ? <div className="col-span-2">
-                <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
-            </div> : null}
         </>
     );
 }
@@ -723,34 +706,15 @@ async function readStoredLogs() {
     return (await Promise.all(records.map(normalizeLog))).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
+async function normalizeLog(log: GenerationLog): Promise<GenerationLog> {
     const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
     const references = await Promise.all(
-        (log.references || []).map(async (item) => {
+        log.references.map(async (item) => {
             if (item.type.startsWith("image/")) { void ensureImagePreview(item.storageKey); return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }; }
             return { ...item, dataUrl: await resolveMediaUrl(item.storageKey, item.dataUrl) };
         }),
     );
-    const config = normalizeLogConfig(log);
-    return {
-        recordVersion: log.recordVersion,
-        id: log.id || nanoid(),
-        createdAt: log.createdAt || Date.now(),
-        title: log.title || log.model || i18n.t("workbench.untitled"),
-        prompt: log.prompt || "",
-        time: log.time || new Date().toLocaleString(i18n.resolvedLanguage, { hour12: false }),
-        model: log.model || config.videoModel || "",
-        config,
-        references,
-        durationMs: log.durationMs || 0,
-        size: log.size || config.size || "",
-        resolution: normalizeResolution(log.resolution || config.vquality || ""),
-        seconds: log.seconds || config.videoSeconds || "",
-        status: log.status || "success",
-        task: log.task,
-        video,
-        error: log.error,
-    };
+    return { ...log, references, video };
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
@@ -786,31 +750,11 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     );
 }
 
-function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
-    return {
-        model: log.config?.model || log.model || "",
-        modelParameters: log.config?.modelParameters,
-        videoModel: log.config?.videoModel || log.model || "",
-        size: log.config?.size || log.size || "",
-        vquality: normalizeResolution(log.config?.vquality || log.resolution || ""),
-        videoSeconds: log.config?.videoSeconds || log.seconds || "",
-        videoGenerateAudio: log.config?.videoGenerateAudio || "true",
-        videoWatermark: log.config?.videoWatermark || "false",
-        videoMode: log.config?.videoMode === "reference" ? "reference" : "frames",
-    };
-}
-
 function buildLog({ prompt, model, config, references, durationMs, status, task, video, error }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; video?: GeneratedVideo; error?: string }): GenerationLog {
     const logConfig = {
         model: config.model,
         modelParameters: config.modelParameters,
         videoModel: config.videoModel,
-        size: config.size,
-        vquality: normalizeResolution(config.vquality),
-        videoSeconds: config.videoSeconds,
-        videoGenerateAudio: config.videoGenerateAudio,
-        videoWatermark: config.videoWatermark,
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
     };
     return {
         id: nanoid(),
@@ -822,40 +766,10 @@ function buildLog({ prompt, model, config, references, durationMs, status, task,
         config: logConfig,
         references,
         durationMs,
-        size: logConfig.size,
-        resolution: logConfig.vquality,
-        seconds: logConfig.videoSeconds,
         status,
         task,
         video,
         error,
     };
-}
-
-function buildVideoConfig(config: AiConfig, model: string): AiConfig {
-    return {
-        ...config,
-        model,
-        videoModel: model,
-        size: normalizeVideoSize(config.size),
-        videoSeconds: normalizeVideoSeconds(config.videoSeconds),
-        vquality: normalizeResolution(config.vquality),
-        videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
-        videoWatermark: String(boolConfig(config.videoWatermark, false)),
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
-    };
-}
-
-function normalizeVideoSeconds(value: string) {
-    if (String(value).trim() === "-1") return "-1";
-    return clampVideoSeconds(value);
-}
-
-function normalizeVideoSize(value: string) {
-    return normalizeVideoSizeValue(value);
-}
-
-function normalizeResolution(value: string) {
-    return normalizeVideoResolutionValue(value);
 }
 

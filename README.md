@@ -2,13 +2,13 @@
 
 面向个人与小团队自托管的 AI 无限画布，基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) v0.20.0 二次开发，由 [qgming](https://github.com/qgming) 维护。React、TypeScript、Vite 前端沿用暖灰浅深主题与 shadcn/ui + Radix，Go、Gin、GORM、SQLite 后端统一管理账号、项目、私有资产、渠道、任务、助手与统计；业务及组件细节参考 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat)。
 
-当前处于后端化实施阶段。持久调度、模型接口脚本、对象存储、云端助手和用量账本已写入代码，**本轮脚本重梳已按用户要求完成前后端构建与重启，页面、健康接口及前端代理可访问；项目端到端、安全与性能验收仍待完成**。既有 UI 验收不覆盖本轮新增功能。完整进度、真实供应商证据和待办集中在 [CHANGELOG](CHANGELOG.md#渠道模型与接口脚本重梳)。
+当前处于后端化实施阶段。持久调度、模型接口脚本、对象存储、云端助手和用量账本已写入代码，**当前文本与图片模型接入已通过用户在本项目中的实际测试**。视频、OpenAI TTS、Agent 工具及其余端到端、安全、恢复与性能专项继续独立验收，既有 UI 验收不自动覆盖本轮新增功能。完整进度、真实调用证据和待办集中在 [CHANGELOG](CHANGELOG.md#渠道模型与接口脚本重梳)。
 
 ## 核心功能
 
 - 无限画布、独立图片 / 视频工作台、多项目、节点连线、导入导出；服务端按用户保存项目，版本冲突保留未保存编辑。
 - 图片、视频、音频私有资产库；成品先持久落盘，再后台同步；删除项目或节点只解除引用，全局资产删除需确认。
-- 渠道默认使用 OpenAI 兼容连接；模型分别选择内置 OpenAI Chat Completions / Responses、图片生成 / 编辑、TTS、Seedance / MiniMax 视频，或自建接口脚本。脚本包包含 `script.json`、`inputs.json`、`adapter.js` 及可选相对导入模块，内置只读且不可复制，自建支持草稿、请求预览、可选真实测试与不可变发布版本。
+- 渠道默认使用 OpenAI 兼容连接；模型分别选择内置 OpenAI Chat Completions / Responses、图片生成 / 编辑、TTS、`/videos` 兼容接口、Seedance / MiniMax 视频，或自建接口脚本。脚本包包含 `script.json`、`inputs.json`、`adapter.js` 及可选相对导入模块，内置只读且不可复制，自建支持草稿、请求预览、可选真实测试与不可变发布版本。
 - Cloudflare R2、阿里云 OSS、腾讯云 COS、七牛云 S3、通用 S3 配置模板；可保存多份，最多启用一份，历史文件保留原存储归属。
 - 持久排队、异步查询、待确认恢复、取消意愿和文件同步 / 删除队列；不确定的付费提交不自动重提或切换渠道。
 - 全局文本 Agent 助手，可调用工具创建和编辑节点、连线、项目、素材、生成任务及自建脚本草稿；内置模型 API 适配 Skill，服务端会话与持久审批，明确目标项目与在线页面。外部 Streamable HTTP MCP 复用同一套工具定义、分发及业务层，大文件经同权限 Bearer HTTP 上传 / 读取。

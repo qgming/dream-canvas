@@ -4,7 +4,7 @@ import type { GenerationTask } from "./tasks";
 export type Capability = "text" | "image" | "video" | "audio";
 export type ParameterControl = {
     key: string; label: string; labelEn?: string; type: "text" | "textarea" | "number" | "switch" | "select" | "asset" | "reference";
-    required?: boolean; default?: unknown; options?: { label: string; labelEn?: string; value: string | number | boolean }[]; role?: "image" | "video" | "audio";
+    required?: boolean; default?: unknown; options?: { label: string; labelEn?: string; value: string | number | boolean }[]; suggestions?: { label: string; labelEn?: string; value: string | number }[]; role?: "image" | "video" | "audio";
     description?: string; descriptionEn?: string; hidden?: boolean; advanced?: boolean; order?: number; when?: { key: string; values: unknown[] };
     min?: number; max?: number; step?: number; minLength?: number; maxLength?: number;
     transport?: "https" | "file" | "data"; minCount?: number; maxCount?: number; mimeTypes?: string[]; maxBytes?: number;
@@ -37,7 +37,7 @@ export const createModelScript = (input: { name: string; capability: Capability;
 export const getModelScript = (id: string) => apiRequest<ScriptDetail>(`/admin/model-scripts/${encodeURIComponent(id)}`);
 export const saveScriptDraft = (id: string, draft: ScriptDraft) => apiRequest<ScriptDraft>(`/admin/model-scripts/${encodeURIComponent(id)}/draft`, jsonRequest("PUT", draft));
 export const publishModelScript = (id: string, revision: number, scriptVersion: number) => apiRequest<ScriptVersion>(`/admin/model-scripts/${encodeURIComponent(id)}/publish`, jsonRequest("POST", { revision, scriptVersion }));
-export const checkModelScript = (files: Record<string, string>, input?: Record<string, unknown>, baseUrl?: string) => apiRequest<ScriptCheck>("/admin/model-scripts/check", jsonRequest("POST", { files, input, baseUrl }));
+export const checkModelScript = (files: Record<string, string>, input?: Record<string, unknown>, baseUrl?: string, parameterOverrides?: ParameterOverrides) => apiRequest<ScriptCheck>("/admin/model-scripts/check", jsonRequest("POST", { files, input, baseUrl, parameterOverrides }));
 export const testModelScript = (id: string, input: ScriptTest) => apiRequest<GenerationTask>(`/admin/model-scripts/${encodeURIComponent(id)}/test`, jsonRequest("POST", input));
 export const getScriptEvidence = (id: string, taskId = "") => apiRequest<ScriptEvidence>(`/admin/model-scripts/${encodeURIComponent(id)}/evidence?${new URLSearchParams({ taskId })}`);
 export type ChannelTemplate = { id: string; name: string; baseUrl: string; documentation: string; models: ServerModel[] };

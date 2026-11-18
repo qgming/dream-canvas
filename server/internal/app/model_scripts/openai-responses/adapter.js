@@ -10,16 +10,20 @@ export async function submit(input, { encode, sign }) {
       else for (const call of m.tool_calls || []) list.push({type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments});
       if (m.content) list.push({role: m.role, content: Array.isArray(m.content) ? m.content.map(c => c.type === "image_asset" ? {type: "input_image", image_url: refs.get(c.assetId)?.url || refs.get(c.assetId)?.dataUrl} : c.type === "image_url" ? {type: "input_image", image_url: c.image_url.url} : {type: "input_text", text: c.text}) : m.content});
   }
-  const body = {model: input.model, input: list, stream: true, store: false, include: ["reasoning.encrypted_content"]};
+  const body = {model: input.model, input: list, stream: p.stream !== false, store: false, include: ["reasoning.encrypted_content"]};
   for (const key of ["temperature", "top_p", "max_output_tokens"]) if (p[key] != null) body[key] = p[key];
   if (p.reasoning_effort) body.reasoning = {effort: p.reasoning_effort};
   if (input.tools?.length) { body.tools = input.tools.map(t => ({type: "function", ...t.function, strict: false})); body.parallel_tool_calls = false; }
-  return {method: "POST", path: "responses", body, responseType: "sse"};
+  return {method: "POST", path: "responses", body, responseType: body.stream ? "sse" : "json"};
 }
 
 export async function stream(input, { encode, sign }) {
   const s = input.state, e = input.event;
   s.text ||= ""; s.toolCalls ||= []; s.responseItems ||= [];
+  if (e.response?.id) s.upstreamId = e.response.id;
+  if (e.response?.usage) s.usage = e.response.usage;
+  if (e.error || ["response.failed", "error"].includes(e.type)) { s.complete = true; s.status = "failed"; s.error = "供应商文本响应失败 / Provider response failed"; }
+  if (s.status === "failed") return s;
   if (e.type === "response.output_text.delta") s.text += e.delta || "";
   if (e.type === "response.output_item.done") {
       const item = e.item;
@@ -27,11 +31,18 @@ export async function stream(input, { encode, sign }) {
       if (["reasoning", "function_call"].includes(item.type)) s.responseItems.push(item);
   }
   if (["response.completed", "response.incomplete"].includes(e.type)) { s.complete = true; s.upstreamId = e.response.id; s.usage = e.response.usage; s.status = e.type === "response.incomplete" ? "incomplete" : "completed"; }
-  if (["response.failed", "error"].includes(e.type)) { s.complete = true; s.status = "failed"; s.error = "供应商文本响应失败 / Provider response failed"; }
   return s;
 }
 
 export async function result(input, { encode, sign }) {
   const r = input.response;
+  if (Array.isArray(r.output)) {
+    if (!["completed", "incomplete", "failed", "cancelled"].includes(r.status)) throw new Error("Missing terminal response status");
+    const responseItems = r.output.filter(item => ["reasoning", "function_call"].includes(item.type));
+    const toolCalls = r.output.filter(item => item.type === "function_call").map(item => ({id: item.call_id, type: "function", function: {name: item.name, arguments: item.arguments}}));
+    return {status: r.status, upstreamId: r.id, text: r.output.flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join(""), responseItems, toolCalls, usage: r.usage || {}, error: r.status !== "completed" ? "供应商文本未完整结束，已收到内容保留 / Incomplete provider response retained" : ""};
+  }
+  if (r.error && r.complete !== true) return {status: "failed", upstreamId: r.id, usage: r.usage || {}, error: "供应商文本接口返回错误 / Provider text API error"};
+  if (r.complete !== true) throw new Error("Missing completed Responses response");
   return {status: r.status || "completed", upstreamId: r.upstreamId, text: r.text || "", reasoning: r.reasoning, responseItems: r.responseItems, toolCalls: (r.toolCalls || []).filter(Boolean), usage: r.usage || {}, error: r.error || (r.status === "incomplete" ? "输出未完整结束，已收到内容保留 / Incomplete output retained" : "")};
 }

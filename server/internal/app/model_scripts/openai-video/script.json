@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "OpenAI-compatible Videos (/videos)",
+  "capability": "video",
+  "description": "按 infinite-canvas 的 /videos 约定：首尾帧或多模态参考，默认 6 秒、720p、1:1、生成音频且无水印。适用于实现此接口的兼容渠道，不代表 OpenAI 官方当前提供视频服务 / The infinite-canvas /videos contract: keyframes or multimodal references, default 6 seconds, 720p, 1:1, audio enabled and watermark off. For compatible channels implementing this API; does not imply current official OpenAI video availability.",
+  "entry": "adapter.js",
+  "inputs": "inputs.json",
+  "phases": [
+    "validate",
+    "submit",
+    "query",
+    "result"
+  ],
+  "features": {
+    "tools": false,
+    "streaming": false
+  },
+  "auth": {
+    "type": "bearer"
+  }
+}

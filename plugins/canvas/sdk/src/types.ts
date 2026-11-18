@@ -36,17 +36,7 @@ export type CanvasNodeMetadata = {
     generationType?: CanvasImageGenerationType;
     model?: string;
     modelParameters?: Record<string, Record<string, unknown>>;
-    size?: string;
-    quality?: string;
     count?: number;
-    seconds?: string;
-    vquality?: string;
-    generateAudio?: string;
-    watermark?: string;
-    audioVoice?: string;
-    audioFormat?: string;
-    audioSpeed?: string;
-    audioInstructions?: string;
     references?: string[];
     naturalWidth?: number;
     naturalHeight?: number;

@@ -91,19 +91,43 @@ func (a *App) providerClient(snapshot executionSnapshot) (openai.Client, error) 
 	credential, err := a.decryptSecret(snapshot.Credential)
 	if err != nil { return openai.Client{}, err }
 	header, prefix := scriptAuth(snapshot)
-	opts := []option.RequestOption{option.WithAPIKey(""), option.WithBaseURL(strings.TrimRight(snapshot.BaseURL, "/")+"/"), option.WithMaxRetries(0), option.WithRequestTimeout(0), option.WithHTTPClient(providerHTTP(snapshot.Policy))}
+	opts := []option.RequestOption{option.WithAPIKey(""), option.WithHeaderDel("Authorization"), option.WithHeaderDel("OpenAI-Organization"), option.WithHeaderDel("OpenAI-Project"), option.WithBaseURL(strings.TrimRight(snapshot.BaseURL, "/")+"/"), option.WithMaxRetries(0), option.WithRequestTimeout(0), option.WithHTTPClient(providerHTTP(snapshot.Policy))}
 	if header != "" { opts = append(opts, option.WithHeader(header, prefix+credential)) }
 	return openai.NewClient(opts...), nil
 }
 
 func providerError(err error) string {
 	var preparation *scriptPreparationError
-	if errors.As(err, &preparation) { return "接口脚本、参数或素材准备失败，尚未提交供应商；请管理员核对接口配置" }
+	if errors.As(err, &preparation) { var runtime *scriptRuntimeError; if errors.As(err, &runtime) { return runtime.Error()+"；尚未提交供应商" }; return "接口请求映射或素材准备失败，尚未提交供应商；请管理员使用请求预览核对路径、参数与素材" }
+	var request *providerRequestError; if errors.As(err, &request) { return request.Error() }
+	var runtime *scriptRuntimeError; if errors.As(err, &runtime) { return runtime.Error()+"；请保留任务记录核对已经收到的响应" }
 	var apiError *openai.Error
 	if errors.As(err, &apiError) { return fmt.Sprintf("供应商返回 HTTP %d，请核对模型、参数、权限和供应商账单", apiError.StatusCode) }
 	if errors.Is(err, context.Canceled) { return "调用已停止；请求可能已提交，结果与用量仍待确认" }
 	if errors.Is(err, context.DeadlineExceeded) { return "调用超过已配置时限，结果与用量待确认，不会自动重新生成" }
 	return "供应商连接或响应读取失败，结果与用量待确认；请保留任务记录核对"
+}
+
+type providerRequestError struct { cause error; message string }
+func (e *providerRequestError) Error() string { return e.message }
+func (e *providerRequestError) Unwrap() error { return e.cause }
+
+func (a *App) providerFailure(snapshot executionSnapshot, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) { return err }
+	var apiError *openai.Error
+	if !errors.As(err, &apiError) {
+		var dns *net.DNSError; if errors.As(err, &dns) { return &providerRequestError{cause: err, message: "供应商域名解析失败，请核对渠道地址和服务器 DNS；未自动重试生成"} }
+		var network *net.OpError; if errors.As(err, &network) && network.Op == "dial" { return &providerRequestError{cause: err, message: "无法建立供应商连接，请核对服务器到渠道的网络；未自动重试生成"} }
+		return err
+	}
+	message := providerError(err)
+	redact, redactionErr := a.assistantRedactor(snapshot)
+	if redactionErr == nil {
+		detail := strings.Join(strings.Fields(apiError.Message), " ")
+		if strings.Contains(detail, "data:") || strings.Contains(strings.ToLower(detail), "base64") || strings.Contains(detail, "b64_json") { detail = "" }
+		if detail != "" { message += "："+text(redact(debugResponseMaterial(detail))) }
+	}
+	return &providerRequestError{cause: err, message: message}
 }
 
 func definitiveRejection(err error) bool {

@@ -25,10 +25,8 @@ import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { modelHasParameters, modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -73,13 +71,11 @@ type GenerationLog = {
     successCount: number;
     failCount: number;
     imageCount: number;
-    size: string;
-    quality: string;
     status: "success" | "failed";
     images: GeneratedImage[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count" | "modelParameters">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "count" | "modelParameters">;
 
 type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
 
@@ -341,8 +337,6 @@ export default function ImagePage() {
         setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
         setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     });
@@ -515,7 +509,7 @@ export default function ImagePage() {
 
                             <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
                                 <span className="truncate text-muted-foreground ">
-                                    {modelOptionLabel(effectiveConfig, model)}{!modelHasParameters(effectiveConfig, model) ? ` · ${effectiveConfig.size} · ${effectiveConfig.quality}` : ""}
+                                    {modelOptionLabel(effectiveConfig, model)}
                                 </span>
                                 <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -603,7 +597,6 @@ export default function ImagePage() {
 
 function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
     const openModelSettings = useOpenModelSettings();
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
     return (
@@ -613,7 +606,7 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} countOnly={modelHasParameters(config, model)} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );
@@ -825,39 +818,20 @@ async function readStoredLogs() {
     return (await Promise.all(records.map(normalizeLog))).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
+async function normalizeLog(log: GenerationLog): Promise<GenerationLog> {
     const references = await Promise.all(
-        (log.references || []).map(async (item) => {
+        log.references.map(async (item) => {
             void ensureImagePreview(item.storageKey);
             return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         }),
     );
     const images = await Promise.all(
-        (log.images || []).map(async (item) => {
+        log.images.map(async (item) => {
             void ensureImagePreview(item.storageKey);
             return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         }),
     );
-    const config = normalizeLogConfig(log);
-    return {
-        recordVersion: log.recordVersion,
-        id: log.id || nanoid(),
-        createdAt: log.createdAt || Date.now(),
-        title: log.title || log.model || i18n.t("workbench.untitled"),
-        prompt: log.prompt || log.title || "",
-        time: log.time || new Date().toLocaleString(i18n.resolvedLanguage, { hour12: false }),
-        model: log.model || config.imageModel || "",
-        config,
-        references,
-        durationMs: log.durationMs || 0,
-        successCount: log.successCount ?? log.imageCount ?? 0,
-        failCount: log.failCount || 0,
-        imageCount: log.imageCount || log.successCount || 0,
-        size: log.size || config.size || "",
-        quality: log.quality || config.quality || "",
-        status: log.status || "success",
-        images,
-    };
+    return { ...log, references, images };
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
@@ -865,17 +839,6 @@ function serializeLog(log: GenerationLog): GenerationLog {
         ...log,
         references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
         images: log.images.map((image) => ({ ...image, dataUrl: image.storageKey ? "" : image.dataUrl })),
-    };
-}
-
-function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
-    return {
-        model: log.config?.model || log.model || "",
-        modelParameters: log.config?.modelParameters,
-        imageModel: log.config?.imageModel || log.model || "",
-        quality: log.config?.quality || log.quality || "",
-        size: log.config?.size || log.size || "",
-        count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
 }
 
@@ -923,8 +886,6 @@ function buildLog({
         model: config.model,
         modelParameters: config.modelParameters,
         imageModel: config.imageModel,
-        quality: config.quality,
-        size: config.size,
         count: config.count,
     };
     return {
@@ -940,8 +901,6 @@ function buildLog({
         successCount,
         failCount,
         imageCount: images.length + failCount,
-        size: logConfig.size,
-        quality: logConfig.quality,
         status,
         images,
     };

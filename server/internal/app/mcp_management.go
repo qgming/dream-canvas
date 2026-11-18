@@ -45,7 +45,7 @@ func managementTools() []toolDefinition {
 		tool("admin_storages_list", "读取五类存储配置，不返回 AccessKey 或 Secret", "admin", map[string]any{}),
 		tool("admin_storage_save", "创建或按版本修改存储；最多启用一个，历史资产保持原归属", "admin", map[string]any{"storageId": stringField("修改时填写，新建留空"), "config": objectField("name/provider/endpoint/bucket/region/pathStyle/default/version/accessKeyId/accessKeySecret")}, "config"),
 		tool("admin_storage_delete", "移除无文件引用的存储配置，不删除资产", "admin", map[string]any{"storageId": stringField("存储 ID")}, "storageId"),
-		tool("admin_script_check", "不调用供应商地编译脚本包，检查输入及请求映射", "admin", map[string]any{"files": objectField("完整文件映射"), "input": objectField("可选标准样例输入"), "baseUrl": stringField("预览地址")}, "files"),
+		tool("admin_script_check", "不调用供应商地编译脚本包，检查输入及请求映射", "admin", map[string]any{"files": objectField("完整文件映射"), "input": objectField("可选标准样例输入"), "baseUrl": stringField("预览地址"), "parameterOverrides": objectField("可选模型参数覆盖，与正式调用共用合并及校验")}, "files"),
         tool("admin_models_remote", "通过已保存渠道的标准 models 接口拉取模型 ID，不创建模型", "admin", map[string]any{"channelId": stringField("渠道 ID")}, "channelId"),
         tool("admin_scripts_list", "查看内置与自建接口脚本目录", "admin", map[string]any{}),
 		tool("admin_script_contract", "读取接口脚本的脚本、素材、参数与工具调用约定；编写草稿前先读取，不含凭据", "admin", map[string]any{"locale": stringField("可选 zh-CN 或 en-US")} ),

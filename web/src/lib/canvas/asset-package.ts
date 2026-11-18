@@ -8,7 +8,7 @@ export function collectPackageAssets(value: unknown, keys = new Set<string>()) {
             const id = assetId(item) || (key === "assetId" ? item : "");
             if (id) keys.add(`asset:${id}`);
         } else if (Array.isArray(item)) item.forEach((child) => walk(child, key));
-        else if (item && typeof item === "object") Object.entries(item).forEach(([name, child]) => { if (!["title", "prompt", "composerContent", "text", "instructions", "systemPrompt", "audioInstructions", "errorDetails"].includes(name)) walk(child, name); });
+        else if (item && typeof item === "object") Object.entries(item).forEach(([name, child]) => { if (!["title", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"].includes(name)) walk(child, name); });
     };
     walk(value);
     return keys;

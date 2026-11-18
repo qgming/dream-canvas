@@ -1,195 +1,35 @@
 [
   {
-    "key": "size",
-    "label": "尺寸",
-    "type": "text",
-    "labelEn": "Size",
-    "description": "填写 auto 或 WIDTHxHEIGHT，具体可用尺寸以模型文档为准。",
-    "descriptionEn": "Use auto or WIDTHxHEIGHT; supported sizes depend on the model."
+    "key": "size", "label": "比例 / 尺寸", "labelEn": "Aspect ratio / size", "type": "text", "default": "1:1", "required": true,
+    "description": "比例按分辨率转换为像素尺寸，也可直接填写 WIDTHxHEIGHT；auto 不发送尺寸。",
+    "descriptionEn": "Ratios use pixel presets at the selected resolution. Enter WIDTHxHEIGHT for a custom size; auto omits size.",
+    "suggestions": [
+      {"label": "自动", "labelEn": "Auto", "value": "auto"},
+      {"label": "1:1", "value": "1:1"}, {"label": "2:3", "value": "2:3"}, {"label": "3:2", "value": "3:2"},
+      {"label": "4:3", "value": "4:3"}, {"label": "3:4", "value": "3:4"}, {"label": "16:9", "value": "16:9"},
+      {"label": "9:16", "value": "9:16"}, {"label": "21:9", "value": "21:9"}, {"label": "9:21", "value": "9:21"}
+    ]
   },
   {
-    "key": "quality",
-    "label": "质量",
-    "type": "select",
-    "options": [
-      {
-        "label": "auto",
-        "value": "auto"
-      },
-      {
-        "label": "low",
-        "value": "low"
-      },
-      {
-        "label": "medium",
-        "value": "medium"
-      },
-      {
-        "label": "high",
-        "value": "high"
-      },
-      {
-        "label": "xhigh",
-        "value": "xhigh"
-      },
-      {
-        "label": "max",
-        "value": "max"
-      },
-      {
-        "label": "standard",
-        "value": "standard"
-      },
-      {
-        "label": "hd",
-        "value": "hd"
-      }
-    ],
-    "labelEn": "Quality",
-    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
-    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+    "key": "resolution", "label": "分辨率", "labelEn": "Resolution", "type": "select", "default": "1k", "required": true,
+    "description": "用于比例到像素的转换；直接填写像素尺寸时以该尺寸为准。",
+    "descriptionEn": "Used to convert ratios to pixels. An explicit pixel size takes precedence.",
+    "options": [{"label": "1K", "value": "1k"}, {"label": "2K", "value": "2k"}, {"label": "4K", "value": "4k"}, {"label": "自动", "labelEn": "Auto", "value": "auto"}]
   },
   {
-    "key": "background",
-    "label": "背景",
-    "type": "select",
-    "options": [
-      {
-        "label": "auto",
-        "value": "auto"
-      },
-      {
-        "label": "opaque",
-        "value": "opaque"
-      },
-      {
-        "label": "transparent",
-        "value": "transparent"
-      }
-    ],
-    "labelEn": "Background",
-    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
-    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+    "key": "quality", "label": "质量", "labelEn": "Quality", "type": "select", "default": "auto", "required": true,
+    "options": [{"label": "自动", "labelEn": "Auto", "value": "auto"}, {"label": "低", "labelEn": "Low", "value": "low"}, {"label": "中", "labelEn": "Medium", "value": "medium"}, {"label": "高", "labelEn": "High", "value": "high"}, {"label": "极高", "labelEn": "Extra high", "value": "xhigh"}, {"label": "最高", "labelEn": "Maximum", "value": "max"}]
   },
   {
-    "key": "output_format",
-    "label": "格式",
-    "type": "select",
-    "options": [
-      {
-        "label": "png",
-        "value": "png"
-      },
-      {
-        "label": "jpeg",
-        "value": "jpeg"
-      },
-      {
-        "label": "webp",
-        "value": "webp"
-      }
-    ],
-    "labelEn": "Format",
-    "description": "仅填写当前模型支持的参数；留空使用供应商默认值。",
-    "descriptionEn": "Set only parameters supported by this model; leave empty for provider defaults."
+    "key": "count", "label": "单次返回张数", "labelEn": "Images per request", "type": "number", "default": 1, "required": true, "min": 1, "max": 15, "step": 1,
+    "description": "映射到供应商 n；与应用的批量请求次数分别设置，模型可收窄可用张数。",
+    "descriptionEn": "Maps to provider n, separately from batch request count. Configure supported counts per model.",
+    "suggestions": [{"label": "1", "value": 1}, {"label": "2", "value": 2}, {"label": "3", "value": 3}, {"label": "4", "value": 4}]
   },
   {
-    "key": "references_image",
-    "label": "参考图片",
-    "type": "reference",
-    "role": "image",
-    "transport": "file",
-    "mimeTypes": [
-      "image/png",
-      "image/jpeg",
-      "image/webp"
-    ],
-    "labelEn": "Images"
+    "key": "background", "label": "背景", "labelEn": "Background", "type": "select",
+    "description": "留空使用默认不透明背景；仅透明背景会传给供应商。", "descriptionEn": "Leave empty for the default opaque background; only transparent is sent to the provider.",
+    "options": [{"label": "透明", "labelEn": "Transparent", "value": "transparent"}]
   },
-  {
-    "key": "mask",
-    "label": "蒙版",
-    "type": "asset",
-    "role": "image",
-    "transport": "file",
-    "mimeTypes": [
-      "image/png"
-    ],
-    "labelEn": "Mask"
-  },
-  {
-    "key": "n",
-    "label": "生成张数",
-    "labelEn": "Number of images",
-    "type": "number",
-    "description": "仅填写模型支持的参数；留空时不发送。",
-    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
-    "advanced": true
-  },
-  {
-    "key": "response_format",
-    "label": "响应格式（仅支持的模型）",
-    "labelEn": "Response format (supported models only)",
-    "type": "select",
-    "options": [
-      {
-        "label": "url",
-        "value": "url"
-      },
-      {
-        "label": "b64_json",
-        "value": "b64_json"
-      }
-    ],
-    "description": "仅填写模型支持的参数；留空时不发送。",
-    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
-    "advanced": true
-  },
-  {
-    "key": "moderation",
-    "label": "审核等级",
-    "labelEn": "Moderation",
-    "type": "select",
-    "options": [
-      {
-        "label": "auto",
-        "value": "auto"
-      },
-      {
-        "label": "low",
-        "value": "low"
-      }
-    ],
-    "description": "仅填写模型支持的参数；留空时不发送。",
-    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
-    "advanced": true
-  },
-  {
-    "key": "input_fidelity",
-    "label": "编辑参考保真度",
-    "labelEn": "Edit input fidelity",
-    "type": "select",
-    "options": [
-      {
-        "label": "low",
-        "value": "low"
-      },
-      {
-        "label": "high",
-        "value": "high"
-      }
-    ],
-    "description": "仅填写模型支持的参数；留空时不发送。",
-    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
-    "advanced": true
-  },
-  {
-    "key": "output_compression",
-    "label": "供应商输出压缩参数",
-    "labelEn": "Provider output compression",
-    "type": "number",
-    "description": "仅填写模型支持的参数；留空时不发送。",
-    "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
-    "advanced": true
-  }
+  {"key": "references_image", "label": "参考图片", "labelEn": "Reference images", "type": "reference", "role": "image", "transport": "file", "mimeTypes": ["image/png", "image/jpeg", "image/webp"]}
 ]

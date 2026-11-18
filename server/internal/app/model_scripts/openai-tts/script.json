@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "OpenAI TTS",
   "capability": "audio",
-  "description": "内置接口脚本，仅可查看和选择使用 / Builtin script: view and use only",
+  "description": "按 infinite-canvas 的 OpenAI TTS 约定调用 audio/speech；voice / format / speed / instructions 默认 Alloy、MP3、1 倍语速，无参考音频或音色编号替换 / The infinite-canvas OpenAI TTS contract at audio/speech. Parameters: voice / format / speed / instructions; defaults Alloy, MP3 and speed 1. No reference audio or voice-ID substitution.",
   "entry": "adapter.js",
   "inputs": "inputs.json",
   "phases": [

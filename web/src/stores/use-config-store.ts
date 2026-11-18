@@ -17,10 +17,8 @@ export type AiConfig = {
     channels: ModelChannel[];
     models: string[];
     model: string; imageModel: string; videoModel: string; textModel: string; audioModel: string;
-    audioVoice: string; audioFormat: string; audioSpeed: string; audioInstructions: string;
-    videoSeconds: string; vquality: string; videoGenerateAudio: string; videoWatermark: string; videoMode: string;
     systemPrompt: string; reasoningEffort: ReasoningEffort;
-    quality: string; size: string; background: string; count: string; canvasImageCount: string;
+    count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
     parameterDefaults: Record<string, Record<string, unknown>>;
     modelParameters?: Record<string, unknown>;
@@ -28,9 +26,7 @@ export type AiConfig = {
 export type GenerationPreference = Omit<AiConfig, "channelMode" | "channels" | "models" | "modelParameters">;
 export const defaultConfig: AiConfig = {
     channelMode: "remote", channels: [], models: [], model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "",
-    audioVoice: "", audioFormat: "mp3", audioSpeed: "1", audioInstructions: "",
-    videoSeconds: "6", vquality: "720", videoGenerateAudio: "true", videoWatermark: "false", videoMode: "frames",
-    systemPrompt: "", reasoningEffort: "auto", quality: "auto", size: "1:1", background: "", count: "1", canvasImageCount: "3",
+    systemPrompt: "", reasoningEffort: "auto", count: "1", canvasImageCount: "3",
     nodeRegenerateBehavior: "new-node", autoFocusOnSelect: false,
     parameterDefaults: {},
 };
@@ -128,7 +124,6 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
 }));
 
 export const useEffectiveConfig = () => useConfigStore((state) => state.config);
-export const boolConfig = (value: string, fallback: boolean) => value ? value === "true" : fallback;
 export const encodeChannelModel = (channelId: string, model: string) => `${channelId}::${model}`;
 export function decodeChannelModel(value: string) { const index = value.indexOf("::"); return index < 0 ? null : { channelId: value.slice(0, index), model: value.slice(index + 2) }; }
 export const isChannelModelValue = (value: string) => Boolean(decodeChannelModel(value));
@@ -157,8 +152,6 @@ export const channelModelId = (config: AiConfig, value: string) => findChannelMo
 export function resolveModelParameters(config: AiConfig, model: string, overrides: Record<string, unknown> = {}) {
     const selected = findChannelModel(config, model)?.model;
     const defaults = selected ? config.parameterDefaults[selected.id] || {} : {};
-    const values = Object.fromEntries((selected?.parameters || []).filter((control) => control.type !== "reference").map((control) => [control.key,
-        Object.prototype.hasOwnProperty.call(overrides, control.key) ? overrides[control.key] : Object.prototype.hasOwnProperty.call(defaults, control.key) ? defaults[control.key] : control.default,
-    ]).filter(([, value]) => value !== undefined));
-    return Object.fromEntries(Object.entries(values).filter(([key]) => inputVisible(selected!.parameters.find((control) => control.key === key)!, values)));
+    const values = { ...Object.fromEntries((selected?.parameters || []).filter((control) => control.type !== "reference" && control.default !== undefined).map((control) => [control.key, control.default])), ...defaults, ...overrides };
+    return Object.fromEntries(Object.entries(values).filter(([key]) => { const control = selected?.parameters.find((control) => control.key === key); return !control || inputVisible(control, values); }));
 }

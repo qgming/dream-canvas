@@ -128,6 +128,8 @@ func validHeaderName(name string) bool {
 	if name == "" { return false }; for _, ch := range name { if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", ch)) { return false } }; return true
 }
 
+type parameterOption struct { Label string `json:"label"`; LabelEn string `json:"labelEn,omitempty"`; Value any `json:"value"` }
+
 type parameterControl struct {
 	Key string `json:"key"`
 	Label string `json:"label"`
@@ -135,7 +137,8 @@ type parameterControl struct {
 	Type string `json:"type"`
 	Required bool `json:"required"`
 	Default any `json:"default"`
-	Options []struct { Label string `json:"label"`; LabelEn string `json:"labelEn,omitempty"`; Value any `json:"value"` } `json:"options"`
+	Options []parameterOption `json:"options"`
+	Suggestions []parameterOption `json:"suggestions,omitempty"`
 	Role string `json:"role"`
 	Description string `json:"description,omitempty"`
 	DescriptionEn string `json:"descriptionEn,omitempty"`
@@ -177,11 +180,13 @@ func validateParameters(raw JSON, modelConfig ...bool) error {
 		if control.Transport != "" && !includes([]string{"https", "file", "data"}, control.Transport) { return problem(400, "invalid_parameters", "素材传递方式支持 https、file 或 data") }
 		if control.MinLength != nil && control.MaxLength != nil && *control.MinLength > *control.MaxLength || control.MinWidth < 0 || control.MaxWidth < 0 || control.MinHeight < 0 || control.MaxHeight < 0 || control.MaxWidth > 0 && control.MinWidth > control.MaxWidth || control.MaxHeight > 0 && control.MinHeight > control.MaxHeight || control.MaxDurationMS > 0 && control.MinDurationMS > control.MaxDurationMS { return problem(400, "invalid_parameters", "素材或文本的最小值不能大于最大值") }
 		for _, kind := range control.MimeTypes { if !strings.Contains(kind, "/") || strings.ContainsAny(kind, " \r\n;") { return problem(400, "invalid_parameters", "素材格式需要 MIME 类型，例如 image/png 或 image/*") } }
+		if len(control.Options) > 0 && !includes([]string{"select", "text", "textarea", "number"}, control.Type) || len(control.Suggestions) > 0 && !includes([]string{"text", "textarea", "number"}, control.Type) { return problem(400, "invalid_parameters", "选项只适用于选择、文本或数字参数；建议值只适用于文本或数字参数") }
 		options := map[string]bool{}
-		for _, option := range control.Options {
+		for _, option := range append(append([]parameterOption{}, control.Options...), control.Suggestions...) {
 			if strings.TrimSpace(option.Label) == "" { return problem(400, "invalid_parameters", "参数选项需要显示名称") }
 			switch option.Value.(type) { case string, bool, float64: default: return problem(400, "invalid_parameters", "参数选项仅支持文本、数字或开关值") }
 			if text, ok := option.Value.(string); ok && strings.TrimSpace(text) == "" { return problem(400, "invalid_parameters", "参数选项值不能为空") }
+			if control.Type != "select" { unrestricted := control; unrestricted.Options = nil; if err := validateParameterValue(unrestricted, option.Value); err != nil { return err } }
 			encoded, _ := json.Marshal(option.Value)
 			if options[string(encoded)] { return problem(400, "invalid_parameters", "参数选项值不能重复") }
 			options[string(encoded)] = true
@@ -203,10 +208,12 @@ func validateParameterValue(control parameterControl, value any) error {
 	case "number": v, ok := value.(float64); if !ok || math.IsNaN(v) || math.IsInf(v, 0) || control.Min != nil && v < *control.Min || control.Max != nil && v > *control.Max { return invalid }; if control.Step != nil { start := 0.0; if control.Min != nil { start = *control.Min }; steps := (v-start)/ *control.Step; if math.Abs(steps-math.Round(steps)) > 1e-9 { return invalid } }
 	case "switch": if _, ok := value.(bool); !ok { return invalid }
 	case "select":
+	default: return invalid
+	}
+	if len(control.Options) > 0 {
 		encoded, _ := json.Marshal(value)
 		for _, option := range control.Options { candidate, _ := json.Marshal(option.Value); if string(encoded) == string(candidate) { return nil } }
 		return invalid
-	default: return invalid
 	}
 	return nil
 }
@@ -224,7 +231,7 @@ func resolveParameters(definitions JSON, input map[string]any) (map[string]any, 
 		value, exists := input[control.Key]; if !exists && control.Default != nil { value, exists = control.Default, true }
 		if exists { parameters[control.Key] = value }
 		if !exists || value == nil { if control.Required { return nil, problem(400, "parameter_required", "请填写参数「"+control.Label+"」") }; continue }
-		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" { if control.Required { return nil, problem(400, "parameter_required", "请填写参数「"+control.Label+"」") }; continue }
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" { if control.Required { return nil, problem(400, "parameter_required", "请填写参数「"+control.Label+"」") }; parameters[control.Key] = nil; continue }
 		if err := validateParameterValue(control, value); err != nil { return nil, err }
 	}
 	return parameters, nil

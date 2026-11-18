@@ -1,0 +1,19 @@
+[
+  {
+    "key": "mode", "label": "参考模式", "labelEn": "Reference mode", "type": "select", "required": true, "default": "frames",
+    "options": [{"label": "首尾帧", "labelEn": "First / last frame", "value": "frames"}, {"label": "多模态参考", "labelEn": "Multimodal references", "value": "reference"}]
+  },
+  {"key": "seconds", "label": "时长（秒）", "labelEn": "Duration (seconds)", "type": "number", "required": true, "default": 6, "min": 4, "max": 30, "step": 1, "suggestions": [{"label": "4", "value": 4}, {"label": "6", "value": 6}, {"label": "8", "value": 8}, {"label": "10", "value": 10}, {"label": "12", "value": 12}]},
+  {
+    "key": "size", "label": "比例 / 尺寸", "labelEn": "Aspect ratio / size", "type": "text", "required": true, "default": "1:1",
+    "description": "按分辨率转换比例，也可填写 WIDTHxHEIGHT；auto 不发送尺寸和比例。", "descriptionEn": "Ratios are converted using the resolution; enter WIDTHxHEIGHT for a custom size. Auto omits size and ratio.",
+    "suggestions": [{"label": "1:1", "value": "1:1"}, {"label": "3:4", "value": "3:4"}, {"label": "4:3", "value": "4:3"}, {"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "21:9", "value": "21:9"}, {"label": "自动", "labelEn": "Auto", "value": "auto"}]
+  },
+  {"key": "resolution", "label": "分辨率", "labelEn": "Resolution", "type": "text", "required": true, "default": "720p", "description": "可填写渠道支持的正整数 p 分辨率，例如 720p。", "descriptionEn": "Enter a provider-supported positive integer p resolution, such as 720p.", "suggestions": [{"label": "480p", "value": "480p"}, {"label": "720p", "value": "720p"}, {"label": "1080p", "value": "1080p"}]},
+  {"key": "generateAudio", "label": "生成音频", "labelEn": "Generate audio", "type": "switch", "required": true, "default": true},
+  {"key": "watermark", "label": "水印", "labelEn": "Watermark", "type": "switch", "required": true, "default": false},
+  {"key": "keyframe_images", "label": "首尾帧（第一张为首帧，第二张为尾帧）", "labelEn": "Keyframes (first image, then last image)", "type": "reference", "role": "image", "transport": "file", "maxCount": 2, "when": {"key": "mode", "values": ["frames"]}},
+  {"key": "reference_images", "label": "参考图片", "labelEn": "Reference images", "type": "reference", "role": "image", "transport": "file", "when": {"key": "mode", "values": ["reference"]}},
+  {"key": "reference_videos", "label": "参考视频", "labelEn": "Reference videos", "type": "reference", "role": "video", "transport": "file", "when": {"key": "mode", "values": ["reference"]}},
+  {"key": "reference_audios", "label": "参考音频", "labelEn": "Reference audio", "type": "reference", "role": "audio", "transport": "file", "when": {"key": "mode", "values": ["reference"]}}
+]

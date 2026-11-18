@@ -23,7 +23,7 @@ func validatePreference(name string, value map[string]any) error {
 				continue
 			}
 			if key == "autoFocusOnSelect" { if _, ok := item.(bool); !ok { return invalid }; continue }
-			if !includes([]string{"model", "imageModel", "textModel", "videoModel", "audioModel", "audioVoice", "audioFormat", "audioSpeed", "audioInstructions", "videoSeconds", "vquality", "videoGenerateAudio", "videoWatermark", "videoMode", "systemPrompt", "reasoningEffort", "quality", "size", "background", "count", "canvasImageCount", "nodeRegenerateBehavior"}, key) { return invalid }
+			if !includes([]string{"model", "imageModel", "textModel", "videoModel", "audioModel", "systemPrompt", "reasoningEffort", "count", "canvasImageCount", "nodeRegenerateBehavior"}, key) { return invalid }
 			text, ok := item.(string)
 			if !ok { return invalid }
 			if key == "reasoningEffort" && !includes([]string{"auto", "low", "medium", "high", "xhigh"}, text) { return invalid }
@@ -125,8 +125,7 @@ func savedModelParameters(db *gorm.DB, userID string, model ChannelModel, overri
 	var value struct { Defaults map[string]map[string]any `json:"parameterDefaults"` }
 	if json.Unmarshal(preference.Value, &value) != nil { return nil, problem(409, "invalid_preference", "创作偏好无法读取，未提交模型") }
 	parameters := map[string]any{}
-	var controls []parameterControl; if json.Unmarshal(model.Parameters, &controls) != nil { return nil, problem(409, "invalid_parameters", "模型参数定义无法读取") }
-	for _, control := range controls { if control.Type != "asset" && control.Type != "reference" { if selected, ok := value.Defaults[model.ID][control.Key]; ok { parameters[control.Key] = selected } } }
+	for key, value := range value.Defaults[model.ID] { parameters[key] = value }
 	for key, value := range overrides { parameters[key] = value }
 	return resolveParameters(model.Parameters, parameters)
 }

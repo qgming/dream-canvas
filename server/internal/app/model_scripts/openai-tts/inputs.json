@@ -1,71 +1,22 @@
 [
   {
-    "key": "voice",
-    "label": "音色编号",
-    "type": "text",
-    "required": true,
-    "default": "coral",
-    "labelEn": "Voice ID"
-  },
-  {
-    "key": "response_format",
-    "label": "音频格式",
-    "type": "select",
-    "default": "mp3",
-    "required": true,
+    "key": "voice", "label": "音色", "labelEn": "Voice", "type": "select", "required": true, "default": "alloy",
+    "description": "模型配置可限定实际支持的内置音色。", "descriptionEn": "Restrict the list per model to supported built-in voices.",
     "options": [
-      {
-        "label": "mp3",
-        "value": "mp3"
-      },
-      {
-        "label": "opus",
-        "value": "opus"
-      },
-      {
-        "label": "aac",
-        "value": "aac"
-      },
-      {
-        "label": "flac",
-        "value": "flac"
-      },
-      {
-        "label": "wav",
-        "value": "wav"
-      },
-      {
-        "label": "pcm",
-        "value": "pcm"
-      }
-    ],
-    "labelEn": "Audio format"
+      {"label": "Alloy", "value": "alloy"}, {"label": "Ash", "value": "ash"}, {"label": "Ballad", "value": "ballad"},
+      {"label": "Coral", "value": "coral"}, {"label": "Echo", "value": "echo"}, {"label": "Fable", "value": "fable"},
+      {"label": "Nova", "value": "nova"}, {"label": "Onyx", "value": "onyx"}, {"label": "Sage", "value": "sage"},
+      {"label": "Shimmer", "value": "shimmer"}, {"label": "Verse", "value": "verse"}, {"label": "Marin", "value": "marin"}, {"label": "Cedar", "value": "cedar"}
+    ]
   },
   {
-    "key": "speed",
-    "label": "语速",
-    "type": "number",
-    "default": 1,
-    "min": 0.25,
-    "max": 4,
-    "labelEn": "Speed"
+    "key": "format", "label": "音频格式", "labelEn": "Audio format", "type": "select", "required": true, "default": "mp3",
+    "description": "映射到 response_format，PCM 保留供应商原始无头音频。", "descriptionEn": "Maps to response_format. PCM preserves the provider's raw headerless audio.",
+    "options": [{"label": "MP3", "value": "mp3"}, {"label": "WAV", "value": "wav"}, {"label": "OPUS", "value": "opus"}, {"label": "AAC", "value": "aac"}, {"label": "FLAC", "value": "flac"}, {"label": "PCM", "value": "pcm"}]
   },
   {
-    "key": "instructions",
-    "label": "语音指令",
-    "type": "textarea",
-    "maxLength": 4096,
-    "labelEn": "Instructions"
+    "key": "speed", "label": "语速", "labelEn": "Speed", "type": "number", "required": true, "default": 1, "min": 0.25, "max": 4, "step": 0.05,
+    "suggestions": [{"label": "0.75×", "value": 0.75}, {"label": "1×", "value": 1}, {"label": "1.25×", "value": 1.25}, {"label": "1.5×", "value": 1.5}]
   },
-  {
-    "key": "references_audio",
-    "label": "参考音频",
-    "type": "reference",
-    "role": "audio",
-    "transport": "file",
-    "maxCount": 1,
-    "description": "使用资产已关联的渠道音色编号；不上传原音频",
-    "labelEn": "Audio",
-    "descriptionEn": "Uses the registered channel voice ID"
-  }
+  {"key": "instructions", "label": "语音指令", "labelEn": "Voice instructions", "type": "textarea", "description": "可选的语气、风格等指令，仅填写当前模型支持的内容。", "descriptionEn": "Optional tone or style instructions supported by the selected model."}
 ]

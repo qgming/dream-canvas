@@ -22,7 +22,7 @@ func channelTemplates() []channelTemplate {
         return ChannelModel{}
     }
     return []channelTemplate{
-        {ID: "openai", Name: "OpenAI API", BaseURL: "https://api.openai.com/v1", Documentation: "https://developers.openai.com/api/docs", Models: []ChannelModel{model("gpt-4.1-mini", "OpenAI Chat Completions", "openai-chat"), model("gpt-4.1", "OpenAI Responses", "openai-responses"), model("gpt-image-1", "OpenAI Images", "openai-image"), model("gpt-4o-mini-tts", "OpenAI TTS", "openai-tts")}},
+        {ID: "openai", Name: "OpenAI API", BaseURL: "https://api.openai.com/v1", Documentation: "https://developers.openai.com/api/docs", Models: []ChannelModel{model("gpt-4.1-mini", "OpenAI Chat Completions", "openai-chat"), model("gpt-4.1", "OpenAI Responses", "openai-responses"), model("gpt-image-2", "OpenAI Images", "openai-image"), model("gpt-4o-mini-tts", "OpenAI TTS", "openai-tts")}},
         {ID: "seedance", Name: "Seedance", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Documentation: "https://www.volcengine.com/docs/82379/1520757", Models: []ChannelModel{model("doubao-seedance-1-0-pro-250528", "Seedance", "seedance")}},
         {ID: "minimax", Name: "MiniMax Video", BaseURL: "https://api.minimax.cn/v1", Documentation: "https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create", Models: []ChannelModel{model("MiniMax-H3", "MiniMax H3", "minimax-video-v2")}},
     }

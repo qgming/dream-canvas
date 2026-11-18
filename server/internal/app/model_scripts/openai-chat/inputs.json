@@ -1,5 +1,15 @@
 [
   {
+    "key": "stream", "label": "流式返回", "labelEn": "Stream response", "type": "switch", "required": true, "default": true, "advanced": true,
+    "description": "关闭时按非流式 Chat Completions JSON 响应读取，不自动切换接口。",
+    "descriptionEn": "When disabled, read non-streaming Chat Completions JSON without switching APIs."
+  },
+  {
+    "key": "include_usage", "label": "请求流式用量", "labelEn": "Request streaming usage", "type": "switch", "required": true, "default": true, "advanced": true, "when": {"key": "stream", "values": [true]},
+    "description": "不支持 stream_options 的兼容渠道可关闭；未返回的用量仍标记未知。",
+    "descriptionEn": "Disable for channels without stream_options. Missing usage stays unknown."
+  },
+  {
     "key": "systemPrompt",
     "label": "系统指令",
     "type": "textarea",

@@ -17,11 +17,12 @@ description: 为梦想画布创建或修订供应商模型的接口脚本，将�
 
 - 输入为 model、prompt、messages、images、videos、audios、params、tools、upstreamId。prompt 在音频任务中是待朗读文本。素材是资产描述符，不是临时 URL 或浏览器文件；按接口选择 https/file/data 传输。
 - `inputs.json` 是输入定义的唯一来源，包含中文和英文名称、适用模式、默认值、类型和必要约束。使用 when 表达模式条件。模型只配置已有字段的默认值、显示设置和更窄的选项，不另存一套完整定义。
+- `options` 是限定选项，值必须符合字段类型；文本或数字的 `suggestions` 仅提供快捷选择并允许自定义，不能放宽其他约束。尺寸可以在脚本内将比例与分辨率转换成像素；不要未经接口约定就将 `16:9` 原样发送到只接收 `WIDTHxHEIGHT` 的字段。默认图片 `count` 映射供应商 `n`，批量请求次数由应用另行控制；默认视频 `generateAudio` 映射 `generate_audio`。默认参数以契约的 builtinMedia 和目标脚本版本为准。
 - 精确列出供应商接受的参数，不盲目展开 params。保留显式 false、0 与空值语义；说明秒/毫秒、像素、采样率等单位。不要将个人资产写入共享默认值。
 - 请求 path 相对完整 API Base URL；不自动补 /v1，前导 / 表示域名根路径。认证由平台注入，不在代码和非秘密 headers 中写 key。
 - 图片区分生成与编辑；multipart 使用 assetId，让平台流式读取原件并处理 boundary。不要转码或压缩输入。
-- 视频 submit 返回供应商编号；query 每次只发一个查询，平台持久轮询。result 映射 running/completed/failed 等真实状态。需要取文件时返回只读后续请求，不在脚本中长时间等待或重复提交。
-- 音频是 TTS，核实 voice、format、speed、instructions 等实际能力与 binary MIME，不改成音乐生成。
+- 视频 submit 返回供应商编号；query 每次只发一个查询，平台持久轮询。result 映射 running/completed/failed 等真实状态。需要取文件时返回只读后续请求，并在该结果提供 usage / usageState，后续通过 input.previousResult 取回并带入最终结果；不在脚本中长时间等待或重复提交。
+- 音频仅内置 OpenAI TTS，输入 voice / format / speed / instructions，默认 alloy / mp3 / 1 / 无指令；format 映射 audio/speech 的 response_format，不保留旧参数别名，不自动使用参考音频或注册音色覆盖 voice。读取 binary MIME，PCM 原件标为 audio/pcm，不改成音乐生成。
 - 文本保留完整 messages 与 tools，规范化工具编号、函数名和 JSON 字符串参数。只有真实支持工具调用时才声明 features.tools。流式阶段累计文本、推理、工具与用量；只有真实终止事件才设置 complete=true，断流不能伪装完成。非流式响应不要伪称流式。
 - 用量只写有依据的数据；区分实际、估算、未知，不按返回次数猜 token 或成本。保留供应商任务编号和可恢复依据。
 

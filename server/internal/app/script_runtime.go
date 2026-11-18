@@ -28,9 +28,9 @@ import (
 // Builtin and user scripts share the same WASM runtime and host capabilities.
 func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot) (runner func(string, any) (map[string]any, error), cleanup func(), failure error) {
 	ctx, cancel := context.WithCancel(parent)
-	defer func() { if recover() != nil { cancel(); if cleanup != nil { cleanup() }; runner, cleanup, failure = nil, nil, errors.New("script runtime could not start within its resource boundary") } }()
+	defer func() { if recover() != nil { cancel(); if cleanup != nil { cleanup() }; runner, cleanup, failure = nil, nil, &scriptRuntimeError{stage: "脚本运行环境初始化", cause: errors.New("runtime resource boundary")} } }()
 	runtime, err := qjs.New(qjs.Option{Context: ctx, NoFilesystem: true, CloseOnContextDone: true, MemoryLimit: snapshot.Policy.ScriptMemoryMiB << 20, MemoryLimitPages: uint32(snapshot.Policy.ScriptMemoryMiB)*16, Stdout: io.Discard, Stderr: io.Discard})
-	if err != nil { cancel(); return nil, nil, err }
+	if err != nil { cancel(); return nil, nil, &scriptRuntimeError{stage: "脚本运行环境初始化", cause: err} }
 	cleanup = func() { defer func() { cancel(); _ = recover() }(); runtime.Close() }
 	js := runtime.Context()
 	js.SetFunc("$encode", func(this *qjs.This) (*qjs.Value, error) {
@@ -39,13 +39,13 @@ func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot) (
 	})
 	js.SetFunc("$sign", func(this *qjs.This) (*qjs.Value, error) { args := this.Args(); if len(args) != 1 { return nil, errors.New("sign(value) required") }; secret, err := a.decryptSecret(snapshot.Credential); if err != nil { return nil, err }; mac := hmac.New(sha256.New, []byte(secret)); mac.Write([]byte(args[0].String())); return js.NewString(hex.EncodeToString(mac.Sum(nil))), nil })
 	run := func(source string, input any) (output map[string]any, err error) {
-		defer func() { if recover() != nil { output, err = nil, errors.New("script interrupted or resource limit reached") } }()
-		data, err := json.Marshal(input); if err != nil { return nil, err }; if int64(len(data)) > snapshot.Policy.JSONBytes { return nil, errors.New("script input exceeds configured JSON boundary") }
+		defer func() { if recover() != nil { output, err = nil, &scriptRuntimeError{stage: "脚本执行（中断或资源边界）", cause: ctx.Err()} } }()
+		data, err := json.Marshal(input); if err != nil { return nil, err }; if int64(len(data)) > snapshot.Policy.JSONBytes { return nil, &scriptRuntimeError{stage: "脚本输入（超过 JSON 边界）"} }
 		timer := time.AfterFunc(seconds(snapshot.Policy.ScriptSeconds), cancel); defer timer.Stop()
-		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+strconv.Quote(string(data))+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, errors.New("script execution failed") }; defer value.Free()
-		resolved, err := value.Await(); if err != nil { return nil, errors.New("script execution failed") }; defer resolved.Free()
-		encoded := resolved.String(); if int64(len(encoded)) > snapshot.Policy.JSONBytes { return nil, errors.New("script output exceeds configured JSON boundary") }
-		if json.Unmarshal([]byte(encoded), &output) != nil || output == nil { return nil, errors.New("script must return a JSON object") }; return output, nil
+		// QJS_Eval already awaits promises; its return value is the resolved JSON string.
+		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+strconv.Quote(string(data))+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, &scriptRuntimeError{stage: "脚本执行", cause: err} }; defer value.Free()
+		encoded := value.String(); if int64(len(encoded)) > snapshot.Policy.JSONBytes { return nil, &scriptRuntimeError{stage: "脚本输出（超过 JSON 边界）"} }
+		if json.Unmarshal([]byte(encoded), &output) != nil || output == nil { return nil, &scriptRuntimeError{stage: "脚本输出（需要 JSON 对象）"} }; return output, nil
 	}
 	return run, cleanup, nil
 }
@@ -87,12 +87,18 @@ func (a *App) validateScriptInput(userID string, snapshot executionSnapshot, inp
 	if snapshot.Script == nil { return problem(400, "script_required", "模型尚未选择接口脚本版本") }; scripts := map[string]string{}; if err := json.Unmarshal(snapshot.Script.Scripts, &scripts); err != nil { return err }; if scripts["validate"] == "" { return nil }
 	arguments, err := a.scriptArguments(GenerationTask{UserID: userID}, snapshot, input, false); if err != nil { return err }
 	if len(tools) > 0 { arguments["tools"] = tools[0] }
-	value, err := a.runScript(a.ctx, snapshot, scripts["validate"], arguments); if err != nil { return problem(400, "interface_validation_failed", "模型参数校验脚本执行失败，未提交供应商") }
+	value, err := a.runScript(a.ctx, snapshot, scripts["validate"], arguments); if err != nil { return problem(400, "interface_validation_failed", "参数校验阶段："+providerError(&scriptPreparationError{cause: err})) }
 	if value["valid"] != true { message := text(value["error"]); if message == "" { message = "模型参数或素材组合不符合接口要求" }; return problem(400, "invalid_model_input", message) }; return nil
 }
 
+// Public diagnostics identify the failing stage without exposing script values or credentials.
+type scriptRuntimeError struct { stage string; cause error }
+func (e *scriptRuntimeError) Error() string { return e.stage+"失败，请核对接口脚本及已配置运行边界" }
+func (e *scriptRuntimeError) Unwrap() error { return e.cause }
+
 type scriptPreparationError struct { cause error }
 func (e *scriptPreparationError) Error() string { return "接口脚本调用准备失败，尚未提交供应商" }
+func (e *scriptPreparationError) Unwrap() error { return e.cause }
 
 func scriptRequestURL(baseURL, requestPath string) (string, error) {
 	address, err := url.Parse(requestPath); base, baseErr := url.Parse(strings.TrimRight(baseURL, "/")+"/")
@@ -132,7 +138,8 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 		}(); writer.CloseWithError(err) }(); body = reader; opts = append(opts, option.WithHeader("Content-Type", form.FormDataContentType()))
 	}
 	submitted = true
-	var response *http.Response; if err := client.Execute(ctx, method, resolved, body, &response, opts...); err != nil { return nil, err }; defer response.Body.Close()
+	var response *http.Response; if err := client.Execute(ctx, method, resolved, body, &response, opts...); err != nil { return nil, a.providerFailure(snapshot, err) }; defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 { return nil, &providerRequestError{cause: errors.New("provider redirect"), message: "供应商返回 HTTP "+strconv.Itoa(response.StatusCode)+"，请检查完整 API Base URL；不会跟随重定向提交凭据"} }
 	if responseType == "sse" { return a.readScriptStream(ctx, snapshot, response, arguments, onText) }
 	if responseType == "image-json" { result, err := a.persistProviderResponse(task.ID, response.Body); return map[string]any{"responseFile": result.ResponseFile}, err }
 	if responseType == "binary" {
@@ -146,8 +153,14 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 func (a *App) readScriptStream(ctx context.Context, snapshot executionSnapshot, response *http.Response, arguments map[string]any, onText func(string) error) (map[string]any, error) {
 	scripts := map[string]string{}; _ = json.Unmarshal(snapshot.Script.Scripts, &scripts); if scripts["stream"] == "" { return nil, errors.New("script stream parser required") }
 	run, close, err := a.scriptRunner(ctx, snapshot); if err != nil { return nil, err }; defer close()
-	stream := ssestream.NewStream[map[string]any](ssestream.NewDecoder(response), nil); defer stream.Close(); state := map[string]any{}
-	for stream.Next() { next, err := run(scripts["stream"], map[string]any{"event": stream.Current(), "state": state, "input": arguments}); if err != nil { return state, err }; state = next; if onText != nil { if err := onText(text(state["text"])); err != nil { return state, err } } }
+	stream := ssestream.NewDecoder(response); defer stream.Close(); state := map[string]any{}
+	for stream.Next() {
+		event := stream.Event(); data := strings.TrimSpace(string(event.Data)); if data == "" || data == "[DONE]" { continue }
+		if int64(len(event.Data)) > snapshot.Policy.JSONBytes { return state, errors.New("stream event exceeds configured JSON boundary") }
+		var value map[string]any; if json.Unmarshal(event.Data, &value) != nil || value == nil { return state, errors.New("invalid stream JSON") }; if value["type"] == nil && event.Type != "" { value["type"] = event.Type }
+		next, err := run(scripts["stream"], map[string]any{"event": value, "state": state, "input": arguments}); if err != nil { return state, err }; state = next
+		if onText != nil { if err := onText(text(state["text"])); err != nil { return state, err } }
+	}
 	if err := stream.Err(); err != nil { return state, err }; if state["complete"] != true { return state, io.ErrUnexpectedEOF }; return state, nil
 }
 
@@ -185,7 +198,11 @@ func (a *App) executeModelScript(ctx context.Context, task GenerationTask, lease
 		if err := ctx.Err(); err != nil { return providerResult{}, err }
 		parsed, err := a.runScript(ctx, snapshot, scripts["result"], map[string]any{"response": response, "phase": phase, "input": arguments}); if err != nil { return providerResult{}, &scriptParseError{phase: "结果"} }
 		if id := text(parsed["upstreamId"]); id != "" { arguments["upstreamId"] = id }
-		if follow := object(parsed["request"]); len(follow) > 0 { if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, &scriptParseError{phase: "后续只读请求"} }; response, err = a.scriptRequest(ctx, task, leaseID, snapshot, follow, arguments, onText); if err != nil { return providerResult{}, &scriptParseError{phase: "后续查询"} }; phase = "followup"; if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }; continue }
+		if follow := object(parsed["request"]); len(follow) > 0 {
+			if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, &scriptParseError{phase: "后续只读请求"} }
+			previous := object(arguments["previousResult"]); for _, key := range []string{"usage", "usageState"} { if parsed[key] != nil { previous[key] = parsed[key] } }; arguments["previousResult"] = previous
+			response, err = a.scriptRequest(ctx, task, leaseID, snapshot, follow, arguments, onText); if err != nil { return providerResult{}, &scriptParseError{phase: "后续查询"} }; phase = "followup"; if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }; continue
+		}
 		var result providerResult; if json.Unmarshal(encode(parsed), &result) != nil || !includes([]string{"queued", "running", "completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) { return result, &scriptParseError{phase: "结果状态"} }
 		if result.UpstreamID == "" { result.UpstreamID = text(arguments["upstreamId"]) }
 		if result.ResponseFile != "" && result.ResponseFile != text(response["responseFile"]) { return providerResult{}, &scriptParseError{phase: "文件标识"} }

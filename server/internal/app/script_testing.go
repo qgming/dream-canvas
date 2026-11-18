@@ -65,13 +65,13 @@ func (a *App) DiscoverChannelModels(parent context.Context, channelID string) ([
 	policy, err := a.executionPolicy(); if err != nil { return nil, err }
 	ctx, cancel := context.WithTimeout(parent, seconds(policy.QuerySeconds)); defer cancel()
 	client, err := a.providerClient(executionSnapshot{BaseURL: channel.BaseURL, Credential: channel.Secret, Policy: policy}); if err != nil { return nil, err }
-	var response *http.Response; if err := client.Execute(ctx, "GET", "models", nil, &response); err != nil { return nil, problem(502, "models_discovery_failed", "拉取模型失败，请核对地址、凭据，或手动填写模型 ID") }; defer response.Body.Close()
+	var response *http.Response; if err := client.Execute(ctx, "GET", "models", nil, &response); err != nil { return nil, problem(502, "models_discovery_failed", "拉取模型失败："+providerError(a.providerFailure(executionSnapshot{Credential: channel.Secret}, err))+"；可核对完整 API Base URL 或手动填写模型 ID") }; defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, policy.JSONBytes+1)); if err != nil || int64(len(data)) > policy.JSONBytes { return nil, problem(502, "models_discovery_failed", "模型列表读取失败或超过已配置 JSON 边界") }
 	var value struct { Data []struct { ID string `json:"id"` } `json:"data"` }; if json.Unmarshal(data, &value) != nil || value.Data == nil { return nil, problem(502, "models_discovery_failed", "服务未返回 OpenAI 模型列表，可手动填写") }
 	rows := []string{}; seen := map[string]bool{}; for _, model := range value.Data { if strings.TrimSpace(model.ID) != "" && !seen[model.ID] { rows = append(rows, model.ID); seen[model.ID] = true } }; return rows, nil
 }
 
-type scriptCheckInput struct { Files JSON `json:"files"`; Input map[string]any `json:"input"`; BaseURL string `json:"baseUrl"` }
+type scriptCheckInput struct { Files JSON `json:"files"`; Input map[string]any `json:"input"`; BaseURL string `json:"baseUrl"`; ParameterOverrides JSON `json:"parameterOverrides"` }
 
 func (a *App) checkModelScript(c *gin.Context) {
 	var input scriptCheckInput; if !bind(c, &input) { return }
@@ -80,6 +80,7 @@ func (a *App) checkModelScript(c *gin.Context) {
 
 func (a *App) CheckModelScript(ctx context.Context, userID string, input scriptCheckInput) (gin.H, error) {
 	scripts, parameters, err := compileScriptPackage(input.Files); if err != nil { return nil, err }
+	parameters, err = effectiveParameters(parameters, input.ParameterOverrides); if err != nil { return nil, err }
 	result := gin.H{"valid": true, "parameters": parameters, "features": scriptFeatures(input.Files)}
 	if input.Input != nil {
 		policy, err := a.executionPolicy(); if err != nil { return nil, err }
@@ -97,9 +98,9 @@ func (a *App) CheckModelScript(ctx context.Context, userID string, input scriptC
 		if err := a.validateReferenceMedia(snapshot, preview, userID); err != nil { return nil, err }
 		arguments, err := a.scriptArguments(GenerationTask{UserID: userID}, snapshot, preview, false); if err != nil { return nil, err }
 		for _, key := range []string{"images", "videos", "audios"} { input.Input[key] = arguments[key] }
-		if stages["validate"] != "" { valid, err := a.runScript(ctx, snapshot, stages["validate"], input.Input); if err != nil { return nil, problem(400, "script_validation_failed", "样例校验阶段执行失败 / Sample validation failed") }; if valid["valid"] != true { return nil, problem(400, "script_validation_failed", "样例未通过校验 / Invalid sample: "+text(valid["error"])) } }
+		if stages["validate"] != "" { valid, err := a.runScript(ctx, snapshot, stages["validate"], input.Input); if err != nil { return nil, problem(400, "script_validation_failed", "样例校验阶段："+providerError(&scriptPreparationError{cause: err})) }; if valid["valid"] != true { return nil, problem(400, "script_validation_failed", "样例未通过校验 / Invalid sample: "+text(valid["error"])) } }
 		for _, key := range []string{"images", "videos", "audios"} { for _, item := range array(input.Input[key]) { asset := object(item); switch asset["transport"] { case "https": asset["url"] = "https://preview.invalid/assets/"+text(asset["assetId"]); case "data": asset["dataUrl"] = "data:"+text(asset["mimeType"])+";base64,PREVIEW" } } }
-		request, err := a.runScript(ctx, snapshot, stages["submit"], input.Input); if err != nil { return nil, problem(400, "script_preview_failed", "请求映射失败，请核对脚本与样例输入；签名接口需在真实测试时使用服务端凭据") }
+		request, err := a.runScript(ctx, snapshot, stages["submit"], input.Input); if err != nil { return nil, problem(400, "script_preview_failed", "请求映射阶段："+providerError(&scriptPreparationError{cause: err})+"；签名接口需在真实测试时使用服务端凭据") }
 		result["request"], result["placeholderMedia"] = debugResponseMaterial(request), len(preview.References) > 0
 		if input.BaseURL != "" { resolved, err := scriptRequestURL(input.BaseURL, text(request["path"])); if err != nil { return nil, problem(400, "invalid_request_path", "预览请求必须使用渠道的 HTTPS 域名 / Preview request must stay on the channel HTTPS origin") }; result["resolvedUrl"] = resolved }
 	}

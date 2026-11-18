@@ -1,5 +1,10 @@
 [
   {
+    "key": "stream", "label": "流式返回", "labelEn": "Stream response", "type": "switch", "required": true, "default": true, "advanced": true,
+    "description": "关闭时按非流式 Responses JSON 响应读取，不自动切换接口。",
+    "descriptionEn": "When disabled, read non-streaming Responses JSON without switching APIs."
+  },
+  {
     "key": "systemPrompt",
     "label": "系统指令",
     "type": "textarea",

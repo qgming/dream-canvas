@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { EditorForm, Field, useEditorForm } from "@/components/ui/form";
+import { EditorForm, Field, useEditorForm, useWatch } from "@/components/ui/form";
 import { Choice } from "@/components/ui/choice";
 import { Input, NumberInput, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/controls";
@@ -15,25 +15,31 @@ export function ModelInputSettings({ controls, value = {}, onChange }: { control
     const { t } = useTranslation();
     const form = useEditorForm();
     const [editing, setEditing] = useState<ParameterControl | null>(null);
+    const defaultValue = useWatch({ control: form.control, name: "default" });
     const effective = applyInputOverrides(controls, value);
+    const baseControl = controls.find((control) => control.key === editing?.key);
     const update = (key: string, change: ParameterOverrides[string]) => onChange({ ...value, [key]: { ...value[key], ...change } });
     return <div className="space-y-4">
         <p className="text-xs leading-5 text-muted-foreground">{t("modelScripts.overridesHint")}</p>
         {effective.length ? <div className="grid gap-4 sm:grid-cols-2">{effective.map((control) => <div key={control.key} className="min-w-0 space-y-2 rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{inputLabel(control)} <span className="font-mono text-xs font-normal text-muted-foreground">{control.key}</span></span><Button size="sm" variant="ghost" onClick={() => { form.reset({ ...control, options: control.options?.map((option) => JSON.stringify(option.value)) || [] }); setEditing(control); }}>{t("common.edit")}</Button></div>
+            <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{inputLabel(control)} <span className="font-mono text-xs font-normal text-muted-foreground">{control.key}</span></span><Button size="sm" variant="ghost" onClick={() => { form.reset({ ...control, options: control.options?.map((option) => JSON.stringify(option.value)) || [], textOptions: control.options?.map((option) => String(option.value)) || [] }); setEditing(control); }}>{t("common.edit")}</Button></div>
             {control.type === "reference" || control.type === "asset" ? <p className="text-xs text-muted-foreground">{t("modelScripts.mediaScriptOwned")}</p> : <ModelInputFields defaultsOnly controls={[{ ...control, hidden: false, advanced: false, when: undefined }]} value={{}} onChange={(values) => update(control.key, { default: values[control.key] })} />}
             {control.hidden ? <p className="text-xs text-muted-foreground">{t("modelScripts.hidden")}</p> : null}
             {value[control.key] ? <Button size="sm" variant="ghost" onClick={() => { const next = { ...value }; delete next[control.key]; onChange(next); }}>{t("modelScripts.resetField")}</Button> : null}
         </div>)}</div> : <p className="text-sm text-muted-foreground">{t("modelScripts.noInputs")}</p>}
-        <Dialog title={t("modelScripts.inputSettings")} open={Boolean(editing)} onClose={() => setEditing(null)} footer={<Button type="submit" form="model-input-override">{t("common.save")}</Button>}>
+        <Dialog title={t("modelScripts.inputSettings")} open={Boolean(editing)} onClose={() => setEditing(null)} dirty={form.formState.isDirty} footer={<Button type="submit" form="model-input-override" loading={form.formState.isSubmitting}>{t("common.save")}</Button>}>
             {editing ? <EditorForm id="model-input-override" form={form} onSubmit={(values) => {
                 const base = controls.find((control) => control.key === editing.key)!;
                 const change: ParameterOverrides[string] = { label: values.label, labelEn: values.labelEn, description: values.description, descriptionEn: values.descriptionEn, hidden: values.hidden, advanced: values.advanced, order: values.order ?? 0, required: base.required || values.required };
                 if (editing.type === "select") change.options = base.options?.filter((option) => values.options.includes(JSON.stringify(option.value)));
                 if (editing.type === "number") { change.min = values.min ?? base.min; change.max = values.max ?? base.max; }
+                if (editing.type === "text" || editing.type === "textarea" || editing.type === "number") change.options = base.options?.length ? base.options.filter((option) => values.options.includes(JSON.stringify(option.value))) : (values.textOptions || []).map((text: string) => { const selected = editing.type === "number" ? Number(text) : text.trim(); return base.suggestions?.find((option) => option.value === selected) || { label: text.trim(), value: selected }; });
+                if (base.options?.length && !change.options?.length) throw new Error(t("modelScripts.optionsRequired"));
+                if (change.options && (change.options.some((option) => !option.label || typeof option.value === "number" && !Number.isFinite(option.value)) || new Set(change.options.map((option) => JSON.stringify(option.value))).size !== change.options.length)) throw new Error(t("modelScripts.optionsInvalid"));
                 const next = { ...value[editing.key], ...change };
+                if (values.default !== editing.default) next.default = values.default;
                 const previousDefault = next.default === undefined ? base.default : next.default;
-                if (previousDefault != null && change.options && !change.options.some((option) => JSON.stringify(option.value) === JSON.stringify(previousDefault))) next.default = null;
+                if (previousDefault != null && change.options?.length && !change.options.some((option) => JSON.stringify(option.value) === JSON.stringify(previousDefault))) throw new Error(t("modelScripts.defaultOutsideOptions"));
                 onChange({ ...value, [editing.key]: next }); form.reset(values); setEditing(null);
             }}>
                 <Field name="label" label={t("modelScripts.labelZh")} schema={z.string().trim().min(1)}><Input /></Field>
@@ -45,7 +51,9 @@ export function ModelInputSettings({ controls, value = {}, onChange }: { control
                 <Field name="required" label={t("modelScripts.required")} checked><Switch disabled={controls.find((control) => control.key === editing.key)?.required} /></Field>
                 <Field name="order" label={t("modelScripts.order")}><NumberInput /></Field>
                 {editing.type === "select" ? <Field name="options" label={t("modelScripts.allowedOptions")} schema={z.array(z.string()).min(1)}><Choice multiple options={controls.find((control) => control.key === editing.key)?.options?.map((option) => ({ label: inputLabel(option), value: JSON.stringify(option.value) }))} /></Field> : null}
+                {editing.type === "text" || editing.type === "textarea" || editing.type === "number" ? <Field name={baseControl?.options?.length ? "options" : "textOptions"} label={t("modelScripts.allowedOptions")} description={t("modelScripts.textOptionsHint")}><Choice multiple searchable creatable={!baseControl?.options?.length} options={(baseControl?.options?.length ? baseControl.options : baseControl?.suggestions)?.map((option) => ({ label: inputLabel(option), value: baseControl?.options?.length ? JSON.stringify(option.value) : String(option.value) }))} /></Field> : null}
                 {editing.type === "number" ? <div className="grid grid-cols-2 gap-3"><Field name="min" label={t("modelScripts.min")}><NumberInput min={controls.find((control) => control.key === editing.key)?.min} /></Field><Field name="max" label={t("modelScripts.max")}><NumberInput max={controls.find((control) => control.key === editing.key)?.max} /></Field></div> : null}
+                {editing.type !== "reference" && editing.type !== "asset" ? <ModelInputFields defaultsOnly controls={[{ ...baseControl!, label: t("modelScripts.default"), labelEn: undefined, description: undefined, descriptionEn: undefined, default: undefined, hidden: false, advanced: false, when: undefined }]} value={{ [editing.key]: defaultValue }} onChange={(values) => form.setValue("default", values[editing.key], { shouldDirty: true })} /> : null}
             </EditorForm> : null}
         </Dialog>
     </div>;
