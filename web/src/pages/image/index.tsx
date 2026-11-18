@@ -94,13 +94,14 @@ export default function ImagePage() {
     const openModelSettings = useOpenModelSettings();
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [selectedModel, setSelectedModel] = useState<string | null>(null);
     const [parameters, setParameters] = useState<Record<string, Record<string, unknown>>>({});
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [logsError, setLogsError] = useState("");
     const [logsLoading, setLogsLoading] = useState(true);
-    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {} }));
+    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null }));
     const runRef = useRef(false);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
@@ -125,11 +126,11 @@ export default function ImagePage() {
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
     const assertSession = useRef(captureSession()).current;
-    const draftDirty = JSON.stringify({ prompt, references, parameters }) !== savedDraft;
-    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {} })); }, []);
+    const draftDirty = JSON.stringify({ prompt, references, parameters, model: selectedModel }) !== savedDraft;
+    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
     useEditGuard(draftDirty || running, discardDraft);
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const model = selectedModel ?? effectiveConfig.imageModel;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
@@ -335,8 +336,8 @@ export default function ImagePage() {
         setPrompt(log.prompt);
         setReferences(log.references || []);
         setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
-        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
+        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} }, model: log.model }));
+        setSelectedModel(log.model);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     });
@@ -517,7 +518,7 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
+                                <GenerationSettings config={effectiveConfig} model={model} onModelChange={setSelectedModel} updateConfig={updateConfig} />
                             </div>
                             <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
@@ -582,7 +583,7 @@ export default function ImagePage() {
             </Dialog>
             <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
+                    <GenerationSettings config={effectiveConfig} model={model} onModelChange={setSelectedModel} updateConfig={updateConfig} />
                 </div>
                 <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
             </Dialog>
@@ -595,7 +596,7 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
+function GenerationSettings({ config, model, onModelChange, updateConfig }: { config: AiConfig; model: string; onModelChange: (model: string) => void; updateConfig: UpdateAiConfig }) {
     const openModelSettings = useOpenModelSettings();
     const { t } = useTranslation();
 
@@ -603,7 +604,7 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={openModelSettings} />
+                <ModelPicker config={config} value={model} onChange={onModelChange} capability="image" fullWidth onMissingConfig={openModelSettings} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} showTitle={false} className="space-y-4" maxCount={10} />

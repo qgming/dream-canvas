@@ -23,8 +23,8 @@ export default function ModelsPage() {
             <PageHeader title={t("settings.models")} description={t("settings.modelsDescription")} actions={<Button variant="ghost" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void query.refetch()}>{t("common.refresh")}</Button>} />
             {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("common.retry")}</Button>} /> : null}
             {query.isLoading ? <div className="flex min-h-40 items-center justify-center"><Spin /></div> : null}
-            {!query.error && query.data?.length === 0 ? <Empty description={t("settings.modelsEmpty")} /> : null}
-            {query.data?.map((channel) => <section key={channel.id} className="space-y-4 pt-2">
+            {!query.error && query.data?.channels.length === 0 ? <Empty description={t("settings.modelsEmpty")} /> : null}
+            {query.data?.channels.map((channel) => <section key={channel.id} className="space-y-4 pt-2">
                 <h2 className="text-base font-semibold break-words">{channel.name}</h2>
                 <DataTable<CatalogChannel["models"][number]> rowId="id" rows={channel.models} columns={[
                     { title: t("workspace.name"), render: (_, model) => <span className="font-medium break-words">{model.name || model.model}</span> },

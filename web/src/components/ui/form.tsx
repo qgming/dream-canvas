@@ -1,12 +1,12 @@
 import { cloneElement, isValidElement, useEffect, useId, useRef, type ReactElement, type ReactNode } from "react";
-import { Controller, FormProvider, useForm, useFormContext, useWatch, type UseFormReturn, type FieldValues } from "react-hook-form";
+import { Controller, FormProvider, useForm, useFormContext, useWatch, type DefaultValues, type UseFormReturn, type FieldValues } from "react-hook-form";
 import type { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 
-export function useEditorForm<T extends FieldValues = FieldValues>() {
-    return useForm<T>({ mode: "onTouched" });
+export function useEditorForm<T extends FieldValues = FieldValues>(defaultValues?: DefaultValues<T>) {
+    return useForm<T>({ defaultValues, mode: "onTouched" });
 }
 
 export async function validateForm<T extends FieldValues>(form: UseFormReturn<T>) {

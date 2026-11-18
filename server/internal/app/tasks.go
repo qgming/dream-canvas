@@ -113,7 +113,7 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		definitions := model.Parameters
 		var controls []parameterControl
 		if json.Unmarshal(definitions, &controls) != nil { return problem(409, "invalid_parameters", "模型参数定义无法读取，请联系管理员") }
-		resolved, err := savedModelParameters(tx, userID, model, parameters); if err != nil { return err }; parameters = resolved
+		resolved, err := resolveParameters(model.Parameters, parameters); if err != nil { return err }; parameters = resolved
 		for _, control := range controls {
 			value := parameters[control.Key]
 			if control.Type == "asset" && value != nil && value != "" {

@@ -65,28 +65,64 @@ func (a *App) ListChannels() ([]gin.H, error) {
 	return result, nil
 }
 
+func (a *App) getChannelForEditing(c *gin.Context) {
+	var channel Channel
+	if err := a.db.First(&channel, "id = ?", c.Param("channelId")).Error; err != nil { respondError(c, err); return }
+	credential := ""
+	if channel.Secret != "" { var err error; credential, err = a.decryptSecret(channel.Secret); if err != nil { respondError(c, err); return } }
+	c.JSON(200, gin.H{"channel": channel, "credential": credential})
+}
+
+func (a *App) deleteChannel(c *gin.Context) {
+	var input struct { Version uint64 `json:"version"`; Confirmed bool `json:"confirmed"` }
+	if !bind(c, &input) { return }
+	if err := a.DeleteChannel(c.Param("channelId"), input.Version, input.Confirmed); err != nil { respondError(c, err); return }
+	c.Status(204)
+}
+
+func (a *App) DeleteChannel(channelID string, version uint64, confirmed bool) error {
+	if !confirmed { return problem(400, "confirmation_required", "请确认移除渠道及其模型配置") }
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var channel Channel
+		if err := tx.First(&channel, "id = ?", channelID).Error; err != nil { return err }
+		if channel.Version != version { return problem(409, "version_conflict", "渠道配置已更新，请重新读取后移除") }
+		if err := tx.Delete(&ChannelModel{}, "channel_id = ?", channel.ID).Error; err != nil { return err }
+		if err := tx.Delete(&AssetVoice{}, "channel_id = ?", channel.ID).Error; err != nil { return err }
+		return tx.Delete(&channel).Error
+	})
+	if err == nil { a.notifyCatalog() }
+	return err
+}
+
 func (a *App) modelCatalog(c *gin.Context) {
 	result, err := a.ModelCatalog()
 	if err != nil { respondError(c, err); return }
 	c.JSON(200, result)
 }
 
-func (a *App) ModelCatalog() ([]gin.H, error) {
-	channels := []Channel{}
-	models := []ChannelModel{}
-	if err := a.db.Where("enabled = ?", true).Order("created_at").Find(&channels).Error; err != nil { return nil, err }
-	if err := a.db.Where("enabled = ?", true).Order("created_at").Find(&models).Error; err != nil { return nil, err }
-	for index := range models { if err := hydrateModel(a.db, &models[index]); err != nil { return nil, err } }
+func (a *App) ModelCatalog() (gin.H, error) {
+	var defaults ModelDefaults
 	result := []gin.H{}
-	for _, channel := range channels {
-		if channel.Secret == "" { continue }
-		entries := []gin.H{}
-		for _, model := range models {
-			if model.ChannelID == channel.ID && model.AdapterVersionID != "" { entries = append(entries, gin.H{"id": model.ID, "model": model.Model, "name": model.Name, "adapterId": model.AdapterID, "capability": model.Capability, "features": modelFeatures(a.db, model), "parameters": model.Parameters, "pricing": model.Pricing, "version": model.Version}) }
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		channels := []Channel{}
+		models := []ChannelModel{}
+		if err := tx.Where("enabled = ?", true).Order("created_at").Find(&channels).Error; err != nil { return err }
+		if err := tx.Where("enabled = ?", true).Order("created_at").Find(&models).Error; err != nil { return err }
+		for index := range models { if err := hydrateModel(tx, &models[index]); err != nil { return err } }
+		var err error
+		defaults, err = readModelDefaults(tx)
+		if err != nil { return err }
+		for _, channel := range channels {
+			if channel.Secret == "" { continue }
+			entries := []gin.H{}
+			for _, model := range models {
+				if model.ChannelID == channel.ID && model.AdapterVersionID != "" { entries = append(entries, gin.H{"id": model.ID, "model": model.Model, "name": model.Name, "adapterId": model.AdapterID, "capability": model.Capability, "features": modelFeatures(tx, model), "parameters": model.Parameters, "pricing": model.Pricing, "version": model.Version}) }
+			}
+			if len(entries) > 0 { result = append(result, gin.H{"id": channel.ID, "name": channel.Name, "models": entries}) }
 		}
-		if len(entries) > 0 { result = append(result, gin.H{"id": channel.ID, "name": channel.Name, "models": entries}) }
-	}
-	return result, nil
+		return nil
+	})
+	return gin.H{"channels": result, "defaults": defaults}, err
 }
 
 type channelInput struct { Name string `json:"name"`; BaseURL string `json:"baseUrl"`; Credential *string `json:"credential"`; Enabled bool `json:"enabled"`; Version uint64 `json:"version"` }

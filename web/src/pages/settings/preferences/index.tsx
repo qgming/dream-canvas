@@ -1,6 +1,6 @@
 import appI18n from "@/i18n";
 import { PageHeader } from "@/components/layout/page-header";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 import { Notice as Alert } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
@@ -11,23 +11,12 @@ import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
 
-import { ModelPicker } from "@/components/model-picker";
-import { ModelParameters } from "@/components/model-parameters";
-import { channelModelId, useConfigStore } from "@/stores/use-config-store";
-import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
+import { useConfigStore } from "@/stores/use-config-store";
 import { captureSession } from "@/services/api/client";
-
-const modelGroups = [
-    { capability: "image", modelKey: "imageModel", labelKey: "config.preferences.defaultImageModel" },
-    { capability: "video", modelKey: "videoModel", labelKey: "config.preferences.defaultVideoModel" },
-    { capability: "text", modelKey: "textModel", labelKey: "config.preferences.defaultTextModel" },
-    { capability: "audio", modelKey: "audioModel", labelKey: "config.preferences.defaultAudioModel" },
-] as const;
 
 export default function PreferencesPage() {
     const { notify, confirm } = useFeedback();
     const { t } = useTranslation();
-    const openModelSettings = useOpenModelSettings();
     const config = useConfigStore((state) => state.config);
     const hydrated = useConfigStore((state) => state.hydrated);
     const error = useConfigStore((state) => state.error);
@@ -37,9 +26,6 @@ export default function PreferencesPage() {
     const discard = useCallback(() => { void useConfigStore.getState().load(true); }, []);
     useEditGuard(dirty, discard);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const [parameterModel, setParameterModel] = useState("");
-    const selectedModel = parameterModel || config.imageModel || config.textModel || config.videoModel || config.audioModel;
-    const selectedId = channelModelId(config, selectedModel);
     const reload = () => {
         const assertSession = captureSession();
         const read = async () => { try { assertSession(); await useConfigStore.getState().load(true); } catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.readFailed")); } };
@@ -51,27 +37,6 @@ export default function PreferencesPage() {
             <PageHeader title={t("settings.preferences")} description={t("settings.preferencesDescription")} />
             {error ? <Alert type="error" title={error} action={<Button onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
             <EditorForm disabled={!hydrated || saving} className="space-y-8">
-                <section>
-                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.defaultModels")}</h2>
-                    <div>
-                        {modelGroups.map((group) => (
-                            <Field key={group.modelKey} layout="horizontal" label={t(group.labelKey)}>
-                                <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} onMissingConfig={openModelSettings} fullWidth />
-                            </Field>
-                        ))}
-                    </div>
-                </section>
-                <section>
-                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.modelParameters")}</h2>
-                    <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("config.preferences.modelParametersDescription")}</p>
-                    <Field layout="horizontal" label={t("workspace.channelModel")}>
-                        <ModelPicker config={config} value={selectedModel} onChange={setParameterModel} onMissingConfig={openModelSettings} fullWidth />
-                    </Field>
-                    {selectedId ? <div className="mt-3 max-w-xl space-y-3">
-                        <ModelParameters config={config} model={selectedModel} value={config.parameterDefaults[selectedId]} disabled={!hydrated || saving} defaultsOnly onChange={(value) => updateConfig("parameterDefaults", { ...config.parameterDefaults, [selectedId]: value })} />
-                        <Button variant="ghost" disabled={!Object.keys(config.parameterDefaults[selectedId] || {}).length} onClick={() => { const next = { ...config.parameterDefaults }; delete next[selectedId]; updateConfig("parameterDefaults", next); }}>{t("config.preferences.resetParameters")}</Button>
-                    </div> : null}
-                </section>
                 <section>
                     <h2 className="mb-2 text-base font-semibold">{t("config.preferences.generation")}</h2>
                     <div>

@@ -55,7 +55,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelDefaults{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &PromptCache{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -204,6 +204,7 @@ func (a *App) Router(web string) *gin.Engine {
 	admin.PATCH("/users/:id", a.updateUser)
 	admin.POST("/users/:id/password", a.resetPassword)
 	admin.GET("/channels", a.listChannels)
+	admin.PUT("/model-defaults", a.saveModelDefaults)
 	admin.GET("/channel-templates", a.listChannelTemplates)
 	admin.POST("/channel-templates/:template", a.installChannelTemplate)
 	admin.GET("/runtime", a.getRuntimeSettings)
@@ -216,7 +217,9 @@ func (a *App) Router(web string) *gin.Engine {
 	admin.POST("/usage/:id/corrections", a.correctUsage)
 	admin.GET("/usage/:id/corrections", a.usageCorrections)
 	admin.POST("/channels", a.saveChannel)
+	admin.GET("/channels/:channelId", a.getChannelForEditing)
 	admin.PUT("/channels/:channelId", a.saveChannel)
+	admin.DELETE("/channels/:channelId", a.deleteChannel)
 	admin.POST("/channels/:channelId/models", a.saveChannelModel)
 	admin.PUT("/channels/:channelId/models/:modelId", a.saveChannelModel)
     admin.POST("/channels/:channelId/models/batch", a.saveChannelModels)

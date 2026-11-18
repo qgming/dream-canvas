@@ -6,7 +6,7 @@ import { Field, useFormContext, useWatch } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
-import { Notice } from "@/components/ui/display";
+import { Notice, Spinner } from "@/components/ui/display";
 import { Button } from "@/components/ui/button";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
 import { ModelInputSettings, ModelPricingFields } from "@/components/model-input-settings";
@@ -28,7 +28,7 @@ export function ModelConfigurationFields({ onCreateScript, onViewScript }: { onC
     const useLatest = useDiscardChanges(Boolean(Object.keys(form.getValues("parameterOverrides") || {}).length), () => { form.setValue("adapterVersionId", script.data!.script.adapterVersionId, { shouldDirty: true }); form.setValue("parameterOverrides", {}, { shouldDirty: true }); });
     return <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2"><Field name="model" label={t("workspace.providerModelId")} schema={z.string().trim().min(1)}><Input /></Field><Field name="name" label={t("workspace.displayName")} schema={z.string().trim().min(1)}><Input /></Field>
-            <Field name="capability" label={t("workspace.type")}><Choice options={["text", "image", "video", "audio"].map((value) => ({ value, label: t(value === "audio" ? "modelScripts.tts" : `workspace.${value}`) }))} onChange={(next: Capability) => { form.setValue("adapterId", defaultAdapter(next), { shouldDirty: true }); form.setValue("adapterVersionId", "", { shouldDirty: true }); form.setValue("parameterOverrides", {}, { shouldDirty: true }); }} /></Field>
+            <Field name="capability" label={t("workspace.type")} schema={z.enum(["text", "image", "video", "audio"])}><Choice options={["text", "image", "video", "audio"].map((value) => ({ value, label: t(value === "audio" ? "modelScripts.tts" : `workspace.${value}`) }))} onChange={(next: Capability) => { form.setValue("adapterId", defaultAdapter(next), { shouldDirty: true }); form.setValue("adapterVersionId", "", { shouldDirty: true }); form.setValue("parameterOverrides", {}, { shouldDirty: true }); }} /></Field>
             <Field name="adapterId" label={t("modelScripts.callAdapter")} schema={z.string().min(1)}><Choice options={scripts.data?.filter((entry) => entry.capability === capability && entry.adapterVersionId).map((entry) => ({ value: entry.id, label: `${entry.name}${entry.builtin ? ` · ${t("modelScripts.builtin")}` : ""}` }))} onChange={() => { form.setValue("adapterVersionId", "", { shouldDirty: true }); form.setValue("parameterOverrides", {}, { shouldDirty: true }); }} /></Field>
         </div>
         {scripts.error || script.error ? <Notice type="error" title={(scripts.error || script.error)?.message} action={<Button onClick={() => { void scripts.refetch(); void script.refetch(); }}>{t("workspace.retry")}</Button>} /> : null}
@@ -36,7 +36,7 @@ export function ModelConfigurationFields({ onCreateScript, onViewScript }: { onC
         {script.data ? <p className="text-xs leading-5 text-muted-foreground">{script.data.script.description}</p> : null}
         {versionId && script.data?.script.adapterVersionId && versionId !== script.data.script.adapterVersionId ? <Notice type="info" title={t("modelScripts.newVersionAvailable")} action={<Button onClick={useLatest}>{t("modelScripts.useLatest")}</Button>} /> : null}
         <Field name="enabled" label={t("workspace.enableModel")} checked><Switch /></Field>
-        <section className="space-y-3"><h3 className="text-sm font-medium">{t("modelScripts.modelInputs")}</h3><Field name="parameterOverrides"><ModelInputSettings controls={version?.parameters || []} value={{}} onChange={() => undefined} /></Field></section>
+        <section className="space-y-3"><h3 className="text-sm font-medium">{t("modelScripts.modelInputs")}</h3>{script.isLoading ? <Spinner label={t("settings.loading")} /> : script.error ? null : version ? <Field key={`${adapterId}:${version.id}`} name="parameterOverrides"><ModelInputSettings controls={version.parameters} value={{}} onChange={() => undefined} /></Field> : <Notice type="error" title={t("modelScripts.versionMissing")} />}</section>
         <section className="space-y-3"><h3 className="text-sm font-medium">{t("modelScripts.pricing")}</h3><Field name="pricing"><ModelPricingFields value={{}} onChange={() => undefined} /></Field></section>
     </div>;
 }

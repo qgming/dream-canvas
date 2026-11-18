@@ -75,9 +75,6 @@ type GenerationLog = {
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "modelParameters">;
 
-type UpdateAiConfig = ReturnType<typeof useConfigStore.getState>["updateConfig"];
-
-
 export default function VideoPage() {
     const { notify } = useFeedback();
     const { t } = useTranslation();
@@ -85,20 +82,19 @@ export default function VideoPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
-    const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
-    const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openModelSettings = useOpenModelSettings();
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [selectedModel, setSelectedModel] = useState<string | null>(null);
     const [parameters, setParameters] = useState<Record<string, Record<string, unknown>>>({});
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [logsError, setLogsError] = useState("");
     const [logsLoading, setLogsLoading] = useState(true);
-    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {} }));
+    const [savedDraft, setSavedDraft] = useState(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null }));
     const submittingRef = useRef(false);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
@@ -127,7 +123,7 @@ export default function VideoPage() {
 
     useEffect(() => () => { watching.current.forEach((controller) => controller.abort()); }, []);
 
-    const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const model = selectedModel ?? effectiveConfig.videoModel;
     const canGenerate = Boolean(prompt.trim());
 
     useEffect(() => {
@@ -312,8 +308,8 @@ export default function VideoPage() {
         } catch (error) { notify.error(error instanceof Error ? error.message : t("errors.mediaNotSaved")); }
     };
 
-    const draftDirty = JSON.stringify({ prompt, references, parameters }) !== savedDraft;
-    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {} })); }, []);
+    const draftDirty = JSON.stringify({ prompt, references, parameters, model: selectedModel }) !== savedDraft;
+    const discardDraft = useCallback(() => { setPrompt(""); setReferences([]); setParameters({}); setSelectedModel(null); setSavedDraft(JSON.stringify({ prompt: "", references: [], parameters: {}, model: null })); }, []);
     useEditGuard(draftDirty || running, discardDraft);
     const createSession = useDiscardChanges(draftDirty, () => {
         discardDraft();
@@ -408,8 +404,8 @@ export default function VideoPage() {
         setPrompt(log.prompt);
         setParameters((state) => ({ ...state, [log.model]: log.config.modelParameters || {} }));
         setReferences(log.references || []);
-        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} } }));
-        if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
+        setSavedDraft(JSON.stringify({ prompt: log.prompt, references: log.references || [], parameters: { ...parameters, [log.model]: log.config.modelParameters || {} }, model: log.model }));
+        setSelectedModel(log.model);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
     });
 
@@ -496,7 +492,7 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
+                                <GenerationSettings config={effectiveConfig} model={model} onModelChange={setSelectedModel} />
                             </div>
                             <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
@@ -542,7 +538,7 @@ export default function VideoPage() {
             </Dialog>
             <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} />
+                    <GenerationSettings config={effectiveConfig} model={model} onModelChange={setSelectedModel} />
                 </div>
                 <ModelParameters config={effectiveConfig} model={model} value={parameters[model]} disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
             </Dialog>
@@ -555,7 +551,7 @@ export default function VideoPage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig }) {
+function GenerationSettings({ config, model, onModelChange }: { config: AiConfig; model: string; onModelChange: (model: string) => void }) {
     const openModelSettings = useOpenModelSettings();
     const { t } = useTranslation();
 
@@ -563,7 +559,7 @@ function GenerationSettings({ config, model, updateConfig }: { config: AiConfig;
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-sm">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={openModelSettings} />
+                <ModelPicker config={config} value={model} onChange={onModelChange} capability="video" fullWidth onMissingConfig={openModelSettings} />
             </label>
         </>
     );

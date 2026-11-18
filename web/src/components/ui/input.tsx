@@ -13,10 +13,10 @@ export function Input({ className, prefix, size, status, showCount, onPressEnter
     return prefix ? <div className={cn("flex w-full items-center gap-2 rounded-md border border-input px-3 focus-within:ring-2 focus-within:ring-ring/30", className)}><span className="shrink-0 text-muted-foreground">{prefix}</span>{field}</div> : field;
 }
 
-export function PasswordInput(props: InputProps) {
+export function PasswordInput({ showLabel, hideLabel, ...props }: InputProps & { showLabel?: string; hideLabel?: string }) {
     const [visible, setVisible] = useState(false);
     const { t } = useTranslation();
-    return <div className="relative"><Input {...props} type={visible ? "text" : "password"} className={cn("pr-10", props.className)} /><Button variant="ghost" size="icon" className={cn("absolute right-0 top-0", props.size === "large" && "size-10", props.size === "small" && "size-7")} aria-label={t(visible ? "ui.hidePassword" : "ui.showPassword")} onClick={() => setVisible(!visible)}>{visible ? <EyeOff /> : <Eye />}</Button></div>;
+    return <div className="relative w-full"><Input {...props} type={visible ? "text" : "password"} className={cn("pr-10", props.className)} /><Button variant="ghost" size="icon" disabled={props.disabled} className={cn("absolute right-0 top-0", props.size === "large" && "size-10", props.size === "small" && "size-7")} aria-label={visible ? hideLabel || t("ui.hidePassword") : showLabel || t("ui.showPassword")} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff /> : <Eye />}</Button></div>;
 }
 
 export function SearchInput({ onSearch, ...props }: InputProps & { onSearch?: (value: string) => void }) {

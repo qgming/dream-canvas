@@ -109,6 +109,12 @@ type ChannelModel struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type ModelDefaults struct {
+	ID uint `json:"-" gorm:"primaryKey"`
+	Version uint64 `json:"version"`
+	Models JSON `json:"models" gorm:"type:blob"`
+}
+
 type ScriptDraft struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	AdapterID string `json:"adapterId" gorm:"uniqueIndex;not null"`

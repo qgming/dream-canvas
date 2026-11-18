@@ -45,7 +45,7 @@ func businessTools() []toolDefinition {
 		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
 		{"asset_voice_save", "关联已注册音色编号；不会调用供应商克隆或注册音色", "edit", toolSchema(map[string]any{"assetId": stringField("音频资产 ID"), "channelId": stringField("渠道 ID"), "voiceId": stringField("已注册编号"), "version": numberField("现有版本，新建为 0")}, "assetId", "channelId", "voiceId", "version")},
-		{"catalog_list", "读取可用渠道模型目录，不含真实凭据", "read", toolSchema(map[string]any{})},
+		{"catalog_list", "读取可用渠道模型目录与管理员配置的各能力默认模型 ID；parameters 包含管理员及脚本默认值，不含真实凭据", "read", toolSchema(map[string]any{})},
 		{"prompts_search", "搜索已保存来源的服务端提示词，读取失败明确报错", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "sourceId": stringField("可选来源 ID")} )},
 		{"workbench_records", "读取图片或视频工作台展示记录，与生成任务分开管理", "read", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}}, "kind")},
 		{"workbench_record_save", "按版本保存工作台展示记录，不提交生成或记账", "edit", toolSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"image", "video"}}, "recordId": stringField("记录 ID"), "version": numberField("读取的版本，新建为 0"), "value": map[string]any{"type": "object"}}, "kind", "recordId", "version", "value")},

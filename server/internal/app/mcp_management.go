@@ -13,7 +13,7 @@ func managementTools() []toolDefinition {
 	tool := func(name, description, scope string, fields map[string]any, required ...string) toolDefinition { return toolDefinition{name, description, scope, toolSchema(fields, required...)} }
 	return []toolDefinition{
 		tool("preference_get", "读取创作偏好或提示词来源；需要不限项目的授权", "read", map[string]any{"name": stringField("generation 或 prompt-sources")}, "name"),
-		tool("preference_save", "按版本保存创作偏好或提示词来源；需要不限项目的授权", "edit", map[string]any{"name": stringField("generation 或 prompt-sources"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象")}, "name", "version", "value"),
+		tool("preference_save", "按版本保存个人创作偏好或提示词来源；默认模型和模型默认参数由管理员配置，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation 或 prompt-sources"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；generation 仅支持 count/canvasImageCount/nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
 		tool("prompt_source_statuses", "读取提示词来源缓存及错误状态", "read", map[string]any{}),
 		tool("prompt_source_get", "读取已配置来源的提示词缓存", "read", map[string]any{"sourceId": stringField("来源 ID")}, "sourceId"),
 		tool("prompt_source_refresh", "主动重新读取已保存来源，不改写来源配置", "edit", map[string]any{"sourceId": stringField("来源 ID")}, "sourceId"),
@@ -22,9 +22,9 @@ func managementTools() []toolDefinition {
 		tool("assistant_thread_get", "读取全局对话、轮次、消息与待确认项", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
 		tool("assistant_thread_create", "创建全局助手对话，不调用模型", "assistant", map[string]any{"title": stringField("对话标题")}),
 		tool("assistant_thread_delete", "删除已停止且用量已保存的对话，历史用量账本保留", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
-		tool("assistant_turn_start", "主动提交助手轮次，可能产生模型和生成费用；项目明确绑定，页面操作可绑定在线客户端", "assistant", map[string]any{"threadId": stringField("对话 ID"), "version": numberField("读取到的对话版本"), "prompt": stringField("用户消息"), "projectId": stringField("目标项目 ID，无项目留空"), "clientId": stringField("可选明确在线客户端 ID"), "channelId": stringField("文本渠道 ID"), "modelId": stringField("文本模型配置 ID"), "parameters": objectField("本轮声明参数；命名素材传原始资产 ID，省略采用个人及管理员默认值"), "skill": stringField("可选 Skill 名称"), "attachments": map[string]any{"type": "array", "items": stringField("图片资产 ID")}, "references": map[string]any{"type": "array", "items": stringField("已保存节点 ID")}}, "threadId", "version", "prompt", "channelId", "modelId"),
+		tool("assistant_turn_start", "主动提交助手轮次，可能产生模型和生成费用；项目明确绑定，页面操作可绑定在线客户端", "assistant", map[string]any{"threadId": stringField("对话 ID"), "version": numberField("读取到的对话版本"), "prompt": stringField("用户消息"), "projectId": stringField("目标项目 ID，无项目留空"), "clientId": stringField("可选明确在线客户端 ID"), "channelId": stringField("文本渠道 ID"), "modelId": stringField("文本模型配置 ID"), "parameters": objectField("本轮声明参数；命名素材传原始资产 ID，省略采用管理员模型默认值及脚本默认值"), "skill": stringField("可选 Skill 名称"), "attachments": map[string]any{"type": "array", "items": stringField("图片资产 ID")}, "references": map[string]any{"type": "array", "items": stringField("已保存节点 ID")}}, "threadId", "version", "prompt", "channelId", "modelId"),
 		tool("assistant_turn_cancel", "停止助手轮次，已提交生成任务由任务入口单独取消", "assistant", map[string]any{"turnId": stringField("轮次 ID")}, "turnId"),
-		tool("assistant_skill_draft_create", "按明确画布或对话材料提交 Skill 草稿任务，可能产生文本模型费用，不自动保存为启用 Skill", "assistant", map[string]any{"source": map[string]any{"type": "string", "enum": []string{"canvas", "conversation"}}, "projectId": stringField("画布材料的项目 ID"), "threadId": stringField("对话材料的对话 ID"), "model": stringField("明确的渠道 ID::模型 ID"), "parameters": objectField("所选文本模型的声明参数，命名素材为资产 ID；省略采用个人及管理员默认值")}, "source", "model"),
+		tool("assistant_skill_draft_create", "按明确画布或对话材料提交 Skill 草稿任务，可能产生文本模型费用，不自动保存为启用 Skill", "assistant", map[string]any{"source": map[string]any{"type": "string", "enum": []string{"canvas", "conversation"}}, "projectId": stringField("画布材料的项目 ID"), "threadId": stringField("对话材料的对话 ID"), "model": stringField("明确的渠道 ID::模型 ID"), "parameters": objectField("所选文本模型的声明参数，命名素材为资产 ID；省略采用管理员模型默认值及脚本默认值")}, "source", "model"),
 		tool("assistant_skill_draft_get", "读取 Skill 草稿任务状态与结果", "assistant", map[string]any{"turnId": stringField("草稿轮次 ID")}, "turnId"),
 		tool("tokens_list", "读取自己的令牌记录，不返回令牌明文", "account", map[string]any{}),
 		tool("token_create", "创建令牌，权限不能超出调用令牌；明文只返回本次", "account", map[string]any{"name": stringField("名称"), "scopes": map[string]any{"type": "array", "items": stringField("read/edit/generate/delete/assistant/account/admin")}, "projects": map[string]any{"type": "array", "items": stringField("项目 ID，空数组表示不限项目")}}, "name", "scopes", "projects"),
@@ -35,7 +35,9 @@ func managementTools() []toolDefinition {
 		tool("admin_user_disable", "管理员停用或恢复账号；不能停用自身", "admin", map[string]any{"userId": stringField("账号 ID"), "disabled": map[string]any{"type": "boolean"}}, "userId", "disabled"),
 		tool("admin_user_password", "管理员主动重置账号密码并撤销其网页会话", "admin", map[string]any{"userId": stringField("账号 ID"), "password": stringField("新密码")}, "userId", "password"),
 		tool("admin_channels_list", "读取渠道及模型管理配置，不返回凭据", "admin", map[string]any{}),
+		tool("admin_model_defaults_save", "按 catalog_list 返回的版本保存全站默认模型；各能力使用渠道模型记录 ID，留空表示未设置", "admin", map[string]any{"version": numberField("读取到的 defaults.version"), "models": toolSchema(map[string]any{"text": stringField("文本模型记录 ID 或空字符串"), "image": stringField("图片模型记录 ID 或空字符串"), "video": stringField("视频模型记录 ID 或空字符串"), "audio": stringField("音频模型记录 ID 或空字符串")}, "text", "image", "video", "audio")}, "version", "models"),
 		tool("admin_channel_save", "创建或按版本修改渠道；凭据仅写入，省略 credential 表示保留现有值", "admin", map[string]any{"channelId": stringField("修改时填写，新建留空"), "config": objectField("name/baseUrl/credential/enabled/version")}, "config"),
+		tool("admin_channel_delete", "管理员明确确认后按版本移除渠道及其模型和音色关联；保留已提交任务快照、资产和历史用量", "admin", map[string]any{"channelId": stringField("渠道 ID"), "version": numberField("读取到的渠道版本"), "confirmed": map[string]any{"type": "boolean"}}, "channelId", "version", "confirmed"),
 		tool("admin_model_save", "创建或按版本修改渠道模型，明确绑定脚本不可变版本、参数与价格", "admin", map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("修改时填写，新建留空"), "config": objectField("model/name/capability/adapterId/adapterVersionId/parameterOverrides/pricing/enabled/version")}, "channelId", "config"),
 		tool("admin_models_save", "原子添加同一渠道的多个模型；任一配置失败时全部保留为未写入", "admin", map[string]any{"channelId": stringField("渠道 ID"), "models": map[string]any{"type": "array", "items": objectField("完整模型配置，结构同 admin_model_save.config")}}, "channelId", "models"),
 		tool("admin_channel_templates", "读取内置渠道模板；模型初始关闭", "admin", map[string]any{}),
@@ -92,7 +94,9 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "admin_user_disable": disabled, ok := input["disabled"].(bool); if !ok { return nil, true, problem(400, "invalid_input", "请明确账号停用状态") }; err = a.SetUserDisabled(p.User.ID, read("userId"), disabled)
 	case "admin_user_password": err = a.setPassword(read("userId"), read("password"))
 	case "admin_channels_list": value, err = a.ListChannels()
+	case "admin_model_defaults_save": var request struct { Version uint64 `json:"version"`; Models map[string]string `json:"models"` }; if err = decode(input, &request); err == nil { value, err = a.SaveModelDefaults(request.Version, request.Models) }
 	case "admin_channel_save": var request channelInput; if err = decode(input["config"], &request); err == nil { value, err = a.SaveChannel(read("channelId"), request) }
+	case "admin_channel_delete": var request struct { Version uint64 `json:"version"`; Confirmed bool `json:"confirmed"` }; if err = decode(input, &request); err == nil { err = a.DeleteChannel(read("channelId"), request.Version, request.Confirmed) }
 	case "admin_model_save": var request ChannelModel; if err = decode(input["config"], &request); err == nil { value, err = a.SaveChannelModel(read("channelId"), read("modelId"), request) }
 	case "admin_models_save": var request []ChannelModel; if err = decode(input["models"], &request); err == nil { value, err = a.SaveChannelModels(read("channelId"), request) }
 	case "admin_channel_templates": value = channelTemplates()

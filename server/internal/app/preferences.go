@@ -17,16 +17,10 @@ func validatePreference(name string, value map[string]any) error {
 	invalid := problem(400, "invalid_preference", "配置字段或类型不正确")
 	if name == "generation" {
 		for key, item := range value {
-			if key == "parameterDefaults" {
-				models, ok := item.(map[string]any); if !ok { return invalid }
-				for id, raw := range models { parameters, ok := raw.(map[string]any); if id == "" || !ok { return invalid }; for key, item := range parameters { if strings.TrimSpace(key) == "" { return invalid }; switch item.(type) { case nil, string, float64, bool: default: return invalid } } }
-				continue
-			}
 			if key == "autoFocusOnSelect" { if _, ok := item.(bool); !ok { return invalid }; continue }
-			if !includes([]string{"model", "imageModel", "textModel", "videoModel", "audioModel", "systemPrompt", "reasoningEffort", "count", "canvasImageCount", "nodeRegenerateBehavior"}, key) { return invalid }
+			if !includes([]string{"count", "canvasImageCount", "nodeRegenerateBehavior"}, key) { return invalid }
 			text, ok := item.(string)
 			if !ok { return invalid }
-			if key == "reasoningEffort" && !includes([]string{"auto", "low", "medium", "high", "xhigh"}, text) { return invalid }
 			if key == "nodeRegenerateBehavior" && text != "new-node" && text != "overwrite" { return invalid }
 		}
 		return nil
@@ -84,7 +78,6 @@ func (a *App) SavePreference(userID, name string, version uint64, data JSON) (Us
 	var value map[string]any
 	if json.Unmarshal(data, &value) != nil || value == nil { return UserPreference{}, problem(400, "invalid_preference", "配置必须是对象") }
 	if err := validatePreference(name, value); err != nil { return UserPreference{}, err }
-	if name == "generation" { if err := a.validateModelDefaults(value["parameterDefaults"]); err != nil { return UserPreference{}, err } }
 	preference := UserPreference{UserID: userID, Name: name}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		err := tx.First(&preference, "user_id = ? AND name = ?", preference.UserID, name).Error
@@ -99,35 +92,6 @@ func (a *App) SavePreference(userID, name string, version uint64, data JSON) (Us
 		return tx.First(&preference, "user_id = ? AND name = ?", preference.UserID, name).Error
 	})
 	if err == nil { a.notify(userID); a.signalWork() }; return preference, err
-}
-
-func (a *App) validateModelDefaults(raw any) error {
-	for modelID, raw := range object(raw) {
-		var model ChannelModel; if err := a.db.First(&model, "id = ?", modelID).Error; err != nil { return err }; if !model.Enabled { continue }; if err := hydrateModel(a.db, &model); err != nil { return err }
-		var controls []parameterControl; if json.Unmarshal(model.Parameters, &controls) != nil { return problem(409, "invalid_parameters", "模型参数定义无法读取") }
-		for key, value := range object(raw) {
-			found := false
-			for _, control := range controls { if control.Key != key { continue }; if control.Type == "asset" || control.Type == "reference" { return problem(400, "invalid_preference", "默认参数不保存素材，请在创作时选择") }; found = true; if value != nil { if err := validateParameterValue(control, value); err != nil { return err } }; break }
-			if !found { return problem(400, "undeclared_parameter", "模型未声明默认参数「"+key+"」，请重新读取模型配置") }
-		}
-	}
-	return nil
-}
-
-func (a *App) savedModelParameters(userID string, model ChannelModel) (map[string]any, error) {
-	return savedModelParameters(a.db, userID, model, nil)
-}
-
-func savedModelParameters(db *gorm.DB, userID string, model ChannelModel, overrides map[string]any) (map[string]any, error) {
-	var preference UserPreference
-	err := db.First(&preference, "user_id = ? AND name = ?", userID, "generation").Error
-	if errors.Is(err, gorm.ErrRecordNotFound) { return resolveParameters(model.Parameters, overrides) }; if err != nil { return nil, err }
-	var value struct { Defaults map[string]map[string]any `json:"parameterDefaults"` }
-	if json.Unmarshal(preference.Value, &value) != nil { return nil, problem(409, "invalid_preference", "创作偏好无法读取，未提交模型") }
-	parameters := map[string]any{}
-	for key, value := range value.Defaults[model.ID] { parameters[key] = value }
-	for key, value := range overrides { parameters[key] = value }
-	return resolveParameters(model.Parameters, parameters)
 }
 
 func workbenchKind(c *gin.Context) bool {

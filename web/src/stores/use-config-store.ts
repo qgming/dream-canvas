@@ -4,7 +4,7 @@ import localforage from "localforage";
 
 import { ApiError, captureSession } from "@/services/api/client";
 import { getPreference, savePreference } from "@/services/api/preferences";
-import type { CatalogChannel, ModelFeatures, ParameterControl } from "@/services/api/channels";
+import type { ModelCatalog, ModelFeatures, ParameterControl } from "@/services/api/channels";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { inputVisible } from "@/lib/model-inputs";
 
@@ -20,19 +20,17 @@ export type AiConfig = {
     systemPrompt: string; reasoningEffort: ReasoningEffort;
     count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
-    parameterDefaults: Record<string, Record<string, unknown>>;
     modelParameters?: Record<string, unknown>;
 };
-export type GenerationPreference = Omit<AiConfig, "channelMode" | "channels" | "models" | "modelParameters">;
+export type GenerationPreference = Pick<AiConfig, "count" | "canvasImageCount" | "nodeRegenerateBehavior" | "autoFocusOnSelect">;
 export const defaultConfig: AiConfig = {
     channelMode: "remote", channels: [], models: [], model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "",
     systemPrompt: "", reasoningEffort: "auto", count: "1", canvasImageCount: "3",
     nodeRegenerateBehavior: "new-node", autoFocusOnSelect: false,
-    parameterDefaults: {},
 };
 type ConfigStore = {
     config: AiConfig; hydrated: boolean; version: number; saving: boolean; dirty: boolean; conflict: boolean; error: string;
-    reset: () => void; load: (discardDraft?: boolean) => Promise<void>; save: () => Promise<void>; setCatalog: (catalog: CatalogChannel[]) => void;
+    reset: () => void; load: (discardDraft?: boolean) => Promise<void>; save: () => Promise<void>; setCatalog: (catalog: ModelCatalog) => void;
     updateConfig: <K extends keyof GenerationPreference>(key: K, value: GenerationPreference[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
 };
@@ -42,7 +40,12 @@ let scopeRevision = 0;
 let editRevision = 0;
 let running: Promise<void> | null = null;
 let pendingWrite = Promise.resolve();
-const preference = ({ channelMode: _mode, channels: _channels, models: _models, modelParameters: _parameters, ...value }: AiConfig): GenerationPreference => value;
+const preference = (value?: Partial<GenerationPreference> | null): GenerationPreference => ({
+    count: value?.count ?? defaultConfig.count,
+    canvasImageCount: value?.canvasImageCount ?? defaultConfig.canvasImageCount,
+    nodeRegenerateBehavior: value?.nodeRegenerateBehavior ?? defaultConfig.nodeRegenerateBehavior,
+    autoFocusOnSelect: value?.autoFocusOnSelect ?? defaultConfig.autoFocusOnSelect,
+});
 const draftKey = (owner: string) => `${owner}/generation`;
 
 export const useConfigStore = create<ConfigStore>((set, get) => ({
@@ -74,12 +77,19 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
             const draft = discardDraft ? null : await drafts.getItem<{ value: GenerationPreference; version: number }>(draftKey(owner));
             if (scope !== scopeRevision || useAuthStore.getState().user?.id !== owner) return;
             if (edit !== editRevision) throw new Error(i18n.t("errors.preferenceEditsPreserved"));
-            set((state) => ({ config: { ...defaultConfig, ...(draft?.value || record.value), channels: state.config.channels, models: state.config.models }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict: Boolean(draft && draft.version !== record.version), error: draft ? i18n.t("errors.preferenceDraftRestored") : "" }));
+            set((state) => ({ config: { ...state.config, ...preference(draft?.value || record.value) }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict: Boolean(draft && draft.version !== record.version), error: draft ? i18n.t("errors.preferenceDraftRestored") : "" }));
         } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
-        const channels = catalog.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, features: model.features, capability: model.capability, parameters: model.parameters })) }));
-        return { config: { ...state.config, channels, models: modelOptionsFromChannels(channels) } };
+        const channels = catalog.channels.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, features: model.features, capability: model.capability, parameters: model.parameters })) }));
+        const defaultModel = (capability: ModelCapability) => {
+            for (const channel of channels) {
+                const model = channel.models.find((model) => model.id === catalog.defaults.models[capability] && model.capability === capability);
+                if (model) return encodeChannelModel(channel.id, model.name);
+            }
+            return "";
+        };
+        return { config: { ...state.config, channels, models: modelOptionsFromChannels(channels), imageModel: defaultModel("image"), videoModel: defaultModel("video"), textModel: defaultModel("text"), audioModel: defaultModel("audio") } };
     }),
     updateConfig: (key, value) => {
         if (!get().hydrated) return;
@@ -151,7 +161,6 @@ export const modelSupportsTools = (config: AiConfig, value: string) => findChann
 export const channelModelId = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.id;
 export function resolveModelParameters(config: AiConfig, model: string, overrides: Record<string, unknown> = {}) {
     const selected = findChannelModel(config, model)?.model;
-    const defaults = selected ? config.parameterDefaults[selected.id] || {} : {};
-    const values = { ...Object.fromEntries((selected?.parameters || []).filter((control) => control.type !== "reference" && control.default !== undefined).map((control) => [control.key, control.default])), ...defaults, ...overrides };
+    const values = { ...Object.fromEntries((selected?.parameters || []).filter((control) => control.type !== "reference" && control.default !== undefined).map((control) => [control.key, control.default])), ...overrides };
     return Object.fromEntries(Object.entries(values).filter(([key]) => { const control = selected?.parameters.find((control) => control.key === key); return !control || inputVisible(control, values); }));
 }
