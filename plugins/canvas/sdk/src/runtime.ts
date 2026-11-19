@@ -1,6 +1,6 @@
 // 运行时桥接:所有对宿主 React 的访问都惰性读取全局运行时,
 // 保证插件与画布共用同一份 React(不打包第二份),且不在模块顶层触碰运行时
-// (宿主 loader 会先 import 插件模块、再设置运行时)。
+// (宿主 loader 在 import 插件模块前注入运行时)。
 
 import type * as React from "react";
 

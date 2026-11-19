@@ -33,7 +33,7 @@ func scriptPackagePath(name string) bool {
 func readScriptPackage(raw JSON) (scriptManifest, map[string]string, JSON, error) {
     var manifest scriptManifest; var files map[string]string
     invalid := func(message string) (scriptManifest, map[string]string, JSON, error) { return manifest, nil, nil, problem(400, "invalid_script_package", message) }
-    if json.Unmarshal(raw, &files) != nil || files == nil { return invalid("接口脚本需要 files 文件映射") }
+    if json.Unmarshal(raw, &files) != nil || files == nil { return invalid("接口插件需要 files 文件映射") }
     for name, content := range files { if !scriptPackagePath(name) || !utf8.ValidString(content) { return invalid("仅支持包内相对路径的 UTF-8 JS / JSON 文件") }; if path.Ext(name) == ".json" && !json.Valid([]byte(content)) { return invalid("JSON 文件无效："+name) } }
     if json.Unmarshal([]byte(files["script.json"]), &manifest) != nil || manifest.SchemaVersion != 1 || !includes([]string{"text", "image", "video", "audio"}, manifest.Capability) { return invalid("script.json 需要 schemaVersion:1、名称和正确的 capability") }
     if err := validTitle(manifest.Name); err != nil { return manifest, nil, nil, err }

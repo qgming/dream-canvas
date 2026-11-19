@@ -19,6 +19,12 @@ export const createTextAsset = (title: string, metadata: Record<string, unknown>
 export type AssetVoice = { assetId: string; channelId: string; voiceId: string; version: number };
 export const listAssetVoices = (id: string) => apiRequest<AssetVoice[]>(`/assets/${encodeURIComponent(id)}/voices`);
 export const saveAssetVoice = (id: string, channelId: string, voiceId: string, version: number) => apiRequest<AssetVoice>(`/assets/${encodeURIComponent(id)}/voices/${encodeURIComponent(channelId)}`, jsonRequest("PUT", { voiceId, version }));
+export type AssetFilenameRepairStatus = {
+    total: number; completed: number; changed: number; failed: number; pending: number;
+    items: { assetId: string; title: string; state: string; error: string; changed: boolean }[];
+};
+export const getAssetFilenameRepair = () => apiRequest<AssetFilenameRepairStatus>("/admin/assets/filename-repair");
+export const startAssetFilenameRepair = () => apiRequest<{ queued: number }>("/admin/assets/filename-repair", jsonRequest("POST", { confirmed: true }));
 
 export async function assetBlob(id: string, signal?: AbortSignal) {
     const assertSession = captureSession();

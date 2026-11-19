@@ -5,9 +5,6 @@ import { Segmented } from "@/components/ui/controls";
 import { Slider } from "@/components/ui/controls";
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { PointsEstimate } from "@/components/points-estimate";
-import { buildAnglePrompt, buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
-import { useEffectiveConfig } from "@/stores/use-config-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasImageAngleParams = {
@@ -27,7 +24,6 @@ const defaultParams: CanvasImageAngleParams = {
 export function CanvasNodeAngleDialog({ node, open, onClose, onConfirm }: { node: CanvasNodeData; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageAngleParams) => void | Promise<unknown> }) {
     const { t } = useTranslation();
     const [params, setParams] = useState(defaultParams);
-    const config = buildGenerationConfig(useEffectiveConfig(), node, "image");
     const dataUrl = node.metadata?.content || "";
 
     useEffect(() => {
@@ -37,7 +33,7 @@ export function CanvasNodeAngleDialog({ node, open, onClose, onConfirm }: { node
     const update = <Key extends keyof CanvasImageAngleParams>(key: Key, value: CanvasImageAngleParams[Key]) => setParams((current) => ({ ...current, [key]: value }));
 
     return (
-        <Dialog title={t("canvas.editors.angleTitle")} description={<span className="flex flex-wrap items-center gap-2"><span>{t("canvas.editors.angleDescription")}</span><PointsEstimate model={config.model} parameters={config.modelParameters} prompt={buildAnglePrompt(params)} /></span>} open={open && Boolean(dataUrl)} onClose={onClose} dirty={JSON.stringify(params) !== JSON.stringify(defaultParams)} onConfirm={() => onConfirm(params)} confirmText={t("canvas.editors.aiGenerate")} width={860}>
+        <Dialog title={t("canvas.editors.angleTitle")} description={t("canvas.editors.angleDescription")} open={open && Boolean(dataUrl)} onClose={onClose} dirty={JSON.stringify(params) !== JSON.stringify(defaultParams)} onConfirm={() => onConfirm(params)} confirmText={t("canvas.editors.aiGenerate")} width={860}>
             <div className="space-y-5">
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_360px]">
                     <div className="flex min-h-[300px] flex-col justify-between rounded-xl border p-4">

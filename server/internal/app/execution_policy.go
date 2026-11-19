@@ -39,11 +39,11 @@ type executionPolicy struct {
 	JSONBytes int64 `json:"jsonBytes"`
 	ScriptSeconds int `json:"scriptSeconds"`
 	ScriptMemoryMiB int `json:"scriptMemoryMiB"`
-	PointsPerYuan string `json:"pointsPerYuan"`
+	PointsPerYuan string `json:"pointsPerYuan,omitempty"`
 }
 
 func suggestedPolicy() executionPolicy {
-	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 1 << 30, JSONBytes: 8 << 20, ScriptSeconds: 5, ScriptMemoryMiB: 64, PointsPerYuan: ""}
+	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 1 << 30, JSONBytes: 8 << 20, ScriptSeconds: 5, ScriptMemoryMiB: 64}
 }
 
 func encode(value any) JSON { data, _ := json.Marshal(value); return data }
@@ -71,6 +71,12 @@ func (a *App) GetRuntimeSettings() (gin.H, error) {
 	var record RuntimeSettings
 	err := a.db.First(&record, 1).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return nil, err }
+	if len(record.Policy) > 0 {
+		var policy executionPolicy
+		if err := json.Unmarshal(record.Policy, &policy); err != nil { return nil, err }
+		policy.PointsPerYuan = ""
+		record.Policy = encode(policy)
+	}
 	return gin.H{"record": record, "suggested": suggestedPolicy()}, nil
 }
 
@@ -89,7 +95,7 @@ func (a *App) SaveRuntimeSettings(userID string, version uint64, p executionPoli
 	for _, value := range append([]int{p.ConnectSeconds, p.QuerySeconds, p.FirstResponseSeconds, p.IdleSeconds, p.TextSeconds, p.ImageSeconds, p.AudioSeconds, p.PollSeconds, p.MaxWaitSeconds, p.TransferSeconds, p.SignedURLSeconds, p.ScriptSeconds}, append(append([]int{}, p.DownloadRetrySeconds...), p.StorageRetrySeconds...)...) { if uint64(value) > uint64(math.MaxInt64/int64(time.Second)) { return RuntimeSettings{}, problem(400, "invalid_policy", "时限超过系统可表示范围") } }
 	if p.ImageBytes == math.MaxInt64 || p.AudioBytes == math.MaxInt64 || p.VideoBytes == math.MaxInt64 || uint64(p.ScriptMemoryMiB) > uint64(math.MaxInt>>20) { return RuntimeSettings{}, problem(400, "invalid_policy", "资源限制超过系统可表示范围") }
 	if p.ScriptMemoryMiB > 4096 || p.JSONBytes == math.MaxInt64 { return RuntimeSettings{}, problem(400, "invalid_policy", "WASM 线性内存最多 4096 MiB，JSON 边界不能溢出") }
-	if p.PointsPerYuan != "" { if _, ok := decimalValue(p.PointsPerYuan); !ok { return RuntimeSettings{}, problem(400, "invalid_points", "人民币兑积分比例需要非负十进制数") } }
+	p.PointsPerYuan = ""
 	record := RuntimeSettings{ID: 1, Version: version + 1, Policy: encode(p), UpdatedBy: userID}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var previous RuntimeSettings

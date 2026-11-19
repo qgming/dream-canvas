@@ -7,6 +7,7 @@ import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
+import { cn } from "@/lib/utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
@@ -18,6 +19,7 @@ type Props = {
     className?: string;
     style?: CSSProperties;
     placeholder?: string;
+    placeholderClassName?: string;
 };
 
 type MentionState = {
@@ -31,18 +33,20 @@ type Token =
 
 // Prompt-panel contentEditable input: @ references embed thumbnail chips instead of plain label text.
 // Serialization converts chips back to reference labels so the generated value matches the former textarea semantics.
-export function CanvasPromptChipInput({ value, references, onChange, onSubmit, className, style, placeholder }: Props) {
+export function CanvasPromptChipInput({ value, references, onChange, onSubmit, className, style, placeholder, placeholderClassName }: Props) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
     // Track the last value emitted to the parent. An identical focused value is this component's own echo,
     // so skip rebuilding to preserve the caret and IME. Rebuild external changes even while focused.
     const lastEmittedRef = useRef(value);
+    const renderedReferencesRef = useRef("");
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
 
     const activeReferences = useMemo(() => references.filter((item) => item.active), [references]);
+    const referenceKey = JSON.stringify(activeReferences.map(({ nodeId, label, previewUrl, text }) => [nodeId, label, previewUrl, text]));
     const referenceByLabel = useMemo(() => new Map(activeReferences.map((item) => [item.label, item])), [activeReferences]);
     // Match longer labels first so a shorter label cannot split a longer one.
     const activeLabels = useMemo(() => Array.from(new Set(activeReferences.map((item) => item.label))).sort((a, b) => b.length - a.length), [activeReferences]);
@@ -59,7 +63,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     useEffect(() => {
         const editor = editorRef.current;
         if (!editor) return;
-        if (document.activeElement === editor && value === lastEmittedRef.current) return;
+        if (document.activeElement === editor && value === lastEmittedRef.current && renderedReferencesRef.current === referenceKey) return;
         editor.textContent = "";
         tokens.forEach((token) => {
             if (token.type === "text") {
@@ -71,7 +75,8 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
             else editor.append(document.createTextNode(token.label));
         });
         lastEmittedRef.current = value;
-    }, [tokens, referenceByLabel, theme, value]);
+        renderedReferencesRef.current = referenceKey;
+    }, [tokens, referenceByLabel, referenceKey, theme, value]);
 
     const emit = (next: string) => {
         lastEmittedRef.current = next;
@@ -129,7 +134,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     return (
         <div className="relative w-full">
             {showPlaceholder && placeholder ? (
-                <div className="pointer-events-none absolute left-3 top-2 text-sm leading-5" style={{ color: theme.node.placeholder }}>
+                <div className={cn("pointer-events-none absolute left-3 top-2 text-sm leading-5", placeholderClassName)} style={{ color: theme.node.placeholder }}>
                     {placeholder}
                 </div>
             ) : null}
@@ -138,6 +143,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                 contentEditable
                 suppressContentEditableWarning
                 role="textbox"
+                aria-label={placeholder}
                 aria-multiline="true"
                 className={`${className || ""} overflow-y-auto whitespace-pre-wrap break-words outline-none`}
                 style={{ ...style, cursor: "text" }}
@@ -225,11 +231,13 @@ function MentionMenu({ rect, references, activeIndex, theme, onSelect }: { rect:
     return createPortal(
         <div
             data-canvas-resource-mention-menu="true"
-            className="fixed z-[1100] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl backdrop-blur-md"
+            data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore
+            className="fixed z-[1600] max-h-56 w-64 overflow-x-hidden overflow-y-auto rounded-xl border p-1 shadow-2xl backdrop-blur-md"
             style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={stopCanvasInteraction}
             onMouseDown={stopCanvasInteraction}
             onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
         >
             {references.map((reference, index) => (
                 <button

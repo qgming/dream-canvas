@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/controls";
 import { CircleDot, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, LocateFixed, MousePointer2, Music2, Palette, Puzzle, Redo2, Settings2, Square, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasTheme } from "@/lib/canvas-theme";
-import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
+import { isBuiltinNodeType, isRegisteredNodeType, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { getNodeSpec } from "@/constant/canvas";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useTranslation } from "react-i18next";
@@ -79,7 +79,7 @@ export function CanvasToolbar({
     }, [extensionsOpen, appearanceOpen]);
     // Keep extension plugin nodes synchronized with registry changes.
     useNodeRegistryVersion();
-    const extensionDefs = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin");
+    const extensionDefs = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && !isBuiltinNodeType(def.type));
     const dockStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: "var(--shadow-lg)" };
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
@@ -115,24 +115,24 @@ export function CanvasToolbar({
                     <LocateFixed className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-text" label={t("canvas.toolbar.text")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
+                {isRegisteredNodeType("text") ? <ToolbarButton id="tool-text" label={t("canvas.toolbar.text")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
                     <Type className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-image" label={t("canvas.toolbar.image")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddImage}>
+                </ToolbarButton> : null}
+                {isRegisteredNodeType("image") ? <ToolbarButton id="tool-image" label={t("canvas.toolbar.image")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddImage}>
                     <ImageIcon className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-video" label={t("canvas.toolbar.video")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
+                </ToolbarButton> : null}
+                {isRegisteredNodeType("video") ? <ToolbarButton id="tool-video" label={t("canvas.toolbar.video")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
                     <Video className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-audio" label={t("canvas.toolbar.audio")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
+                </ToolbarButton> : null}
+                {isRegisteredNodeType("audio") ? <ToolbarButton id="tool-audio" label={t("canvas.toolbar.audio")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
                     <Music2 className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-config" label={t("canvas.toolbar.config")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
+                </ToolbarButton> : null}
+                {isRegisteredNodeType("config") ? <ToolbarButton id="tool-config" label={t("canvas.toolbar.config")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
                     <Settings2 className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-group" label={t("canvas.toolbar.group")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
+                </ToolbarButton> : null}
+                {isRegisteredNodeType("group") ? <ToolbarButton id="tool-group" label={t("canvas.toolbar.group")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
                     <Group className="size-4.5" />
-                </ToolbarButton>
+                </ToolbarButton> : null}
                 {extensionDefs.length ? (
                     <ToolbarButton
                         id="tool-extensions"
@@ -192,7 +192,7 @@ export function CanvasToolbar({
             {extensionsOpen && extensionDefs.length ? (
                 <div
                     ref={activePanel} tabIndex={-1} role="dialog" aria-label={t("canvas.toolbar.extensions")} data-ui-overlay data-canvas-no-zoom
-                    className="thin-scrollbar pointer-events-auto absolute bottom-[72px] z-30 max-h-[50vh] w-[240px] -translate-x-1/2 overflow-y-auto rounded-xl border p-2 shadow-xl backdrop-blur"
+                    className="thin-scrollbar pointer-events-auto absolute bottom-[72px] z-30 max-h-[50vh] w-[240px] -translate-x-1/2 overflow-x-hidden overflow-y-auto rounded-xl border p-2 shadow-xl backdrop-blur"
                     style={{ left: extPanelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
                 >
                     <div className="px-1.5 pb-1.5 text-xs font-medium opacity-50">{t("canvas.toolbar.extensions")}</div>
@@ -210,7 +210,7 @@ export function CanvasToolbar({
                                     setExtensionsOpen(false);
                                 }}
                             >
-                                <span className="grid size-7 shrink-0 place-items-center rounded-md text-base" style={{ background: theme.toolbar.itemHover }}>
+                                <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4 [&_svg]:shrink-0">
                                     {def.icon}
                                 </span>
                                 <span className="min-w-0 flex-1 truncate">{getNodeSpec(def.type).title}</span>

@@ -6,7 +6,17 @@ import type { CanvasNodeDefinition } from "@/types/canvas-plugin";
 import { CanvasNodeType } from "@/types/canvas";
 
 const definitions = new Map<string, CanvasNodeDefinition>();
-const ownerByType = new Map<string, string>(); // type -> pluginId; built-in nodes use "builtin".
+const ownerByType = new Map<string, string>(); // type -> pluginId
+let availableTypes = new Set<string>();
+
+export function setAvailableNodeTypes(types: string[]) {
+    availableTypes = new Set(types);
+    bump();
+}
+
+export function isNodeTypeEnabled(type: string) {
+    return availableTypes.has(type);
+}
 
 // Increment the registry version on registration or removal to update dependent UI such as creation menus.
 export const useNodeRegistryVersion = create<{ version: number }>(() => ({ version: 0 }));
@@ -15,6 +25,10 @@ function bump() {
 }
 
 export function registerNodeDefinitions(defs: CanvasNodeDefinition[], pluginId = "builtin") {
+    for (const def of defs) {
+        const owner = ownerByType.get(def.type);
+        if (owner && owner !== pluginId) throw new Error(i18n.t("nodePlugins.typeConflict", { type: def.type }));
+    }
     defs.forEach((def) => {
         definitions.set(def.type, def);
         ownerByType.set(def.type, pluginId);
@@ -40,11 +54,11 @@ export function getNodePluginId(type: string) {
 }
 
 export function listNodeDefinitions() {
-    return Array.from(definitions.values());
+    return Array.from(definitions.values()).filter((def) => availableTypes.has(def.type));
 }
 
 export function isRegisteredNodeType(type: string) {
-    return definitions.has(type);
+    return availableTypes.has(type) && definitions.has(type);
 }
 
 const FALLBACK_SPEC = { width: 340, height: 240, title: i18n.t("canvas.node.node"), metadata: {} as CanvasNodeDefinition["defaultMetadata"] };

@@ -1,26 +1,14 @@
-import { defaultConfig, resolveModelForCapability, resolveModelParameters, type AiConfig } from "@/stores/use-config-store";
+import { findChannelModel, resolveModelForCapability, resolveModelParameters, type AiConfig } from "@/stores/use-config-store";
+import { inputVisible } from "@/lib/model-inputs";
+import type { CanvasResourceKind } from "@/lib/canvas/canvas-resource-references";
 import i18n from "@/i18n";
 import { ensureImagePreview, resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { referenceUrl } from "@/lib/canvas/canvas-node-factory";
-import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { ReferenceImage } from "@/types/image";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
-
-export function imageExtension(dataUrl: string) {
-    return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
-}
-
-export function audioExtension(mimeType?: string) {
-    if (mimeType?.includes("wav")) return "wav";
-    if (mimeType?.includes("opus")) return "opus";
-    if (mimeType?.includes("aac")) return "aac";
-    if (mimeType?.includes("flac")) return "flac";
-    if (mimeType?.includes("pcm")) return "pcm";
-    return "mp3";
-}
 
 export function generationReferenceUrls(context: { referenceImages: ReferenceImage[]; referenceVideos: Array<{ storageKey?: string; url?: string }>; referenceAudios?: Array<{ storageKey?: string; url?: string }> }) {
     return [
@@ -83,29 +71,21 @@ export async function hydrateAssistantImages(sessions: CanvasAssistantSession[])
     );
 }
 
-export function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
-}
-
-export function getInputSummary(inputs: NodeGenerationInput[]) {
-    const resources = [...new Map(inputs.flatMap((input) => (input.type === "group" ? input.children : [input])).map((input) => [input.nodeId, input])).values()];
-    return {
-        textCount: resources.filter((input) => input.type === "text").length,
-        imageCount: resources.filter((input) => input.type === "image").length,
-        videoCount: resources.filter((input) => input.type === "video").length,
-        audioCount: resources.filter((input) => input.type === "audio").length,
-    };
-}
-
 export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const model = resolveModelForCapability(config, node?.metadata?.model, mode);
     return {
         ...config,
         model,
         modelParameters: resolveModelParameters(config, model, node?.metadata?.modelParameters?.[model]),
-        reasoningEffort: node?.metadata?.reasoningEffort || config.reasoningEffort || defaultConfig.reasoningEffort,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
+}
+
+export function generationMaterialControls(config: AiConfig) {
+    return (findChannelModel(config, config.model)?.model.parameters || []).filter((control) => (control.type === "reference" || control.type === "asset") && inputVisible(control, config.modelParameters || {}));
+}
+
+export function generationInputKinds(config: AiConfig): CanvasResourceKind[] {
+    return ["text", ...new Set(generationMaterialControls(config).filter((control) => !control.hidden).flatMap((control) => control.role ? [control.role] : []))];
 }
 
 export function hasResumableVideoTask(node: CanvasNodeData) {

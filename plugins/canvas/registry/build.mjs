@@ -1,13 +1,12 @@
-// 官方插件集中构建:生成 bundle 与清单，并同步到 web/public/plugins/official。
+// 可选独立 bundle 导出。应用已直接打包内置节点，不再读取浏览器安装清单。
 // 官方插件目录本身不各自安装依赖:统一从本目录 node_modules 解析 SDK(nodePaths)。
 import { build } from "esbuild";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outDir = join(root, "dist");
-const publicDir = join(root, "..", "..", "..", "web", "public", "plugins", "official");
 const nodeModules = join(root, "node_modules");
 
 // 官方插件登记表:新增官方插件在此登记即可。
@@ -28,9 +27,7 @@ async function readPluginVersion(dir) {
     return pkg.version;
 }
 
-await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
-await mkdir(publicDir, { recursive: true });
 
 for (const plugin of OFFICIAL) {
     await build({
@@ -48,7 +45,6 @@ for (const plugin of OFFICIAL) {
         minify: true,
         nodePaths: [nodeModules],
     });
-    await cp(join(outDir, `${plugin.id}.js`), join(publicDir, `${plugin.id}.js`));
     console.log(`built ${plugin.id}.js`);
 }
 
@@ -68,5 +64,4 @@ const manifest = {
 };
 const source = JSON.stringify(manifest, null, 4) + "\n";
 await writeFile(join(outDir, "official-plugins.json"), source);
-await writeFile(join(publicDir, "official-plugins.json"), source);
-console.log(`synced official-plugins.json (${OFFICIAL.length} plugins) → web/public/plugins/official/`);
+console.log(`exported official-plugins.json (${OFFICIAL.length} plugins) → dist/`);

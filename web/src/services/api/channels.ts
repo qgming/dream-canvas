@@ -11,15 +11,12 @@ export type ParameterControl = {
     minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number; minDurationMs?: number; maxDurationMs?: number;
 };
 export type ModelFeatures = { tools?: boolean; streaming?: boolean };
-export type PricingRates = Record<string, { per: string; amount?: string; points?: string }>;
-export type ModelPricing = { currency?: string; exchangeRate?: string; rates?: PricingRates; tiers?: { id?: string; conditions: Record<string, string | number | boolean>; rates: PricingRates }[] };
-export type PointsPricing = { rates?: Record<string, { per: string; points?: string }>; tiers?: { id?: string; conditions: Record<string, string | number | boolean>; rates: Record<string, { per: string; points?: string }> }[] };
 export type ParameterOverrides = Record<string, Partial<Pick<ParameterControl, "label" | "labelEn" | "description" | "descriptionEn" | "default" | "hidden" | "advanced" | "order" | "options" | "min" | "max" | "required">>>;
-export type ServerModel = { id: string; channelId: string; model: string; name: string; capability: Capability; adapterId: string; adapterVersionId: string; enabled: boolean; version: number; parameterOverrides: ParameterOverrides; parameters: ParameterControl[]; pricing: ModelPricing; features?: ModelFeatures };
+export type ServerModel = { id: string; channelId: string; model: string; name: string; capability: Capability; adapterId: string; adapterVersionId: string; enabled: boolean; version: number; parameterOverrides: ParameterOverrides; parameters: ParameterControl[]; features?: ModelFeatures };
 export type ModelInput = Omit<ServerModel, "id" | "channelId" | "parameters">;
 export type ServerChannel = { id: string; name: string; baseUrl: string; protocol: "openai-compatible"; enabled: boolean; version: number };
 export type ChannelEntry = { channel: ServerChannel; hasCredential: boolean; models: ServerModel[] };
-export type CatalogChannel = { id: string; name: string; models: (Pick<ServerModel, "id" | "model" | "name" | "capability" | "parameters" | "version" | "adapterId"> & { features: ModelFeatures; pricing: PointsPricing })[] };
+export type CatalogChannel = { id: string; name: string; models: (Pick<ServerModel, "id" | "model" | "name" | "capability" | "parameters" | "version" | "adapterId"> & { features: ModelFeatures })[] };
 export type ModelOrdering = { version: number; orders: Record<string, string[]> };
 export type ModelCatalog = ModelOrdering & { channels: CatalogChannel[] };
 export type ModelScript = { id: string; name: string; capability: Capability; description: string; builtin: boolean; adapterVersionId: string; version: number };

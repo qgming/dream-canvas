@@ -53,6 +53,7 @@ func (a *App) CreateProject(userID string, input projectInput) (Project, error) 
 	refs, err := validateDocument(input.Document)
 	if err != nil { return project, err }
 	err = a.db.Transaction(func(tx *gorm.DB) error {
+		if err := checkCanvasNodeTypes(tx, nil, project.Document); err != nil { return err }
 		if err := checkAssets(tx, userID, refs); err != nil { return err }
 		deleted := []Asset{}
 		if len(refs) > 0 { if err := tx.Where("id IN ? AND delete_state <> ?", refs, "").Find(&deleted).Error; err != nil { return err } }
@@ -95,6 +96,7 @@ func (a *App) SaveProject(userID, id string, input projectInput) (Project, error
 			input.Title, input.Document = merged.Title, merged.Document
 		}
 		refs, err = validateDocument(input.Document); if err != nil { return err }
+		if input.RevertsVersion == 0 { if err := checkCanvasNodeTypes(tx, project.Document, input.Document); err != nil { return err } }
 		if err := checkAssets(tx, userID, refs); err != nil { return err }
 		result := tx.Model(&Project{}).Where("id = ? AND user_id = ? AND version = ?", id, userID, project.Version).Updates(map[string]any{
 			"title": strings.TrimSpace(input.Title), "document": input.Document, "version": project.Version + 1, "updated_at": time.Now(),

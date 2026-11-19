@@ -1,15 +1,5 @@
-# 本地插件注册表
+# 内置节点源码导出
 
-集中构建仓库中的 Markdown、SVG、HTML、全景与便利贴插件，生成 `official-plugins.json`。产物写入本目录 `dist/` 并同步到 `web/public/plugins/official/`，均不提交到 Git；独立子目录避免与开发插件的自动发现重复。
+应用直接打包 Markdown、SVG、HTML、全景和便利贴源码，管理员通过「设置 → 节点插件」控制启停，无需运行此目录。
 
-```bash
-cd plugins/canvas/registry
-npm install
-npm run build
-```
-
-完成后打开画布的节点插件管理器，即可从本地清单安装。新增插件时在 `build.mjs` 的 `OFFICIAL` 中登记，版本取自各插件的 `package.json`。
-
-前端默认读取 `/plugins/official/official-plugins.json`，未构建时显示空列表。若自行托管，将 `dist/` 上传到静态服务器，并用 `VITE_PLUGIN_REGISTRY_URL` 指向清单。清单中的相对 `entry` 会以清单地址为基准解析。
-
-仓库不包含自动发布工作流，也不依赖远程发布分支。第三方插件仍可通过 JS URL 安装。
+本目录保留独立 bundle 的开发导出工具，`npm install` 后可用 `npm run build` 写入当前目录 `dist/`。这些文件和清单不参与应用运行，也不会同步到浏览器安装目录。自建节点使用后台草稿与发布流程，见 [节点插件说明](../README.md)。

@@ -69,12 +69,12 @@ func (a *App) deleteModelScript(c *gin.Context) {
 }
 
 func (a *App) DeleteModelScript(adapterID string, version uint64, confirmed bool) error {
-	if !confirmed { return problem(400, "confirmation_required", "请确认删除自建接口脚本及其草稿、发布版本") }
+	if !confirmed { return problem(400, "confirmation_required", "请确认删除自建接口插件及其草稿、发布版本") }
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var script ModelScript
 		if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return err }
-		if script.Builtin { return problem(403, "builtin_readonly", "内置接口脚本不允许删除") }
-		if script.Version != version { return problem(409, "version_conflict", "接口脚本已更新，请重新读取后删除") }
+		if script.Builtin { return problem(403, "builtin_readonly", "内置接口插件不允许删除") }
+		if script.Version != version { return problem(409, "version_conflict", "接口插件已更新，请重新读取后删除") }
 		var count int64
 		if err := tx.Model(&ChannelModel{}).Where("adapter_id = ?", script.ID).Count(&count).Error; err != nil { return err }
 		if count > 0 { return problem(409, "script_in_use", "仍有渠道模型引用此脚本（含停用模型），请先更换模型使用的脚本后删除") }
@@ -86,7 +86,7 @@ func (a *App) DeleteModelScript(adapterID string, version uint64, confirmed bool
 }
 
 func (a *App) attachModelScript(snapshot *executionSnapshot) error {
-	if snapshot.Model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "请选择已发布的接口脚本版本") }
+	if snapshot.Model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "请选择已发布的接口插件版本") }
 	snapshot.Script = &ScriptVersion{}
 	return a.db.First(snapshot.Script, "id = ? AND adapter_id = ?", snapshot.Model.AdapterVersionID, snapshot.Model.AdapterID).Error
 }
@@ -103,12 +103,12 @@ func (a *App) CreateModelScript(user User, input scriptInput) (ModelScript, erro
 		manifest, _, _, err := readScriptPackage(input.Files); if err != nil { return ModelScript{}, err }; input.Name, input.Capability, input.Description = manifest.Name, manifest.Capability, manifest.Description
 	}
 	if err := validTitle(input.Name); err != nil { return ModelScript{}, err }
-	if !includes([]string{"text", "image", "video", "audio"}, input.Capability) { return ModelScript{}, problem(400, "invalid_capability", "请选择接口脚本能力") }
+	if !includes([]string{"text", "image", "video", "audio"}, input.Capability) { return ModelScript{}, problem(400, "invalid_capability", "请选择接口插件能力") }
 	script := ModelScript{ID: identifier(), Name: strings.TrimSpace(input.Name), Capability: input.Capability, Description: strings.TrimSpace(input.Description), Version: 1}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		files := newScriptPackage(script.Name, script.Capability, script.Description)
 		if len(input.Files) > 0 && string(input.Files) != "null" { files = input.Files }
-		if input.CopyFrom != "" { var source ModelScript; if err := tx.First(&source, "id = ? AND capability = ?", input.CopyFrom, input.Capability).Error; err != nil { return err }; if source.Builtin { return problem(403, "builtin_readonly", "内置接口脚本只允许查看和选择使用，不允许复制或修改") }
+		if input.CopyFrom != "" { var source ModelScript; if err := tx.First(&source, "id = ? AND capability = ?", input.CopyFrom, input.Capability).Error; err != nil { return err }; if source.Builtin { return problem(403, "builtin_readonly", "内置接口插件只允许查看和选择使用，不允许复制或修改") }
 			var draft ScriptDraft; err := tx.First(&draft, "adapter_id = ?", source.ID).Error
 			if err == nil { files = draft.Files } else if errors.Is(err, gorm.ErrRecordNotFound) && source.AdapterVersionID != "" { var version ScriptVersion; if err := tx.First(&version, "id = ?", source.AdapterVersionID).Error; err != nil { return err }; files = version.Files } else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
 			manifest, content, _, err := readScriptPackage(files); if err != nil { return err }; manifest.Name, manifest.Description = script.Name, script.Description; content["script.json"] = prettyJSON(manifest); files = encode(content)
@@ -133,12 +133,13 @@ func (a *App) GetModelScript(adapterID string) (gin.H, error) {
 		for _, version := range versions { if version.ID == script.AdapterVersionID { draft.Revision, draft.Files, draft.Parameters = version.DraftRevision, version.Files, version.Parameters; break } }
 	}
 	models := []ChannelModel{}; if err := a.db.Where("adapter_id = ?", script.ID).Find(&models).Error; err != nil { return nil, err }
+	for index := range models { models[index].Pricing = nil }
 	return gin.H{"script": script, "draft": draft, "versions": versions, "models": models}, nil
 }
 
 func (a *App) writeScriptDraft(tx *gorm.DB, user User, adapterID string, input ScriptDraft) (ScriptDraft, error) {
 	var script ModelScript; var draft ScriptDraft
-	if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return draft, err }; if script.Builtin { return draft, problem(403, "builtin_readonly", "内置接口脚本只允许查看和选择使用，不允许复制或修改") }
+	if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return draft, err }; if script.Builtin { return draft, problem(403, "builtin_readonly", "内置接口插件只允许查看和选择使用，不允许复制或修改") }
 	manifest, _, parameters, err := readScriptPackage(input.Files); if err != nil { return draft, err }; if manifest.Capability != script.Capability { return draft, problem(400, "invalid_capability", "脚本能力创建后不可变更，请创建另一脚本") }
 	if err := tx.First(&draft, "adapter_id = ?", script.ID).Error; err != nil { return draft, err }; if draft.Revision != input.Revision { return draft, problem(409, "version_conflict", "脚本草稿已更新，当前编辑未覆盖") }
 	if err := tx.Model(&draft).Updates(map[string]any{"files": input.Files, "parameters": parameters, "revision": draft.Revision+1, "updated_by": user.ID}).Error; err != nil { return draft, err }
@@ -160,13 +161,13 @@ func (a *App) publishModelScript(c *gin.Context) {
 }
 
 func (a *App) PublishModelScript(user User, adapterID string, revision, scriptVersion uint64) (ScriptVersion, error) {
-	var selected ModelScript; if err := a.db.First(&selected, "id = ?", adapterID).Error; err != nil { return ScriptVersion{}, err }; if selected.Builtin { return ScriptVersion{}, problem(403, "builtin_readonly", "内置接口脚本只允许查看和选择使用，不允许复制或修改") }
+	var selected ModelScript; if err := a.db.First(&selected, "id = ?", adapterID).Error; err != nil { return ScriptVersion{}, err }; if selected.Builtin { return ScriptVersion{}, problem(403, "builtin_readonly", "内置接口插件只允许查看和选择使用，不允许复制或修改") }
 	var prepared ScriptDraft; if err := a.db.First(&prepared, "adapter_id = ?", adapterID).Error; err != nil { return ScriptVersion{}, err }; if prepared.Revision != revision { return ScriptVersion{}, problem(409, "version_conflict", "草稿已更新，请重新读取") }
 	scripts, parameters, err := compileScriptPackage(prepared.Files); if err != nil { return ScriptVersion{}, err }
 	var version ScriptVersion
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		var script ModelScript; var draft ScriptDraft
-		if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return err }; if script.Builtin { return problem(403, "builtin_readonly", "内置接口脚本只允许查看和选择使用，不允许复制或修改") }; if script.Version != scriptVersion { return problem(409, "version_conflict", "脚本已更新，请重新读取") }
+		if err := tx.First(&script, "id = ?", adapterID).Error; err != nil { return err }; if script.Builtin { return problem(403, "builtin_readonly", "内置接口插件只允许查看和选择使用，不允许复制或修改") }; if script.Version != scriptVersion { return problem(409, "version_conflict", "脚本已更新，请重新读取") }
 		if err := tx.First(&draft, "adapter_id = ?", script.ID).Error; err != nil { return err }; if draft.Revision != revision { return problem(409, "version_conflict", "草稿已更新，请重新读取") }
 		version = ScriptVersion{ID: identifier(), AdapterID: script.ID, DraftRevision: draft.Revision, Files: draft.Files, Scripts: scripts, Parameters: parameters, Features: scriptFeatures(draft.Files), PublishedBy: user.ID}
 		

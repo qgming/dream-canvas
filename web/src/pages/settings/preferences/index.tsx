@@ -6,7 +6,6 @@ import { Notice as Alert } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { EditorForm, Field } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
@@ -42,22 +41,6 @@ export default function PreferencesPage() {
             {error ? <Alert type="error" title={error} action={<Button onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
             <EditorForm id="preferences-form" disabled={!hydrated || saving} className="space-y-8" onSubmit={() => useConfigStore.getState().save()}>
                 <section>
-                    <h2 className="mb-2 text-base font-semibold">{t("config.preferences.generation")}</h2>
-                    <div>
-                        <Field layout="horizontal" label={t("config.preferences.canvasImageCount")} description={t("config.preferences.canvasImageCountDescription")}>
-                            <Input
-                                className="w-24 text-right tabular-nums"
-                                type="number"
-                                min={1}
-                                max={15}
-                                value={config.canvasImageCount}
-                                onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
-                                onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
-                            />
-                        </Field>
-                    </div>
-                </section>
-                <section>
                     <h2 className="mb-2 text-base font-semibold">{t("settings.canvasInteraction")}</h2>
                     <div>
                         <Field layout="horizontal" label={t("config.preferences.regenerateBehavior")} description={t(config.nodeRegenerateBehavior === "overwrite" ? "config.preferences.regenerateBehaviorOverwriteDescription" : "config.preferences.regenerateBehaviorNewNodeDescription")}>
@@ -73,4 +56,3 @@ export default function PreferencesPage() {
     );
 }
 
-function normalizeImageCount(value: string) { return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3)))); }

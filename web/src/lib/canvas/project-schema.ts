@@ -16,7 +16,7 @@ const metadata = z.object({
     model: z.string().optional(), modelParameters: z.record(z.record(z.unknown())).optional(),
     reasoningEffort: z.enum(["auto", "low", "medium", "high", "xhigh"]).optional(),
     count: finite.optional(), textCount: finite.optional(), texts: z.array(text).optional(), primaryTextId: z.string().optional(),
-    references: z.array(z.string()).optional(), naturalWidth: finite.optional(), naturalHeight: finite.optional(), freeResize: z.boolean().optional(),
+    references: z.array(z.string()).optional(), referenceOrder: z.array(id).optional(), naturalWidth: finite.optional(), naturalHeight: finite.optional(), freeResize: z.boolean().optional(),
     images: z.array(image).optional(), primaryImageId: z.string().optional(), storageKey: z.string().optional(), mimeType: z.string().optional(),
     bytes: finite.optional(), durationMs: finite.optional(), videoTaskId: z.string().optional(), videoTaskProvider: z.literal("server").optional(),
     groupId: z.string().optional(), interactive: z.boolean().optional(),

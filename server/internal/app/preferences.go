@@ -17,7 +17,7 @@ func validatePreference(name string, value map[string]any) error {
 	if name == "generation" {
 		for key, item := range value {
 			if key == "autoFocusOnSelect" { if _, ok := item.(bool); !ok { return invalid }; continue }
-			if !includes([]string{"count", "canvasImageCount", "nodeRegenerateBehavior"}, key) { return invalid }
+			if key != "nodeRegenerateBehavior" { return invalid }
 			text, ok := item.(string)
 			if !ok { return invalid }
 			if key == "nodeRegenerateBehavior" && text != "new-node" && text != "overwrite" { return invalid }

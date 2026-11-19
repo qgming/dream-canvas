@@ -22,8 +22,8 @@
   },
   {
     "key": "count", "label": "单次返回张数", "labelEn": "Images per request", "type": "number", "default": 1, "required": true, "min": 1, "max": 15, "step": 1,
-    "description": "映射到供应商 n；与应用的批量请求次数分别设置，模型可收窄可用张数。",
-    "descriptionEn": "Maps to provider n, separately from batch request count. Configure supported counts per model.",
+    "description": "映射到供应商 n；一次生成提交一个任务，模型可收窄可用张数。",
+    "descriptionEn": "Maps to provider n. Each generation submits one task; models may restrict the supported counts.",
     "suggestions": [{"label": "1", "value": 1}, {"label": "2", "value": 2}, {"label": "3", "value": 3}, {"label": "4", "value": 4}]
   },
   {

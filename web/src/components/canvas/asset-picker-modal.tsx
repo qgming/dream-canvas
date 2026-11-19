@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import { getImagePreviewRevision, subscribeImagePreviews } from "@/services/image-storage";
-import { assetCoverUrl, useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { assetCoverUrl, useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 
 type MediaPayload = { url: string; title: string; storageKey?: string; width?: number; height?: number };
 export type InsertAssetPayload = { kind: "text"; content: string; title: string } | { kind: "image"; dataUrl: string; title: string; storageKey?: string } | ({ kind: "video" } & MediaPayload) | ({ kind: "audio" } & MediaPayload);
@@ -18,22 +18,23 @@ export type InsertAssetPayload = { kind: "text"; content: string; title: string 
 type Props = {
     open: boolean;
     defaultTab?: string;
+    kinds?: readonly AssetKind[];
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, kinds, onInsert, onClose }: Props) {
     const { t } = useTranslation();
     return (
         <Dialog title={t("canvas.assetPicker.title")} open={open} onClose={onClose} footer={null} width={860} bodyClassName="min-h-[480px] pt-0">
-            <MyAssetsTab onInsert={onInsert} />
+            <MyAssetsTab kinds={kinds} onInsert={onInsert} />
         </Dialog>
     );
 }
 
 const PAGE_SIZE = 8;
 
-const kindOptions = ["all", "text", "image", "video", "audio"];
+const kindOptions = ["all", "text", "image", "video", "audio"] as const;
 
 function PickerCard({ title, kind, cover, onClick }: { title: string; kind: string; cover: string; onClick: () => void }) {
     const { t } = useTranslation();
@@ -59,7 +60,7 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
     );
 }
 
-function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
+function MyAssetsTab({ kinds, onInsert }: Pick<Props, "kinds" | "onInsert">) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const assets = useAssetStore((state) => state.assets);
@@ -68,14 +69,16 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState("all");
     const [page, setPage] = useState(1);
+    const options = kindOptions.filter((kind) => kind === "all" || !kinds || kinds.includes(kind));
+    const activeKind = options.find((kind) => kind === kindFilter) ?? "all";
 
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets
-            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video" || a.kind === "audio")
-            .filter((a) => kindFilter === "all" || a.kind === kindFilter)
+            .filter((a) => !kinds || kinds.includes(a.kind))
+            .filter((a) => activeKind === "all" || a.kind === activeKind)
             .filter((a) => !query || a.title.toLowerCase().includes(query));
-    }, [assets, keyword, kindFilter]);
+    }, [activeKind, assets, keyword, kinds]);
 
     const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
@@ -109,11 +112,11 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
                     }}
                 />
                 <div className="flex gap-1.5">
-                    {kindOptions.map((option) => (
+                    {options.map((option) => (
                         <FilterChip
                             key={option}
-                            checked={kindFilter === option}
-                            className={cn("prompt-filter-tag", kindFilter === option && "is-active")}
+                            checked={activeKind === option}
+                            className={cn("prompt-filter-tag", activeKind === option && "is-active")}
                             onChange={() => {
                                 setPage(1);
                                 setKindFilter(option);

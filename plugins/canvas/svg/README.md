@@ -1,17 +1,7 @@
-# SVG 节点插件
+# svg 内置节点
 
-梦想画布画布节点插件:编辑与渲染 SVG,无自身内容时自动取上游文本节点里的 SVG 源码。
+编辑与预览 SVG；没有自身内容时可读取上游 SVG 文本。
 
-## 构建
+此目录源码由前端直接打包，默认启用。管理员在「设置 → 节点插件」统一控制启停，普通用户无需安装。修改源码后由应用开发服务加载，发布时随应用构建；独立目录的构建产物只供源码开发参考，不自动安装。
 
-```bash
-npm install
-npm run build      # 产物 dist/svg.js,并同步到 web/public/plugins/svg.js
-npm run dev        # watch
-```
-
-## 安装
-
-画布 → 左上菜单「节点插件」→ 安装 URL 填 `/plugins/svg.js`(或托管后的公网 URL)。
-
-插件契约见 `plugins/canvas/README.md`。
+节点运行约定见 [节点插件说明](../README.md)。

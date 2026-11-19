@@ -64,13 +64,15 @@ func (a *App) CreateTask(userID string, input generationInput) (GenerationTask, 
 				var document struct { Nodes []json.RawMessage `json:"nodes"` }; if err := json.Unmarshal(project.Document, &document); err != nil { return err }
 				for _, raw := range document.Nodes { var node struct { ID string `json:"id"` }; if err := json.Unmarshal(raw, &node); err != nil { return err }; if node.ID == input.NodeID { task.TargetNode = raw; break } }
 				if len(task.TargetNode) == 0 { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
+				var target struct { Type string `json:"type"` }; if err := json.Unmarshal(task.TargetNode, &target); err != nil { return err }
+				if err := requireCanvasNodeType(tx, target.Type); err != nil { return err }
 				if err := checkTaskTargetVersion(tx, project, input, task.TargetNode); err != nil { return err }
 			}
 		}
 		for _, reference := range input.References {
 			var asset Asset
 			if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(400, "invalid_asset", "素材已删除或尚未可靠保存") }
-			if err := tx.FirstOrCreate(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err }
+			if err := claimTaskAsset(tx, TaskAsset{TaskID: task.ID, AssetID: asset.ID}); err != nil { return err }
 		}
 		return tx.Create(&task).Error
 	})
@@ -87,14 +89,15 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		if err := tx.First(&channel, "id = ? AND enabled = ?", input.ChannelID, true).Error; err != nil { return err }
 		if err := tx.First(&model, "id = ? AND channel_id = ? AND enabled = ?", input.ModelID, channel.ID, true).Error; err != nil { return err }
 		if channel.Secret == "" || model.Capability != input.Capability { return problem(400, "invalid_model", "渠道凭据或模型能力不匹配") }
+		targetType := ""
 		if input.ProjectID != "" {
 			var project Project
 			if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
 			if input.NodeID != "" {
-				var document struct { Nodes []struct { ID string `json:"id"` } `json:"nodes"` }
+				var document struct { Nodes []struct { ID string `json:"id"`; Type string `json:"type"` } `json:"nodes"` }
 				if json.Unmarshal(project.Document, &document) != nil { return problem(409, "invalid_document", "目标项目内容无法读取") }
 				found := false
-				for _, node := range document.Nodes { if node.ID == input.NodeID { found = true; break } }
+				for _, node := range document.Nodes { if node.ID == input.NodeID { if err := requireCanvasNodeType(tx, node.Type); err != nil { return err }; targetType = node.Type; if err := canvasNodeDefaultPrompt(node.Type, input); err != nil { return err }; found = true; break } }
 				if !found { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
 				if input.ResultSlotID != "" {
 					var value map[string]any; _ = json.Unmarshal(project.Document, &value)
@@ -112,7 +115,7 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		if len(input.Messages) > 0 {
 			if err := validateGenerationMessages(*input); err != nil { return err }
 		}
-		if model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "接口脚本尚未发布") }
+		if model.AdapterVersionID == "" { return problem(400, "interface_unpublished", "接口插件尚未发布") }
 		script = &ScriptVersion{}
 		if err := tx.First(script, "id = ? AND adapter_id = ?", model.AdapterVersionID, model.AdapterID).Error; err != nil { return err }
 		if err := hydrateModel(tx, &model); err != nil { return err }
@@ -128,6 +131,7 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 				if !found { input.References = append(input.References, assetInput{AssetID: text(value), Role: control.Role}) }
 			}
 		}
+		if err := validateCanvasUpscaleSource(targetType, *input); err != nil { return err }
 		if err := snapshotAssetInputs(tx, userID, channel.ID, input.References); err != nil { return err }
 		encoded, err := json.Marshal(parameters)
 		if err != nil { return err }

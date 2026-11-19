@@ -49,7 +49,8 @@ func businessTools() []toolDefinition {
 		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
 		{"asset_voice_save", "关联已注册音色编号；不会调用供应商克隆或注册音色", "edit", toolSchema(map[string]any{"assetId": stringField("音频资产 ID"), "channelId": stringField("渠道 ID"), "voiceId": stringField("已注册编号"), "version": numberField("现有版本，新建为 0")}, "assetId", "channelId", "voiceId", "version")},
-		{"catalog_list", "读取按管理员排序返回的可用渠道模型目录；parameters 包含管理员及脚本默认值，pricing 只返回积分投影，不含真实凭据或成本", "read", toolSchema(map[string]any{})},
+		{"catalog_list", "读取按管理员排序返回的可用渠道模型目录；parameters 包含管理员及脚本默认值，不含真实凭据、积分或价格", "read", toolSchema(map[string]any{})},
+		{"canvas_nodes_list", "读取管理员已发布且启用的画布节点目录，包含节点类型、名称、默认尺寸和 metadata；创建节点前先读取，不依赖在线浏览器", "read", toolSchema(map[string]any{})},
 		{"prompts_search", "按文本、图片或视频类型搜索项目内置及当前用户的提示词", "read", toolSchema(map[string]any{"keyword": stringField("关键词"), "scope": map[string]any{"type": "string", "enum": []string{"all", "builtin", "user"}}, "type": map[string]any{"type": "string", "enum": []string{"all", "text", "image", "video"}}, "locale": stringField("可选 zh-CN 或 en-US")})},
 		{"prompt_get", "读取内置或当前用户的提示词及版本", "read", toolSchema(map[string]any{"promptId": stringField("提示词 ID"), "locale": stringField("可选 zh-CN 或 en-US")}, "promptId")},
 		{"prompt_save", "创建或按版本保存我的提示词；内置提示词只读，需要不限项目的授权", "edit", toolSchema(map[string]any{"promptId": stringField("修改时填写，新建留空"), "version": numberField("读取版本，新建为 0"), "title": stringField("名称"), "prompt": stringField("提示词正文"), "type": map[string]any{"type": "string", "enum": []string{"text", "image", "video"}}, "description": stringField("说明"), "category": stringField("分类")}, "version", "title", "prompt", "type")},
@@ -62,13 +63,12 @@ func businessTools() []toolDefinition {
 		{"skill_save", "创建或按版本修改个人 Skill；不执行模型调用", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "description": stringField("说明"), "instructions": stringField("指令"), "interface": map[string]any{"type": "object"}, "expectedRevision": stringField("读取的版本，新建时留空"), "enabled": map[string]any{"type": "boolean"}}, "name")},
 		{"skill_delete", "按读取版本删除个人 Skill，不删除对话或项目", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "expectedRevision": stringField("读取的版本")}, "name", "expectedRevision")},
 		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点，独立工作台任务可指定记录归属并手动保留成品", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "workbenchRecordId": stringField("可选图片或视频工作台记录 ID，与 projectId 互斥；成品仅手动保存后进入资产库"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
-		{"generation_quote", "按明确渠道、模型和有效参数预估积分，不调用供应商；未知单位或 token 用量返回 unknown 和 null，不猜测为 0", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "parameters": map[string]any{"type": "object", "description": "与生成提交相同的模型参数；省略字段采用管理员及脚本默认值"}, "prompt": stringField("可选提示词，用于字符数计价"), "messages": map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "可选消息数组，用于字符数计价"}, "requests": map[string]any{"type": "integer", "minimum": 1, "description": "可选请求次数，默认 1"}}, "channelId", "modelId", "parameters")},
 		{"tasks_wait", "读取明确任务是否均已结束或需人工核对；ready=false 返回待等待任务。云端助手会持久等待并让出执行名额，完成后自动续行；外部 MCP 返回同一状态快照，不阻塞 HTTP，也不重新生成", "read", toolSchema(map[string]any{"taskIds": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": stringField("明确生成任务 ID")}}, "taskIds")},
 		{"tasks_list", "读取授权项目内的生成任务和保存、同步状态", "read", toolSchema(map[string]any{})},
 		{"task_get", "读取生成任务、成品资产及待确认状态", "read", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_cancel", "取消未提交任务，已提交任务记录取消意愿并继续核对实际结果", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_resume", "仅继续查询已有上游编号或保存已收到结果，不重新提交供应商", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
-		{"usage_list", "读取授权项目内的积分用量及汇总，可按开始执行时间和渠道模型筛选；未知积分单独计入 pendingCount，不暴露成本", "read", toolSchema(map[string]any{"userId": stringField("用户 ID"), "projectId": stringField("项目 ID"), "channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": stringField("能力"), "from": stringField("含时区的起始时间"), "to": stringField("含时区的结束时间")})},
+		{"usage_list", "读取授权项目内的调用次数与用量汇总，可按开始执行时间和渠道模型筛选；pendingCount 为估算或未知用量的调用数", "read", toolSchema(map[string]any{"userId": stringField("用户 ID"), "projectId": stringField("项目 ID"), "channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": stringField("能力"), "from": stringField("含时区的起始时间"), "to": stringField("含时区的结束时间")})},
 		{"approval_request", "为项目删除或全局资产删除创建持久确认请求，返回 pending 后等待用户明确确认", "delete", toolSchema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"delete_project", "delete_asset"}}, "targetId": stringField("目标 ID"), "version": numberField("删除项目时的版本")}, "action", "targetId", "version")},
 		{"approvals_list", "读取授权范围内的持久确认状态", "read", toolSchema(map[string]any{})},
 		{"approval_decide", "仅在用户明确确认后确认或拒绝删除，禁止自行批准", "delete", toolSchema(map[string]any{"approvalId": stringField("确认请求 ID"), "accept": map[string]any{"type": "boolean", "description": "用户明确确认后才可设为 true"}}, "approvalId", "accept")},
@@ -192,7 +192,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 			if asset.Kind == "text" { return assetMetadata(asset.Metadata) }
 			if asset.SaveState != "saved" || asset.Bytes < 0 || asset.Bytes > (policy.JSONBytes/4)*3 { return nil, problem(413, "content_too_large", "原件尚未保存或超过工具 JSON 边界，请使用带 Bearer 的 HTTP 文件接口") }
 			release, err := a.acquireFile(ctx, false, false); if err != nil { return nil, err }; defer release(); a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
-			if err := a.db.First(&asset, "id = ? AND delete_state = ?", id, "").Error; err != nil { return nil, err }; path, err := a.assetPath(id); if err != nil { return nil, err }; file, err := os.Open(path); if err != nil { return nil, err }; defer file.Close()
+			if err := a.db.First(&asset, "id = ? AND delete_state = ?", id, "").Error; err != nil { return nil, err }; path, err := a.assetOriginalPath(asset); if err != nil { return nil, err }; file, err := os.Open(path); if err != nil { return nil, err }; defer file.Close()
 			data, err := io.ReadAll(io.LimitReader(file, policy.JSONBytes+1)); if err != nil { return nil, err }; if int64(base64.StdEncoding.EncodedLen(len(data))) > policy.JSONBytes { return nil, problem(413, "content_too_large", "媒体超过工具 JSON 边界") }; return map[string]any{"mimeType": asset.MimeType, "base64": base64.StdEncoding.EncodeToString(data)}, nil
 		}
 	case "asset_text_create":
@@ -231,10 +231,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if len(p.Projects) > 0 && !includes(p.Projects, request.ProjectID) { return nil, problem(403, "project_scope", "任务需要令牌范围内的明确目标项目") }
 		for _, reference := range request.References { if err := a.checkTokenAsset(p, reference.AssetID); err != nil { return nil, err } }
 		return a.CreateTask(p.User.ID, request)
-	case "generation_quote":
-		var request generationQuoteInput
-		if err := json.Unmarshal(encode(input), &request); err != nil { return nil, problem(400, "invalid_input", "积分预估参数不正确") }
-		return a.GenerationQuote(p, request)
+
 	case "tasks_list":
 		tasks := []GenerationTask{}
 		query := a.db.Where("user_id = ?", p.User.ID)

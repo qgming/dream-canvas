@@ -110,7 +110,7 @@ type ChannelModel struct {
 	Version uint64 `json:"version"`
 	ParameterOverrides JSON `json:"parameterOverrides" gorm:"type:blob"`
 	Parameters JSON `json:"parameters" gorm:"-"`
-	Pricing JSON `json:"pricing" gorm:"type:blob"`
+	Pricing JSON `json:"pricing,omitempty" gorm:"type:blob"`
 	AdapterVersionID string `json:"adapterVersionId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -325,6 +325,9 @@ type FileOperation struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	AssetID string `json:"assetId" gorm:"uniqueIndex:file_operation"`
 	Kind string `json:"kind" gorm:"uniqueIndex:file_operation"`
+	State string `json:"state,omitempty" gorm:"not null;default:''"`
+	SourcePath string `json:"-"`
+	TargetPath string `json:"-"`
 	Attempts int `json:"attempts"`
 	NextRunAt *time.Time `json:"nextRunAt,omitempty" gorm:"index"`
 	Error string `json:"error,omitempty"`

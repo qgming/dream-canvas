@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
@@ -22,17 +22,19 @@ export function ConnectionCreateMenu({
 }: {
     pending: PendingConnectionCreate;
     scale?: number;
-    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio) => void;
+    onCreate: (type: string) => void;
     onClose: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    useNodeRegistryVersion();
+    const definitions = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && def.type !== CanvasNodeType.Group);
     const menuRef = useRef<HTMLDivElement>(null);
     useMenuFocus(menuRef, onClose);
     return (
         <div
             ref={menuRef} role="menu" aria-label={t("canvas.createMenu.fromNode")} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore onKeyDown={menuKeyDown}
-            className="absolute z-[120] w-[240px] rounded-xl border p-2 shadow-lg"
+            className="absolute z-[120] max-h-[70vh] w-[240px] overflow-x-hidden overflow-y-auto rounded-xl border p-2 shadow-lg thin-scrollbar"
             data-connection-create-menu
             style={{ left: pending.position.x, top: pending.position.y, transform: `scale(${1 / scale})`, transformOrigin: "top left", background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
@@ -45,11 +47,7 @@ export function ConnectionCreateMenu({
                 <Button variant="ghost" size="icon" className="size-7 opacity-55 hover:opacity-100" onClick={onClose} aria-label={t("canvas.createMenu.close")}><X /></Button>
             </div>
             <div className="grid gap-0.5">
-                <ConnectionCreateOption theme={theme} icon={<List className="size-4" />} title={t("canvas.createMenu.text")} description={t("canvas.createMenu.textDescription")} onClick={() => onCreate(CanvasNodeType.Text)} />
-                <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-4" />} title={t("canvas.createMenu.image")} onClick={() => onCreate(CanvasNodeType.Image)} />
-                <ConnectionCreateOption theme={theme} icon={<Video className="size-4" />} title={t("canvas.createMenu.video")} onClick={() => onCreate(CanvasNodeType.Video)} />
-                <ConnectionCreateOption theme={theme} icon={<Music2 className="size-4" />} title={t("canvas.createMenu.audio")} onClick={() => onCreate(CanvasNodeType.Audio)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-4" />} title={t("canvas.createMenu.config")} description={t("canvas.createMenu.configDescription")} onClick={() => onCreate(CanvasNodeType.Config)} />
+                {definitions.map((def) => <ConnectionCreateOption key={def.type} theme={theme} icon={def.icon} title={getNodeSpec(def.type).title} description={def.description} onClick={() => onCreate(def.type)} />)}
             </div>
         </div>
     );
@@ -66,7 +64,7 @@ export function ConnectionCreateOption({ theme, icon, title, description, onClic
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
-            <span className="grid size-7 shrink-0 place-items-center" style={{ color: theme.node.muted }}>
+            <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4 [&_svg]:shrink-0" style={{ color: theme.node.muted }}>
                 {icon}
             </span>
             <span className="min-w-0 flex-1">
@@ -100,7 +98,7 @@ export function NodeCreateMenu({ position, scale = 1, onCreate, onClose }: { pos
         <div
             ref={menuRef}
             role="menu" aria-label={t("canvas.createMenu.select")} data-ui-overlay data-canvas-shortcuts-ignore onKeyDown={menuKeyDown}
-            className="absolute z-[120] max-h-[70vh] w-[240px] overflow-y-auto rounded-xl border p-2 shadow-lg thin-scrollbar"
+            className="absolute z-[120] max-h-[70vh] w-[240px] overflow-x-hidden overflow-y-auto rounded-xl border p-2 shadow-lg thin-scrollbar"
             data-canvas-no-zoom
             style={{ left: position.x, top: position.y, transform: `scale(${1 / scale})`, transformOrigin: "top left", background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}

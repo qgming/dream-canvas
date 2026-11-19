@@ -87,7 +87,7 @@ func (a *App) storageBucket(id string, policy executionPolicy) (*oss.Bucket, err
 	return client.Bucket(storage.Bucket)
 }
 
-func storageKey(asset Asset) string { return "assets/"+asset.UserID+"/"+asset.ID }
+func storageKey(asset Asset) string { return "assets/"+asset.UserID+"/"+asset.Path }
 
 func (a *App) s3Client(storage ObjectStorage, policy executionPolicy) (*s3.Client, error) {
 	key, err := a.decryptSecret(storage.AccessKeyID); if err != nil { return nil, err }
@@ -196,9 +196,9 @@ func (a *App) prepareTaskAssets(task GenerationTask, snapshot executionSnapshot,
 func (a *App) dispatchFiles() {
 	policy, err := a.executionPolicy(); if err != nil { return }
 	var rows []FileOperation
-	if a.db.Where("(next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?))", time.Now(), "delete", false).Order("created_at").Find(&rows).Error != nil { return }
+	if a.db.Where("(next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR state <> ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?))", time.Now(), "repair_suffix", "done", "delete", false).Order("created_at").Find(&rows).Error != nil { return }
 	active := 0; a.workMu.Lock(); for key := range a.active { if strings.HasPrefix(key, "file:") { active++ } }; a.workMu.Unlock()
-	for _, row := range rows { if active >= policy.TransferSlots { break }; if a.launch("file:"+row.ID, func(ctx context.Context) { a.runFileOperation(ctx, row) }) { active++ } }
+	for _, row := range rows { if active >= policy.TransferSlots { break }; if a.launch("file:"+row.AssetID, func(ctx context.Context) { a.runFileOperation(ctx, row) }) { active++ } }
 }
 
 func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
@@ -206,6 +206,7 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 	a.logEvent(ctx, slog.LevelDebug, "asset.operation_started", slog.Int("attempt", operation.Attempts+1))
 	policy, err := a.executionPolicy(); if err != nil { return }
 	ctx, cancel := context.WithTimeout(ctx, seconds(policy.TransferSeconds)); defer cancel()
+	if operation.Kind == "repair_suffix" { a.runAssetFilenameRepair(ctx, operation, policy); return }
 	var asset Asset
 	if err := a.db.First(&asset, "id = ?", operation.AssetID).Error; err != nil { if errors.Is(err, gorm.ErrRecordNotFound) { if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() } }; return }
 	if operation.Kind == "delete" { err = a.cleanAsset(asset.ID)
@@ -217,7 +218,7 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 			if a.db.First(&asset, "id = ?", asset.ID).Error != nil { return }
 			if asset.DeleteState != "" { var active int64; if a.db.Model(&TaskAsset{}).Where("asset_id = ? AND released = ?", asset.ID, false).Count(&active).Error != nil { return }; if active == 0 { if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() }; return } }
 			a.db.Model(&asset).Update("sync_state", "syncing"); a.notify(asset.UserID)
-			name, pathErr := a.assetPath(asset.Path)
+			name, pathErr := a.assetOriginalPath(asset)
 			err = pathErr
 			if err == nil { var file *os.File; file, err = os.Open(name); if err == nil { err = a.putCloudAsset(ctx, asset, file, policy); file.Close() } }
 			if err == nil { err = a.db.Model(&Asset{}).Where("id = ? AND delete_state <> ?", asset.ID, "deleted").Updates(map[string]any{"sync_state": "synced", "error": ""}).Error }

@@ -2,6 +2,7 @@ import { createGeneration, waitForGeneration, type GenerationOptions } from "./t
 import { assetUrl } from "./assets";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -18,7 +19,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     return task.assetIds.map((id) => ({ id, dataUrl: assetUrl(id), storageKey: `asset:${id}` }));
 }
 
-export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: GenerationOptions) {
-    const task = await waitForGeneration(await createGeneration(config, "text", { messages }, options), { ...options, onText: onDelta });
+export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: GenerationOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] }) {
+    const task = await waitForGeneration(await createGeneration(config, "text", { messages, videos: options?.videos, audios: options?.audios }, options), { ...options, onText: onDelta });
     return task.text;
 }

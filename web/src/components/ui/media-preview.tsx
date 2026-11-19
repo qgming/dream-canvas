@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Dialog } from "./dialog";
 import { Button } from "./button";
 import { cn } from "@/lib/utils";
+import { useDownloadMedia } from "@/hooks/use-download-media";
 
 export type PreviewImage = { src: string; alt: string };
 
@@ -13,6 +14,7 @@ export function MediaPreview({ src, alt, className, triggerClassName, style, pre
     const [rotation, setRotation] = useState(0);
     const [activeSrc, setActiveSrc] = useState<string>();
     const { t } = useTranslation();
+    const downloadMedia = useDownloadMedia();
     const index = Math.max(0, gallery?.findIndex((image) => image.src === (activeSrc || previewSrc || src)) ?? 0);
     const current = gallery?.[index];
     const resetView = () => { setScale(1); setRotation(0); };
@@ -29,7 +31,7 @@ export function MediaPreview({ src, alt, className, triggerClassName, style, pre
             <Button variant="ghost" size="icon" aria-label={t("ui.zoomOut")} onClick={() => setScale(Math.max(0.25, scale - 0.25))}><ZoomOut /></Button>
             <Button variant="ghost" size="icon" aria-label={t("ui.zoomIn")} onClick={() => setScale(scale + 0.25)}><ZoomIn /></Button>
             <Button variant="ghost" size="icon" aria-label={t("ui.rotate")} onClick={() => setRotation(rotation + 90)}><RotateCw /></Button>
-            <Button asChild><a href={current?.src || previewSrc || src} download><Download />{t("common.download")}</a></Button>
+            <Button onClick={() => void downloadMedia({ url: current?.src || previewSrc || src }, current?.alt || alt)}><Download />{t("common.download")}</Button>
         </>}>
             <div className="flex min-h-[50dvh] items-center justify-center overflow-auto"><img src={current?.src || previewSrc || src} alt={current?.alt || alt} className="max-h-[65dvh] max-w-full object-contain" style={{ transform: `scale(${scale}) rotate(${rotation}deg)` }} /></div>
         </Dialog>

@@ -12,7 +12,7 @@ export type CanvasNodeResource = { kind: CanvasResourceKind; text?: string; url?
 export type GenerateOptions = { signal?: AbortSignal; references?: string[]; model?: string; nodeId?: string; parameters?: Record<string, unknown> };
 export type GenerateImageOptions = GenerateOptions;
 export type GenerateImageResult = { images: string[] };
-export type GenerateVideoOptions = GenerateOptions;
+export type GenerateVideoOptions = GenerateOptions & { videos?: string[] };
 export type GenerateVideoResult = { url: string; mimeType: string; width?: number; height?: number; durationMs?: number };
 export type GenerateTextOptions = Omit<GenerateOptions, "references"> & { system?: string; onDelta?: (text: string) => void };
 export type GenerateTextResult = { text: string };
@@ -25,6 +25,7 @@ export type CanvasPluginAi = {
     generateText: (prompt: string, options?: GenerateTextOptions) => Promise<GenerateTextResult>;
     listModels: (capability?: PluginModelCapability) => ModelOption[];
     defaultModel: (capability: PluginModelCapability) => string;
+    stopGeneration: (nodeId?: string) => void;
 };
 
 // Node-specific buttons appended to the hover toolbar.
@@ -118,6 +119,8 @@ export type CanvasNodeDefinition = {
     forceInteractive?: (node: CanvasNodeData) => boolean;
     keepAspectRatio?: (node: CanvasNodeData) => boolean;
     resource?: (node: CanvasNodeData) => CanvasNodeResource | null;
+    // Core plugins reuse the host's media/text/config renderers.
+    builtinRenderer?: boolean;
     // Built-ins use canvas-node's internal renderer and may omit Content.
     Content?: ComponentType<{ ctx: CanvasNodeContext }>;
     Panel?: ComponentType<{ ctx: CanvasNodeContext; onClose: () => void }>;
@@ -141,7 +144,7 @@ export type CanvasPlugin = {
     version: string;
     description?: string;
     minAppVersion?: string;
-    css?: string; // Injected when enabled and removed when uninstalled or disabled.
+    css?: string; // Injected when enabled and removed when disabled or replaced.
     nodes: CanvasNodeDefinition[];
     setup?: (app: CanvasPluginApp) => void | (() => void);
 };

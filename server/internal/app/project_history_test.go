@@ -12,9 +12,11 @@ import (
 func historyTestApp(t *testing.T) *App {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "canvas.sqlite")), &gorm.Config{}); if err != nil { t.Fatal(err) }
-	if err := db.AutoMigrate(&Project{}, &ProjectRevision{}, &GenerationTask{}, &Asset{}, &AssetReference{}); err != nil { t.Fatal(err) }
+	if err := db.AutoMigrate(&Project{}, &ProjectRevision{}, &GenerationTask{}, &Asset{}, &AssetReference{}, &FileOperation{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}); err != nil { t.Fatal(err) }
 	connection, err := db.DB(); if err != nil { t.Fatal(err) }; t.Cleanup(func() { connection.Close() })
-	return &App{db: db, events: map[string]map[chan string]bool{}}
+	a := &App{db: db, events: map[string]map[chan string]bool{}}
+	if err := a.installBuiltinCanvasPlugins(); err != nil { t.Fatal(err) }
+	return a
 }
 
 func historyDocument() JSON {

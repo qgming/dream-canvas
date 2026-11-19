@@ -10,8 +10,9 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { pickImageSource } from "@/lib/image-thumbnail";
 import { previewUrlFor, subscribeImagePreviews, getImagePreviewRevision } from "@/services/image-storage";
-import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { getNodeDefinition, isNodeTypeEnabled } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
+import { UPSCALE_NODE_TYPE } from "@/lib/canvas/canvas-upscale";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeImage, type CanvasNodeText, type Position } from "@/types/canvas";
@@ -133,7 +134,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [hovered, setHovered] = useState(false);
-    const definition = getNodeDefinition(data.type);
+    const definition = isNodeTypeEnabled(data.type) ? getNodeDefinition(data.type) : undefined;
     const pluginContext = useMemo<CanvasNodeContext | null>(() => (pluginHost ? buildNodeContext(pluginHost, data, theme, scale, isSelected) : null), [pluginHost, data, theme, scale, isSelected]);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -141,6 +142,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
+    const hasUpscaleContent = data.type === UPSCALE_NODE_TYPE && Boolean(data.metadata?.content);
     const isGroup = data.type === CanvasNodeType.Group;
     const batchCount = data.type === CanvasNodeType.Image ? data.metadata?.images?.length || 0 : data.type === CanvasNodeType.Text ? data.metadata?.texts?.length || 0 : 0;
     const isBatchRoot = batchCount > 1;
@@ -383,6 +385,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     }
                 }}
                 onDoubleClick={(event) => {
+                    if (!isNodeTypeEnabled(data.type)) return;
                     if (referenceSelectionState) {
                         event.stopPropagation();
                         return;
@@ -438,7 +441,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
 
-                {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
+                {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent && !hasUpscaleContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
                 {referenceSelectionState && (referenceSelectionState !== "available" || hovered) ? (
                     <div className="pointer-events-none absolute inset-0 z-[60] grid place-items-center rounded-[inherit]" style={{ background: `color-mix(in srgb, ${theme.canvas.background} ${referenceSelectionState === "target" ? 78 : referenceSelectionState === "disabled" ? 60 : 34}%, transparent)`, boxShadow: referenceSelectionState === "available" ? `inset 0 0 0 2px ${theme.canvas.selectionStroke}` : undefined }}>
@@ -457,7 +460,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
             {/* Counter-scale the panel so its on-screen size stays constant while the canvas zooms. */}
             {showPanel && !isGroup && renderPanel ? (
-                <div className="absolute left-1/2 top-full z-[70] w-[600px] pt-4" style={{ transform: `translateX(-50%) scale(${1 / scale})`, transformOrigin: "top center" }} data-node-panel={data.id}>
+                <div className="absolute left-1/2 top-full z-[70] w-[624px] max-w-[calc(100vw-2rem)] pt-3" style={{ transform: `translateX(-50%) scale(${1 / scale})`, transformOrigin: "top center" }} data-node-panel={data.id}>
                     {renderPanel(data)}
                 </div>
             ) : null}
@@ -466,6 +469,12 @@ export const CanvasNode = React.memo(function CanvasNode({
 });
 
 function NodeContent(props: NodeContentRendererProps) {
+    if (!isNodeTypeEnabled(props.node.type)) return <MissingPluginContent theme={props.theme} type={props.node.type} />;
+    const definition = getNodeDefinition(props.node.type);
+    if (!definition?.builtinRenderer) {
+        if (!definition?.Content || !props.pluginContext) return <MissingPluginContent theme={props.theme} type={props.node.type} />;
+        return <PluginContentBoundary content={definition.Content} ctx={props.pluginContext} />;
+    }
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot && props.node.type === CanvasNodeType.Image) return <ImageNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Text && props.node.metadata?.texts?.length && (props.node.metadata.status !== "error" || props.node.metadata.texts.some((text) => text.content))) return <TextContent {...props} />;
@@ -475,13 +484,26 @@ function NodeContent(props: NodeContentRendererProps) {
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
     if (Renderer) return <Renderer {...props} />;
 
-    // Render plugin nodes with their registered renderer, or show the missing-plugin placeholder.
-    const definition = getNodeDefinition(props.node.type);
-    if (definition?.Content && props.pluginContext) {
-        const PluginContent = definition.Content;
-        return <PluginContent ctx={props.pluginContext} />;
-    }
     return <MissingPluginContent theme={props.theme} type={props.node.type} />;
+}
+
+type PluginContentBoundaryProps = { content: NonNullable<import("@/types/canvas-plugin").CanvasNodeDefinition["Content"]>; ctx: CanvasNodeContext };
+class PluginContentBoundary extends React.Component<PluginContentBoundaryProps, { failed: boolean }> {
+    state = { failed: false };
+    static getDerivedStateFromError() { return { failed: true }; }
+    componentDidUpdate(previous: Readonly<PluginContentBoundaryProps>) {
+        if (this.state.failed && previous.content !== this.props.content) this.setState({ failed: false });
+    }
+    render() {
+        if (this.state.failed) return <FailedPluginContent onRetry={() => this.setState({ failed: false })} />;
+        const Content = this.props.content;
+        return <Content ctx={this.props.ctx} />;
+    }
+}
+
+function FailedPluginContent({ onRetry }: { onRetry: () => void }) {
+    const { t } = useTranslation();
+    return <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-sm text-muted-foreground"><p>{t("nodePlugins.renderFailed")}</p><Button variant="ghost" size="sm" onPointerDown={(event) => event.stopPropagation()} onClick={onRetry}>{t("workspace.retry")}</Button></div>;
 }
 
 const nodeContentRenderers = {

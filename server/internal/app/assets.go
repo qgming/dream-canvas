@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gabriel-vasile/mimetype"
 	_ "golang.org/x/image/webp"
 	"gorm.io/gorm"
 )
@@ -42,12 +41,21 @@ func (a *App) uploadAsset(c *gin.Context) {
 	if err != nil || (!strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") && !strings.HasPrefix(mimeType, "audio/")) {
 		respondError(c, problem(400, "invalid_media", "只支持图片、视频和音频原件")); return
 	}
-	if policy, err := a.executionPolicy(); err == nil { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.mediaLimit(strings.Split(mimeType, "/")[0])) }
+	kind := strings.Split(mimeType, "/")[0]
+	if policy, err := a.executionPolicy(); err == nil { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.mediaLimit(kind)) }
+	source, detected, err := assetMediaSource(c.Request.Body)
+	if err != nil {
+		var limit *http.MaxBytesError
+		if errors.As(err, &limit) { respondError(c, problem(413, "media_too_large", "原件超过管理员配置的大小限制，未修改原件，请重新选择")); return }
+		respondError(c, problem(500, "save_failed", "文件类型读取失败，尚未完成资产保存，请重新上传")); return
+	}
+	actual, _, err := mime.ParseMediaType(detected.String())
+	if err != nil || !strings.HasPrefix(actual, kind+"/") || detected.Extension() == "" { respondError(c, problem(400, "invalid_media", "文件内容与媒体类型不匹配或格式无法识别，请重新选择原件")); return }
 	id := identifier()
-	name, err := a.assetPath(id)
-	if err != nil { respondError(c, err); return }
 	title, _ := url.QueryUnescape(c.GetHeader("X-File-Name"))
-	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: strings.Split(mimeType, "/")[0], Title: title, MimeType: mimeType, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id, SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
+	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: kind, Title: title, MimeType: actual, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id+detected.Extension(), SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
+	name, err := a.assetOriginalPath(asset)
+	if err != nil { respondError(c, err); return }
 	if asset.Title == "" { asset.Title = "未命名素材" }
 	if err := a.db.Transaction(func(tx *gorm.DB) error {
 		if asset.WorkbenchRecordID != "" { var removed int64; if err := tx.Model(&WorkbenchRecord{}).Where("user_id = ? AND id = ? AND removed = ?", asset.UserID, asset.WorkbenchRecordID, true).Count(&removed).Error; err != nil { return err }; if removed > 0 { return problem(409, "record_removed", "生成记录已删除，请新建后上传") } }
@@ -60,7 +68,7 @@ func (a *App) uploadAsset(c *gin.Context) {
 	}
 	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err == nil {
-		asset.Bytes, err = io.Copy(file, c.Request.Body)
+		asset.Bytes, err = io.Copy(file, source)
 		if err == nil { err = file.Sync() }
 		closeErr := file.Close()
 		if err == nil { err = closeErr }
@@ -71,16 +79,6 @@ func (a *App) uploadAsset(c *gin.Context) {
 		if errors.As(err, &limit) { fail(413, "media_too_large", "原件超过管理员配置的大小限制，未修改原件，请重新选择"); return }
 		fail(500, "save_failed", "文件未能完整写入持久目录，尚未可靠保留，请重新上传"); return
 	}
-	file, err = os.Open(name)
-	if err != nil { fail(500, "file_unavailable", "原件已写入，但无法读取文件类型，请检查服务器磁盘"); return }
-	detected, detectErr := mimetype.DetectReader(file)
-	file.Close()
-	if detectErr != nil { fail(500, "file_unavailable", "文件类型读取失败，尚未完成资产保存"); return }
-	actual, _, parseErr := mime.ParseMediaType(detected.String())
-	if parseErr != nil || !strings.HasPrefix(actual, asset.Kind+"/") {
-		fail(400, "invalid_media", "文件内容与媒体类型不匹配或格式无法识别，请重新选择原件"); return
-	}
-	asset.MimeType = actual
 	if asset.Kind == "image" {
 		if file, openErr := os.Open(name); openErr == nil {
 			config, _, decodeErr := image.DecodeConfig(file)
@@ -116,7 +114,7 @@ func (a *App) assetFile(c *gin.Context) {
 	a.assetFiles.RLock(); defer a.assetFiles.RUnlock()
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", asset.ID, currentUser(c).ID).Error; err != nil { respondError(c, err); return }
 	if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
-	name, err := a.assetPath(asset.Path)
+	name, err := a.assetOriginalPath(asset)
 	if err != nil { respondError(c, err); return }
 	file, err := os.Open(name)
 	if err != nil { respondError(c, problem(500, "file_unavailable", "已保存文件暂时无法读取，请检查服务器磁盘")); return }

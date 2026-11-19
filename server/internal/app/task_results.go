@@ -41,8 +41,14 @@ func (a *App) saveGeneratedAsset(ctx context.Context, task GenerationTask, index
 	err := a.db.First(&asset, "id = ?", id).Error
 	if err == nil && asset.SaveState == "saved" { return asset, a.queueAssetSync(asset.ID) }
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return asset, err }
+	source, detected, err := assetMediaSource(source)
+	if err != nil { return asset, err }
+	actual, _, err := mime.ParseMediaType(detected.String())
+	extension := detected.Extension()
+	if task.Capability == "audio" && mimetype.EqualsAny(actual, "application/octet-stream", "text/plain") && mimetype.EqualsAny(mimeType, "audio/pcm") { actual, extension, err = "audio/pcm", ".pcm", nil }
+	if err != nil || !strings.HasPrefix(actual, task.Capability+"/") || extension == "" { return asset, errors.New("supplier result content type mismatch") }
 	if asset.ID == "" {
-		asset = Asset{ID: id, UserID: task.UserID, WorkbenchRecordID: task.WorkbenchRecordID, Kind: task.Capability, Title: "生成成品", Path: id, SaveState: "saving", SyncState: "local", Metadata: encode(map[string]any{"source": "generation", "taskId": task.ID, "projectId": task.ProjectID, "nodeId": task.NodeID})}
+		asset = Asset{ID: id, UserID: task.UserID, WorkbenchRecordID: task.WorkbenchRecordID, Kind: task.Capability, Title: "生成成品", MimeType: actual, Path: id+extension, SaveState: "saving", SyncState: "local", Metadata: encode(map[string]any{"source": "generation", "taskId": task.ID, "projectId": task.ProjectID, "nodeId": task.NodeID})}
 		if err := a.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&asset).Error; err != nil { return err }
 			if err := tx.Create(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err }
@@ -52,7 +58,9 @@ func (a *App) saveGeneratedAsset(ctx context.Context, task GenerationTask, index
 			if removed > 0 { _, err := queueWorkbenchMediaCleanup(tx, task.UserID, []string{asset.ID}); return err }; return nil
 		}); err != nil { return asset, err }
 	}
-	name, err := a.assetPath(id)
+	if asset.Path != id+extension { return asset, errors.New("supplier result format changed before save") }
+	asset.MimeType = actual
+	name, err := a.assetOriginalPath(asset)
 	if err != nil { return asset, err }
 	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil { return asset, err }
@@ -63,14 +71,6 @@ func (a *App) saveGeneratedAsset(ctx context.Context, task GenerationTask, index
 	closeErr := file.Close()
 	if err == nil { err = closeErr }
 	if err != nil { a.db.Model(&asset).Updates(map[string]any{"save_state": "failed", "error": "生成原件保存失败或超过配置大小，尚未可靠保留"}); return asset, err }
-	read, err := os.Open(name)
-	if err != nil { return asset, err }
-	detected, err := mimetype.DetectReader(read)
-	read.Close()
-	if err != nil { return asset, err }
-	asset.MimeType, _, err = mime.ParseMediaType(detected.String())
-	if asset.Kind == "audio" && mimeType == "audio/pcm" { asset.MimeType, err = mimeType, nil }
-	if err != nil || !strings.HasPrefix(asset.MimeType, asset.Kind+"/") { return asset, errors.New("supplier result content type mismatch") }
 	if asset.Kind == "image" {
 		read, err := os.Open(name)
 		if err == nil { config, _, decodeErr := image.DecodeConfig(read); read.Close(); if decodeErr == nil { asset.Width, asset.Height = config.Width, config.Height } }
@@ -226,7 +226,7 @@ func (a *App) applyTaskResultTx(tx *gorm.DB, task GenerationTask, ids []string, 
 		original := object(target["metadata"])
 		model := task.ChannelID+"::"+snapshot.Model.Model
 		modelParameters := object(metadata["modelParameters"])
-		if reflect.DeepEqual(modelParameters[model], object(original["modelParameters"])[model]) { modelParameters[model] = parameters }; metadata["modelParameters"] = modelParameters
+		if reflect.DeepEqual(modelParameters[model], object(original["modelParameters"])[model]) { values := object(modelParameters[model]); for key, value := range parameters { values[key] = value }; modelParameters[model] = values }; metadata["modelParameters"] = modelParameters
 		if reflect.DeepEqual(metadata["model"], original["model"]) { metadata["model"] = model }
 		if reflect.DeepEqual(metadata["generationMode"], original["generationMode"]) { metadata["generationMode"] = task.Capability }
 		if input.Prompt != "" && reflect.DeepEqual(metadata["prompt"], original["prompt"]) { metadata["prompt"] = input.Prompt }

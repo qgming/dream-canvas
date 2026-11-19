@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { z } from "zod";
 import { ChevronDown } from "lucide-react";
 import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge, EmptyState, FilterChip, Notice } from "@/components/ui/display";
 import { DataTable } from "@/components/ui/data-table";
-import { Dialog, Sheet } from "@/components/ui/dialog";
 import { Choice } from "@/components/ui/choice";
-import { EditorForm, Field } from "@/components/ui/form";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useConfigStore } from "@/stores/use-config-store";
-import { getUsage, correctUsage, usageCorrections, type UsageEntry } from "@/services/api/runtime";
+import { getUsage, type UsageEntry } from "@/services/api/runtime";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { captureSession } from "@/services/api/client";
-import { decimalAmount, integerAmount, formatAmount } from "@/lib/amounts";
 
 type RangeKey = "today" | "last24h" | "days7" | "days30" | "custom";
 type FilterKey = "userId" | "projectId" | "channelId" | "modelId" | "capability" | "from" | "to";
@@ -40,9 +35,6 @@ export default function UsagePage() {
     const [customTo, setCustomTo] = useState(() => datetimeLocal(new Date()));
     const [filters, setFilters] = useState<Record<FilterKey, string>>({ userId: "", projectId: "", channelId: "", modelId: "", capability: "", from: "", to: "" });
     const [tab, setTab] = useState("models");
-    const [auditId, setAuditId] = useState("");
-    const [correction, setCorrection] = useState<UsageEntry | null>(null);
-    const [busy, setBusy] = useState(false);
 
     const timeWindow = useMemo(() => rangeWindow(range, anchor, customFrom, customTo, timeZone), [range, anchor, customFrom, customTo, timeZone]);
     const queryFilters = { ...filters, ...timeWindow, timeZone };
@@ -54,7 +46,6 @@ export default function UsagePage() {
         queryFn: () => getUsage(admin, queryFilters),
         enabled: !rangeInvalid,
     });
-    const audit = useQuery({ queryKey: ["usage-corrections", admin, auditId], queryFn: () => usageCorrections(auditId, admin), enabled: Boolean(auditId) });
 
     useEffect(() => {
         const refresh = (event: Event) => {
@@ -71,7 +62,6 @@ export default function UsagePage() {
         return () => window.removeEventListener("server-changed", refresh);
     }, [query.refetch, range, rangeInvalid]);
 
-    const points = (value: string | null | undefined) => value == null ? t("usage.unknown") : formatAmount(value, 3, locale);
     const change = (key: FilterKey, value: string) => setFilters((current) => ({ ...current, [key]: value || "", ...(key === "channelId" ? { modelId: "" } : {}) }));
     const chooseRange = (next: RangeKey) => {
         const now = new Date();
@@ -89,9 +79,6 @@ export default function UsagePage() {
         return `${channel?.name || channelId} / ${channel?.models.find((item) => item.id === modelId)?.label || modelId}`;
     };
     const data = rangeInvalid ? undefined : query.data;
-    const unknownPoints = data?.entries.filter((entry) => entry.pointsMilli == null).length || 0;
-    const summaryPoints = (summary: { pointsMilli: string; callCount: number; pendingCount: number }) =>
-        summary.callCount > 0 && summary.pendingCount === summary.callCount ? t("usage.unknown") : points(summary.pointsMilli);
 
     return <section className="space-y-6">
         <PageHeader title={t("usage.title")} description={t("usage.description")} actions={<>
@@ -107,10 +94,9 @@ export default function UsagePage() {
             <label className="space-y-1 text-xs text-muted-foreground"><span>{t("usage.to")}</span><Input type="datetime-local" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label>
         </div> : null}
 
-        <div className="grid grid-cols-3 divide-x divide-border border-y border-border py-3">
-            <Metric label={t("usage.pointsTotal")} value={data ? summaryPoints(data.summary) : "-"} />
+        <div className="grid grid-cols-2 divide-x divide-border border-y border-border py-3">
             <Metric label={t("usage.callCount")} value={data?.summary.callCount.toLocaleString(locale) ?? "-"} />
-            <Metric label={t("usage.pending")} value={data?.summary.pendingCount.toLocaleString(locale) ?? "-"} detail={unknownPoints ? t("usage.unknownPoints", { count: unknownPoints }) : undefined} />
+            <Metric label={t("usage.pending")} value={data?.summary.pendingCount.toLocaleString(locale) ?? "-"} />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -132,7 +118,6 @@ export default function UsagePage() {
                     { title: t("workspace.channelModel"), render: (_, row) => <span className="break-all">{modelLabel(row.channelId, row.modelId)}</span> },
                     { title: t("workspace.type"), render: (_, row) => t(row.capability === "audio" ? "modelScripts.tts" : `workspace.${row.capability}`) },
                     { title: t("usage.callCount"), align: "right", render: (_, row) => <span className="tabular-nums">{row.callCount.toLocaleString(locale)}</span> },
-                    { title: t("usage.points"), align: "right", render: (_, row) => <span className="tabular-nums">{summaryPoints(row)}</span> },
                     { title: t("usage.pending"), align: "right", render: (_, row) => <span className="tabular-nums">{row.pendingCount.toLocaleString(locale)}</span> },
                 ]} />,
             },
@@ -143,55 +128,25 @@ export default function UsagePage() {
                     { title: t("usage.startedAt"), render: (_, row) => <span className="whitespace-nowrap text-xs tabular-nums">{new Date(row.startedAt).toLocaleString(locale)}</span> },
                     { title: t("workspace.channelModel"), render: (_, row) => <div className="min-w-40"><div className="break-all">{modelLabel(row.channelId, row.modelId)}</div><div className="mt-1 text-xs text-muted-foreground">{t(row.capability === "audio" ? "modelScripts.tts" : `workspace.${row.capability}`)}</div></div> },
                     ...(admin ? [{ title: t("usage.user"), dataIndex: "userId" as const }] : []),
-                    { title: t("usage.basis"), render: (_, row) => <div className="flex flex-wrap gap-1"><Badge color={row.state === "actual" ? "success" : row.state === "estimated" ? "warning" : undefined}>{t(`usage.${row.state}`)}</Badge>{row.corrected ? <Badge>{t("usage.corrected")}</Badge> : null}</div> },
+                    { title: t("usage.basis"), render: (_, row) => <div className="flex flex-wrap gap-1"><Badge color={row.state === "actual" ? "success" : row.state === "estimated" ? "warning" : undefined}>{t(`usage.${row.state}`)}</Badge></div> },
                     { title: t("usage.details"), render: (_, row) => <UsageDetails row={row} /> },
-                    { title: t("usage.points"), align: "right", render: (_, row) => <span className="whitespace-nowrap tabular-nums">{points(row.pointsMilli)}</span> },
-                    { title: t("workspace.actions"), align: "right" as const, render: (_: unknown, row: UsageEntry) => <div className="flex justify-end">{admin ? <Button variant="ghost" size="sm" onClick={() => setCorrection(row)}>{t("usage.correct")}</Button> : null}{row.corrected ? <Button variant="ghost" size="sm" onClick={() => setAuditId(row.id)}>{t("usage.audit")}</Button> : null}</div> },
                 ]} />,
             },
         ]} /> : null}
 
-        <Dialog title={t("usage.correct")} open={Boolean(correction)} busy={busy} onClose={() => setCorrection(null)} footer={<Button type="submit" form="usage-correction" loading={busy}>{t("workspace.save")}</Button>}>
-            {correction ? <EditorForm key={correction.id} id="usage-correction" initialValues={{ points: correction.pointsMilli == null ? "" : decimalAmount(correction.pointsMilli, 3), reason: "" }} onSubmit={async (values) => {
-                const assertSession = captureSession();
-                setBusy(true);
-                try {
-                    await correctUsage(correction.id, { pointsMilli: integerAmount(values.points, 3), reason: values.reason });
-                    assertSession();
-                    setCorrection(null);
-                    await query.refetch();
-                } finally {
-                    setBusy(false);
-                }
-            }}>
-                <Notice type="info" title={t("usage.correctionHint")} />
-                <Field name="points" label={t("usage.correctPoints")} description={t("usage.emptyPoints")} schema={z.string().regex(/^(?:\d+(?:\.\d{1,3})?)?$/)}><Input inputMode="decimal" /></Field>
-                <Field name="reason" label={t("usage.reason")} schema={z.string().trim().min(1)}><Textarea /></Field>
-            </EditorForm> : null}
-        </Dialog>
-
-        <Sheet title={t("usage.audit")} open={Boolean(auditId)} onClose={() => setAuditId("")}>
-            {audit.error ? <Notice type="error" title={audit.error.message} action={<Button onClick={() => void audit.refetch()}>{t("workspace.retry")}</Button>} /> : null}
-            <DataTable rowId="id" rows={audit.data} loading={audit.isLoading} failed={audit.isError} columns={[
-                { title: t("workspace.submittedAt"), render: (_, row) => new Date(row.createdAt).toLocaleString(locale) },
-                { title: t("usage.reason"), render: (_, row) => admin ? row.reason : t("usage.publicCorrection") },
-                { title: t("usage.beforeAfter"), render: (_, row) => <div className="text-xs tabular-nums">{points(row.before.pointsMilli)} → {points(row.after.pointsMilli)}</div> },
-            ]} />
-        </Sheet>
     </section>;
 }
 
-function Metric({ label, value, detail }: { label: ReactNode; value: ReactNode; detail?: ReactNode }) {
+function Metric({ label, value }: { label: ReactNode; value: ReactNode }) {
     return <dl className="min-w-0 px-4 first:pl-0 last:pr-0">
         <dt className="text-xs text-muted-foreground">{label}</dt>
         <dd className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</dd>
-        {detail ? <dd className="mt-0.5 text-xs text-muted-foreground">{detail}</dd> : null}
     </dl>;
 }
 
 function UsageDetails({ row }: { row: UsageEntry }) {
     const { t } = useTranslation();
-    const expandable = Boolean(Object.keys(row.usage || {}).length || Object.keys(row.pricing || {}).length);
+    const expandable = Boolean(Object.keys(row.usage || {}).length);
     if (!expandable) return <span className="text-xs text-muted-foreground">{t("workspace.details")}</span>;
     return <Collapsible.Root className="group min-w-52">
         <Collapsible.Trigger asChild>
@@ -203,7 +158,6 @@ function UsageDetails({ row }: { row: UsageEntry }) {
         <Collapsible.Content>
             <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
                 <ReadableObject title={t("usage.usage")} value={row.usage} />
-                <ReadableObject title={t("usage.pricing")} value={row.pricing} />
             </div>
         </Collapsible.Content>
     </Collapsible.Root>;
@@ -229,11 +183,6 @@ function readableValue(value: unknown, t: (key: string, options?: Record<string,
     if (typeof value !== "object") return String(value);
     if (Array.isArray(value)) return value.length ? value.map((entry) => readableValue(entry, t)).join(" · ") : t("usage.unknown");
     const record = value as Record<string, unknown>;
-    if ("points" in record) {
-        if (record.points == null) return t("usage.unknown");
-        const per = record.per == null ? "" : String(record.per);
-        return per ? t("usage.rate", { points: String(record.points), per }) : String(record.points);
-    }
     return Object.entries(record).map(([key, entry]) => `${t(`usage.units.${key}`, { defaultValue: humanize(key) })} ${readableValue(entry, t)}`).join(" · ");
 }
 

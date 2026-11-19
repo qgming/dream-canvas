@@ -3,11 +3,18 @@
 // three.js 从 CDN 按需加载,不打进 bundle。AI 生成通过 useBuiltinPanel 声明,结果写回本节点。
 import { definePlugin, useCallback, useEffect, useRef, useState } from "@dream-canvas/plugin-sdk";
 import type { CanvasNodeContentProps, CanvasNodeContext } from "@dream-canvas/plugin-sdk";
+import { useTranslation } from "react-i18next";
+import { Globe2, RefreshCw, Sparkles, Upload } from "lucide-react";
+import i18n from "../../../../web/src/i18n";
+import { Button } from "../../../../web/src/components/ui/button";
+import { useFeedback } from "../../../../web/src/hooks/use-feedback";
+import { uploadImage } from "../../../../web/src/services/image-storage";
+import { captureSession } from "../../../../web/src/services/api/client";
 
 // three 从 CDN 动态加载(env.d.ts 里声明为 any),不打进 bundle
 let threePromise: Promise<any> | undefined;
 function loadThree(): Promise<any> {
-    if (!threePromise) threePromise = import("https://esm.sh/three@0.180.0");
+    if (!threePromise) threePromise = import(/* @vite-ignore */ "https://esm.sh/three@0.180.0");
     return threePromise;
 }
 
@@ -22,7 +29,8 @@ const PANORAMA_SYSTEM_PROMPT =
 // 全景查看器:球体内壁贴等距柱状纹理,指针拖动转视角、滚轮缩放 fov。
 // 自适应容器尺寸(ResizeObserver);超过 GPU 上限的大图先降采样,避免加载失败。
 // ---------------------------------------------------------------------------
-function PanoramaViewer({ src, ctx }: { src: string; ctx: CanvasNodeContext }) {
+function PanoramaViewer({ src }: { src: string }) {
+    const { t } = useTranslation();
     const mountRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
@@ -185,11 +193,11 @@ function PanoramaViewer({ src, ctx }: { src: string; ctx: CanvasNodeContext }) {
     }, [src]);
 
     return (
-        <div style={{ position: "relative", height: "100%", width: "100%", overflow: "hidden", borderRadius: 16, background: "#000" }}>
+        <div className="relative size-full overflow-hidden rounded-xl bg-background">
             <div ref={mountRef} data-canvas-no-zoom onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()} style={{ position: "absolute", inset: 0 }} />
             {status !== "ready" ? (
-                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: ctx.theme.node.placeholder, fontSize: 13, background: status === "error" ? "rgba(0,0,0,0.6)" : `linear-gradient(135deg, ${ctx.theme.node.fill}, #000)` }}>
-                    {status === "error" ? "全景图读取失败,请换 2:1 的 JPG/PNG 全景图" : "正在加载全景…"}
+                <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/80 p-4 text-center text-sm text-muted-foreground">
+                    {t(status === "error" ? "canvas.panorama.loadFailed" : "canvas.panorama.loading")}
                 </div>
             ) : null}
         </div>
@@ -201,47 +209,35 @@ function PanoramaViewer({ src, ctx }: { src: string; ctx: CanvasNodeContext }) {
 // 整块不可点,避免误触;拖动节点照常。
 // ---------------------------------------------------------------------------
 function PanoramaEmpty({ ctx }: { ctx: CanvasNodeContext }) {
+    const { t } = useTranslation();
+    const { notify } = useFeedback();
     const fileRef = useRef<HTMLInputElement>(null);
+    const [uploading, setUploading] = useState(false);
 
-    // 本地上传:读为 dataURL 写入自身 metadata.content
     const onPick = useCallback(
-        (file: File | undefined) => {
+        async (file: File | undefined) => {
             if (!file) return;
-            const reader = new FileReader();
-            reader.onload = () => ctx.updateMetadata({ content: String(reader.result || "") });
-            reader.readAsDataURL(file);
+            const assertSession = captureSession();
+            setUploading(true);
+            try {
+                const image = await uploadImage(file);
+                assertSession();
+                ctx.updateMetadata({ content: image.url, storageKey: image.storageKey, naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType });
+            } catch (error) { notify.error(error instanceof Error ? error.message : t("ui.operationFailed")); }
+            finally { setUploading(false); }
         },
-        [ctx],
+        [ctx, notify, t],
     );
 
-    const t = ctx.theme;
-    const baseBtn = {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        cursor: "pointer",
-        borderRadius: 999,
-        padding: "9px 18px",
-        fontSize: 13,
-        fontWeight: 600,
-        border: `1px solid ${t.node.stroke}`,
-        background: t.node.fill,
-        color: t.node.text,
-    } as const;
-
     return (
-        <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 20, borderRadius: 16, boxSizing: "border-box", background: t.node.fill }}>
-            <span style={{ fontSize: 34 }}>🌐</span>
-            <div data-canvas-no-zoom onMouseDown={(e) => e.stopPropagation()} style={{ display: "flex", gap: 10 }}>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPick(e.target.files?.[0])} />
-                <button type="button" style={baseBtn} onClick={() => fileRef.current?.click()}>
-                    🖼 上传全景图
-                </button>
-                <button type="button" style={{ ...baseBtn, border: "none", background: t.toolbar.activeBg, color: t.toolbar.activeText }} onClick={() => ctx.openPanel()}>
-                    ✨ AI 生成
-                </button>
+        <div className="flex size-full flex-col items-center justify-center gap-3 rounded-xl p-4 text-muted-foreground">
+            <Globe2 className="size-7" />
+            <div data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} className="flex flex-wrap items-center justify-center gap-2">
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void onPick(file); }} />
+                <Button variant="ghost" icon={<Upload />} loading={uploading} onClick={() => fileRef.current?.click()}>{t("canvas.panorama.upload")}</Button>
+                <Button variant="ghost" icon={<Sparkles />} disabled={uploading} onClick={() => ctx.openPanel()}>{t("canvas.panorama.generate")}</Button>
             </div>
-            <span style={{ fontSize: 12, color: t.node.placeholder, textAlign: "center" }}>支持 2:1 等距柱状全景图</span>
+            <span className="text-center text-xs">{t("canvas.panorama.hint")}</span>
         </div>
     );
 }
@@ -254,7 +250,7 @@ function PanoramaContent({ ctx }: CanvasNodeContentProps) {
     const source = (typeof ctx.node.metadata?.content === "string" ? ctx.node.metadata.content : "") || upstreamImage || "";
 
     if (!source) return <PanoramaEmpty ctx={ctx} />;
-    return <PanoramaViewer src={source} ctx={ctx} />;
+    return <PanoramaViewer src={source} />;
 }
 
 export default definePlugin({
@@ -266,7 +262,7 @@ export default definePlugin({
         {
             type: "panorama:viewer",
             title: "3D 全景",
-            icon: "🌐",
+            icon: <Globe2 className="size-4" />,
             description: "360° 全景查看器(上传 / AI 生成)",
             defaultSize: { width: 480, height: 300 },
             defaultMetadata: {},
@@ -288,19 +284,19 @@ export default definePlugin({
                 return [
                     {
                         id: "panorama-generate",
-                        title: "用 AI 生成全景图(打开下方面板)",
-                        label: "AI 生成",
-                        icon: "✨",
+                        title: i18n.t("canvas.panorama.generate"),
+                        label: i18n.t("canvas.panorama.generate"),
+                        icon: <Sparkles className="size-4" />,
                         onClick: () => ctx.openPanel(),
                     },
                     ...(hasOwnContent
                         ? [
                               {
                                   id: "panorama-reset",
-                                  title: "清空当前全景图,重新上传",
-                                  label: "换图",
-                                  icon: "🔄",
-                                  onClick: () => ctx.updateMetadata({ content: "" }),
+                                  title: i18n.t("canvas.panorama.replace"),
+                                  label: i18n.t("canvas.panorama.replace"),
+                                  icon: <RefreshCw className="size-4" />,
+                                  onClick: () => ctx.updateMetadata({ content: "", storageKey: undefined }),
                               },
                           ]
                         : []),

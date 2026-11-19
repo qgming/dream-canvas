@@ -3,7 +3,7 @@ import React from "react";
 import { emitCanvasEvent, onCanvasEvent } from "@/lib/canvas/canvas-event-bus";
 import type { CanvasPluginApp } from "@/types/canvas-plugin";
 
-// Remote plugins obtain the host React instance through this runtime to avoid multiple React copies.
+// Node plugins use the host React instance to avoid multiple React copies.
 export type PluginRuntime = CanvasPluginApp & {
     React: typeof React;
     jsx: typeof React.createElement;

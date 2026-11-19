@@ -20,11 +20,10 @@ import { useTranslation } from "react-i18next";
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
-import { PointsEstimate } from "@/components/points-estimate";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { findChannelModel, modelOptionLabel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { findChannelModel, resolveModelParameters, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
@@ -509,24 +508,12 @@ export default function ImagePage() {
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm   sm:hidden">
-                                <span className="truncate text-muted-foreground ">
-                                    {modelOptionLabel(effectiveConfig, model)}
-                                </span>
-                                <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    {t("workbench.adjust")}
-                                </Button>
-                            </div>
-
-                            <div className="hidden sm:block">
-                                <GenerationSettings model={model} onModelChange={setSelectedModel} />
-                            </div>
                             <ModelParameters key={model} config={effectiveConfig} model={model} value={parameterValues} compact disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
 
-                        <div className="mt-auto pt-6">
-                            <div className="mb-2 flex justify-end"><PointsEstimate model={model} parameters={parameterValues} prompt={prompt} /></div>
-                            <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
+                        <div className="mt-auto flex min-w-0 items-center justify-end gap-2 pt-6">
+                            <ModelPicker config={effectiveConfig} value={model} onChange={setSelectedModel} capability="image" disabled={!draftReady || running} onMissingConfig={openModelSettings} className="min-w-0" />
+                            <Button variant="default" className="shrink-0" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
                         </div>
@@ -588,26 +575,12 @@ export default function ImagePage() {
             </Dialog>
             <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="space-y-4" inert={!draftReady}>
-                    <GenerationSettings model={model} onModelChange={setSelectedModel} />
                     <ModelParameters key={model} config={effectiveConfig} model={model} value={parameterValues} compact disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                 </div>
             </Dialog>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} initialType="image" />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
-    );
-}
-
-function GenerationSettings({ model, onModelChange }: { model: string; onModelChange: (model: string) => void }) {
-    const config = useEffectiveConfig();
-    const openModelSettings = useOpenModelSettings();
-    const { t } = useTranslation();
-
-    return (
-        <label className="block min-w-0">
-            <span className="mb-1.5 block text-xs">{t("workbench.model")}</span>
-            <ModelPicker config={config} value={model} onChange={onModelChange} capability="image" fullWidth onMissingConfig={openModelSettings} />
-        </label>
     );
 }
 

@@ -4,6 +4,7 @@ import i18n from "@/i18n";
 
 import { captureSession } from "@/services/api/client";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { isNodeTypeEnabled } from "@/lib/canvas/node-registry";
 import type { GenerationOptions } from "@/services/api/tasks";
 
 type Target = Required<Pick<GenerationOptions, "projectId" | "projectVersion" | "nodeId" | "batchId">>;
@@ -38,6 +39,8 @@ export function useGenerationTarget(projectId: string) {
                     request.assertSession();
                     if (!mounted.current || request.signal?.aborted) throw interrupted();
                     if (!project.nodes.some((node) => node.id === request.nodeId)) throw new Error(i18n.t("errors.projectTargetRemoved"));
+                    const node = project.nodes.find((node) => node.id === request.nodeId)!;
+                    if (!isNodeTypeEnabled(node.type)) throw new Error(i18n.t("nodePlugins.unavailable"));
                     request.resolve({ projectId, projectVersion: project.version, nodeId: request.nodeId, batchId: nanoid() });
                 } catch (error) { request.reject(error); }
                 finally { pending.current.delete(request); request.stop(); }

@@ -149,7 +149,7 @@ export type GenerateImageResult = {
     images: string[];
 };
 
-export type GenerateVideoOptions = GenerateOptions;
+export type GenerateVideoOptions = GenerateOptions & { videos?: string[] };
 
 export type GenerateVideoResult = {
     url: string; // 视频可访问 URL
@@ -181,6 +181,7 @@ export type CanvasPluginAi = {
     listModels: (capability?: ModelCapability) => ModelOption[];
     // 该能力当前默认选中的模型 value(可作为下拉框初始值)
     defaultModel: (capability: ModelCapability) => string;
+    stopGeneration: (nodeId?: string) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -273,6 +274,7 @@ export type CanvasNodeDefinition = {
     forceInteractive?: (node: CanvasNodeData) => boolean;
     keepAspectRatio?: (node: CanvasNodeData) => boolean;
     resource?: (node: CanvasNodeData) => CanvasNodeResource | null;
+    builtinRenderer?: boolean;
     // 渲染
     Content?: ComponentType<CanvasNodeContentProps>;
     Panel?: ComponentType<CanvasNodePanelProps>; // 节点下方面板(自定义)

@@ -16,6 +16,7 @@ const ApprovalsPage = lazy(() => import("@/pages/settings/approvals"));
 const UsersPage = lazy(() => import("@/pages/settings/users"));
 const ChannelsPage = lazy(() => import("@/pages/settings/channels"));
 const ModelScriptsPage = lazy(() => import("@/pages/settings/model-scripts"));
+const CanvasPluginsPage = lazy(() => import("@/pages/settings/canvas-plugins"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
 const RuntimePage = lazy(() => import("@/pages/settings/runtime"));
 const LoggingPage = lazy(() => import("@/pages/settings/logging"));
@@ -58,6 +59,8 @@ export const router = createBrowserRouter([
                             { path: "channels", element: <ChannelsPage /> },
                             { path: "model-scripts", element: <ModelScriptsPage /> },
                             { path: "model-scripts/:id", element: <ModelScriptsPage /> },
+                            { path: "canvas-plugins", element: <CanvasPluginsPage /> },
+                            { path: "canvas-plugins/:id", element: <CanvasPluginsPage /> },
                             { path: "runtime", element: <RuntimePage /> },
                             { path: "logging", element: <LoggingPage /> },
                             { path: "storage", element: <StoragePage /> },

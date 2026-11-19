@@ -1,161 +1,33 @@
-import type { CSSProperties } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Segmented } from "@/components/ui/controls";
+import { LoaderCircle, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
+import { buildNodeGenerationContext, resolveNodeGenerationContext } from "./canvas-node-generation";
+import { modelOptionLabel, useEffectiveConfig } from "@/stores/use-config-store";
+import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
-import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
-import { ModelPicker } from "@/components/model-picker";
-import { ModelParameters } from "@/components/model-parameters";
-import { PointsEstimate } from "@/components/points-estimate";
-import { getGenerationCount } from "@/lib/canvas/canvas-generation-helpers";
-import { buildNodeGenerationContext } from "./canvas-node-generation";
-import { defaultConfig, firstModel, modelMatchesCapability, resolveModelForCapability, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
-import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
-import type { CanvasConnection, CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
-
-type CanvasConfigNodePanelProps = {
-    node: CanvasNodeData;
-    nodes: CanvasNodeData[];
-    connections: CanvasConnection[];
-    isRunning: boolean;
-    inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
-    onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
-    onGenerate: (nodeId: string) => void;
-    onStop: (nodeId: string) => void;
-    onComposerToggle: () => void;
-};
-
-export function CanvasConfigNodePanel({ node, nodes, connections, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, nodes, connections, isRunning, onComposerToggle }: { node: CanvasNodeData; nodes: CanvasNodeData[]; connections: CanvasConnection[]; isRunning: boolean; onComposerToggle: () => void }) {
     const { t } = useTranslation();
-    const globalConfig = useEffectiveConfig();
-    const openModelSettings = useOpenModelSettings();
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
-    const config = buildNodeConfig(globalConfig, node, mode);
-    const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
-    const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
-    const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const canGenerate = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
-    const estimatePrompt = buildNodeGenerationContext(node.id, nodes, connections, node.metadata?.composerContent ?? node.metadata?.prompt ?? "").prompt;
+    const config = buildGenerationConfig(useEffectiveConfig(), node, mode);
+    const context = resolveNodeGenerationContext(config, buildNodeGenerationContext(node.id, nodes, connections, node.metadata?.composerContent ?? node.metadata?.prompt ?? ""));
 
-    return (
-        <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
-            <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="shrink-0 text-sm font-semibold">{t("canvas.configNode.title")}</div>
-                <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
-                    <Segmented
-                        size="small"
-                        className="canvas-config-mode !rounded-md !p-0.5"
-                        value={mode}
-                        onChange={(value) => { const nextMode = value as CanvasGenerationMode; onConfigChange(node.id, { generationMode: nextMode, model: modelMatchesCapability(config, config.model, nextMode) ? config.model : firstModel(config, nextMode) }); }}
-                        options={[
-                            {
-                                value: "image",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <ImageIcon className="size-3.5" />
-                                        {t("canvas.configNode.image")}
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "text",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <MessageSquare className="size-3.5" />
-                                        {t("canvas.configNode.text")}
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "video",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Video className="size-3.5" />
-                                        {t("canvas.configNode.video")}
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "audio",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Music2 className="size-3.5" />
-                                        {t("canvas.configNode.audio")}
-                                    </span>
-                                ),
-                            },
-                        ]}
-                    />
-                </div>
-            </div>
-
-            <div className="mb-2 flex flex-wrap gap-1.5">
-                <InputChip label={t("canvas.configNode.prompt")} value={t("canvas.configNode.items", { count: inputSummary.textCount })} style={chipStyle} />
-                <InputChip label={t("canvas.configNode.references")} value={t("canvas.configNode.images", { count: inputSummary.imageCount })} style={chipStyle} />
-                <InputChip label={t("canvas.configNode.videoReferences")} value={t("canvas.configNode.items", { count: inputSummary.videoCount })} style={chipStyle} />
-                <InputChip label={t("canvas.configNode.audioReferences")} value={t("canvas.configNode.items", { count: inputSummary.audioCount })} style={chipStyle} />
-                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-xs" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
-                    <Settings2 className="size-3.5" />
-                    {t("canvas.configNode.compose")}
-                </button>
-            </div>
-
-            <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${(mode === "audio" || mode === "video") ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_148px]"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={openModelSettings} fullWidth />
-                {mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { count: Number(value) || 1 })} />
-                ) : mode === "text" ? (
-                    <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
-                ) : null}
-            </div>
-
-            <div className="thin-scrollbar mb-2 max-h-60 overflow-y-auto"><ModelParameters config={config} model={config.model} value={node.metadata?.modelParameters?.[config.model]} disabled={isRunning} onChange={(value) => onConfigChange(node.id, { modelParameters: { ...node.metadata?.modelParameters, [config.model]: value } })} /></div>
-            <div className="mt-auto mb-2 flex justify-end">{!isRunning ? <PointsEstimate model={config.model} parameters={node.metadata?.modelParameters?.[config.model]} prompt={estimatePrompt} requests={mode === "image" ? getGenerationCount(config.count) : mode === "text" ? getGenerationCount(String(node.metadata?.textCount || 1)) : 1} /> : null}</div>
-            <Button variant={isRunning ? "destructive" : "default"}
-                className="mt-auto !h-8 !w-full !cursor-pointer !rounded-lg" aria-busy={isRunning}
-                disabled={!isRunning && !canGenerate}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
-            >
-                <span className="inline-flex items-center gap-1.5">
-                    {isRunning ? (
-                        <>
-                            <LoaderCircle className="size-4 animate-spin" />
-                            <Square className="size-3.5 fill-current" />
-                            <span>{t("canvas.configNode.stop")}</span>
-                        </>
-                    ) : (
-                        <>
-                            <Play className="size-4" />
-                            <span>{t("canvas.configNode.generate")}</span>
-                        </>
-                    )}
-                </span>
-            </Button>
+    return <div className="flex h-full min-h-0 w-full cursor-move flex-col gap-3 p-4 text-sm">
+        <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+            {isRunning ? <LoaderCircle className="size-4 shrink-0 animate-spin motion-reduce:animate-none" /> : <Settings2 className="size-4 shrink-0" />}
+            <span className="truncate text-xs font-medium">{t("canvas.configNode.title")}</span>
+            <span className="ml-auto shrink-0 text-xs">{t(`canvas.configNode.${mode}`)}</span>
         </div>
-    );
-}
-
-function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {
-    return (
-        <div className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs" style={style}>
-            <span>{label}</span>
-            <span className="font-medium">{value}</span>
+        <p className="truncate text-xs text-muted-foreground">{config.model ? modelOptionLabel(config, config.model) : t("settingsPanels.model.select")}</p>
+        <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6">{context.prompt.trim() || t("canvas.configNode.editHint")}</p>
+        <div className="mt-auto flex items-end gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {context.textCount ? <span>{t("canvas.configNode.prompt")} {context.textCount}</span> : null}
+            {context.imageCount ? <span>{t("canvas.configNode.references")} {context.imageCount}</span> : null}
+            {context.videoCount ? <span>{t("canvas.configNode.videoReferences")} {context.videoCount}</span> : null}
+            {context.audioCount ? <span>{t("canvas.configNode.audioReferences")} {context.audioCount}</span> : null}
         </div>
-    );
+        <Button variant="ghost" size="icon" icon={<Settings2 />} title={t("canvas.configNode.edit")} aria-label={t("canvas.configNode.edit")} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle} />
+        </div>
+    </div>;
 }
-
-function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasGenerationMode): AiConfig {
-    return {
-        ...globalConfig,
-        model: resolveModelForCapability(globalConfig, node.metadata?.model, mode),
-        reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
-        count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
-    };
-}
-

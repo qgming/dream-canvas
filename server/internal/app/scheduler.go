@@ -51,7 +51,7 @@ func (a *App) schedule() {
 		} else {
 			// Local cleanup needs no supplier timeout or retry policy.
 			var operations []FileOperation
-			if a.db.Where("kind = ? AND next_run_at IS NULL AND asset_id IN (?) AND NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?)", "delete", a.db.Model(&Asset{}).Select("id").Where("storage_id = ?", ""), false).Find(&operations).Error == nil { for _, operation := range operations { a.launch("file:"+operation.ID, func(ctx context.Context) { if a.cleanAsset(operation.AssetID) == nil { a.db.Delete(&FileOperation{}, "id = ?", operation.ID) } }) } }
+			if a.db.Where("kind = ? AND next_run_at IS NULL AND asset_id IN (?) AND NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?)", "delete", a.db.Model(&Asset{}).Select("id").Where("storage_id = ?", ""), false).Find(&operations).Error == nil { for _, operation := range operations { a.launch("file:"+operation.AssetID, func(ctx context.Context) { if a.cleanAsset(operation.AssetID) == nil { a.db.Delete(&FileOperation{}, "id = ?", operation.ID) } }) } }
 		}
 		select { case <-a.ctx.Done(): return; case <-a.wake: }
 	}
@@ -72,7 +72,7 @@ func (a *App) launch(key string, run func(context.Context)) bool {
 func (a *App) workRevision(key string) string {
 	parts := strings.SplitN(key, ":", 2); if len(parts) != 2 { return "" }
 	var model any
-	switch parts[0] { case "task", "results": model = &GenerationTask{}; case "turn": model = &AssistantTurn{}; case "file": model = &FileOperation{}; default: return "" }
+	switch parts[0] { case "task", "results": model = &GenerationTask{}; case "turn": model = &AssistantTurn{}; case "file": model = &Asset{}; default: return "" }
 	var row struct { UpdatedAt time.Time }
 	err := a.db.Model(model).Select("updated_at").Where("id = ?", parts[1]).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) { return "removed" }; if err != nil { return "" }; return row.UpdatedAt.String()
@@ -166,7 +166,7 @@ func (a *App) executeTask(ctx context.Context, id string) {
 	}
 	if result.UpstreamID != "" { task.UpstreamID = result.UpstreamID }
 	if !includes([]string{"completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) {
-		if task.UpstreamID == "" { a.taskProblem(task, "confirmation_required", "接口脚本未解析出可靠查询编号，请管理员核对响应映射；未重新提交", false); return }
+		if task.UpstreamID == "" { a.taskProblem(task, "confirmation_required", "接口插件未解析出可靠查询编号，请管理员核对响应映射；未重新提交", false); return }
 		next := time.Now().Add(seconds(snapshot.Policy.PollSeconds))
 		if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": "running", "provider_status": result.Status, "progress": result.Progress, "upstream_id": task.UpstreamID, "query_failures": 0, "raw_response_file": "", "next_run_at": next, "error": ""}).Error; err != nil { return }
 		fields := []slog.Attr{slog.String("provider_status", result.Status), slog.Bool("has_progress", result.Progress != nil)}; if result.Progress != nil { fields = append(fields, slog.Float64("progress", *result.Progress)) }

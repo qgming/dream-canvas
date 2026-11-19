@@ -1,27 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { Button } from "@/components/ui/button";
+import { createPortal } from "react-dom";
 import { MediaPreview } from "@/components/ui/media-preview";
-import { FileText, Group, Image as ImageIcon, Music2, Video, X } from "lucide-react";
+import { FileText, Group, Image as ImageIcon, Music2, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
-import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
 import type { CanvasNodeData } from "@/types/canvas";
+import { buildGenerationConfig, generationInputKinds } from "@/lib/canvas/canvas-generation-helpers";
+import { useEffectiveConfig } from "@/stores/use-config-store";
+import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/keyboard-event";
 
 type CanvasConfigComposerProps = {
     nodeId: string;
     nodes: CanvasNodeData[];
     value: string;
     inputs: NodeGenerationInput[];
-    connectedNodes?: CanvasNodeData[];
     onChange: (value: string) => void;
-    onClose: () => void;
-    onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
-    onStartReferenceSelection?: (nodeId: string) => void;
+    className?: string;
 };
 
 type Token =
@@ -34,10 +34,15 @@ type MentionState = {
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNodes = [], onChange, onClose, onDisconnectReference, onStartReferenceSelection }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ nodeId, nodes, value, inputs, onChange, className }: CanvasConfigComposerProps) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const globalConfig = useEffectiveConfig();
+    const node = nodes.find((item) => item.id === nodeId);
+    const config = buildGenerationConfig(globalConfig, node, node?.metadata?.generationMode || "image");
+    const inputKinds = generationInputKinds(config);
     const editorRef = useRef<HTMLDivElement>(null);
+    const lastEmittedRef = useRef(value);
     const composingRef = useRef(false);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
@@ -47,14 +52,13 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = (mention.query || "").trim().toLowerCase();
-        if (!query) return inputs;
-        return inputs.filter((input) => `${resourceLabel(input, inputs)} ${input.title} ${input.type === "group" ? "" : input.text || ""}`.toLowerCase().includes(query));
-    }, [inputs, mention]);
+        return inputs.filter((input) => (input.type === "group" ? input.children.some((child) => inputKinds.includes(child.type)) : inputKinds.includes(input.type)) && (!query || `${resourceLabel(input, inputs)} ${input.title} ${input.type === "group" ? "" : input.text || ""}`.toLowerCase().includes(query)));
+    }, [inputs, inputKinds, mention]);
 
     useEffect(() => {
-        if (document.activeElement === editorRef.current) return;
         const editor = editorRef.current;
         if (!editor) return;
+        if (document.activeElement === editor && value === lastEmittedRef.current) return;
         editor.textContent = "";
         tokens.forEach((token) => {
             if (token.type === "text") {
@@ -63,14 +67,18 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
             }
             const input = referenceById.get(token.nodeId);
             if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
+            else editor.append(document.createTextNode(`@[node:${token.nodeId}]`));
         });
-    }, [inputs, referenceById, theme, tokens]);
+        lastEmittedRef.current = value;
+    }, [inputs, referenceById, theme, tokens, value]);
+
+    const emit = (next: string) => { lastEmittedRef.current = next; onChange(next); };
 
     const syncFromEditor = () => {
         const editor = editorRef.current;
         if (!editor) return;
         const next = serializeEditor(editor);
-        onChange(next);
+        emit(next);
         syncMention();
     };
 
@@ -110,35 +118,28 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
             placeCaretAtEnd(editor);
         }
         closeMention();
-        onChange(serializeEditor(editor));
+        emit(serializeEditor(editor));
     };
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
 
     return (
         <div
-            data-canvas-no-zoom
-            className="rounded-xl border p-3 shadow-2xl backdrop-blur"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            data-canvas-no-zoom data-canvas-shortcuts-ignore
+            className="relative"
             onMouseDown={stopCanvasInteraction}
             onPointerDown={stopCanvasInteraction}
             onWheel={(event) => event.stopPropagation()}
         >
-            <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-baseline gap-2">
-                    <div className="shrink-0 text-xs font-semibold">{t("canvas.composer.title")}</div>
-                    <div className="truncate text-xs opacity-55">{t("canvas.composer.description")}</div>
-                </div>
-                <Button size="sm" variant="ghost" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
-            </div>
-            <CanvasNodeReferenceBar nodeId={nodeId} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
-            <div className="relative rounded-xl">
-                {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>{t("canvas.composer.placeholder")}</div> : null}
+                {!value.trim() ? <div className="pointer-events-none absolute inset-x-0 top-0 text-sm leading-6" style={{ color: theme.node.placeholder }}>{t("canvas.composer.placeholder")}</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
-                    className="thin-scrollbar min-h-28 max-h-72 w-full overflow-y-auto overscroll-contain whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    role="textbox"
+                    aria-label={t("workbench.prompt")}
+                    aria-multiline="true"
+                    className={cn("thin-scrollbar min-h-[3lh] max-h-[10lh] w-full cursor-text overflow-x-hidden overflow-y-auto overscroll-contain whitespace-pre-wrap break-words rounded-lg text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30", className)}
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
@@ -152,6 +153,7 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         event.stopPropagation();
+                        if (isImeComposing(event)) return;
                         if (mention && candidates.length) {
                             if (event.key === "ArrowDown") {
                                 event.preventDefault();
@@ -183,15 +185,14 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
                     }}
                     onBlur={() => window.setTimeout(closeMention, 120)}
                 />
-                {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
-            </div>
+                {mention && candidates.length ? <MentionMenu anchor={editorRef.current} inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
             {imagePreview ? <MediaPreview src={imagePreview} alt={t("canvas.composer.imagePreview")} style={{ display: "none" }} open onOpenChange={(visible) => !visible && setImagePreview(null)} /> : null}
         </div>
     );
 
 }
 
-function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
+function MentionMenu({ anchor, inputs, allInputs, activeIndex, theme, onSelect }: { anchor: HTMLElement | null; inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
     const selectedRef = useRef(false);
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -205,8 +206,11 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
         onSelect(input);
     };
 
-    return (
-        <div className="absolute left-2 top-[calc(100%+6px)] z-[90] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+    const rect = anchor?.getBoundingClientRect();
+    if (!rect) return null;
+    const top = rect.bottom + 6 + 224 <= window.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - 224 - 6);
+    return createPortal(
+        <div data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore className="fixed z-[1600] max-h-56 w-64 max-w-[calc(100vw-16px)] overflow-x-hidden overflow-y-auto rounded-xl border p-1 shadow-lg" style={{ top, left: Math.max(8, Math.min(rect.left, window.innerWidth - 264)), background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             {inputs.map((input, index) => (
                 <button
                     key={input.nodeId}
@@ -227,7 +231,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
                     </span>
                 </button>
             ))}
-        </div>
+        </div>, document.body,
     );
 }
 

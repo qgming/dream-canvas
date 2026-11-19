@@ -86,7 +86,7 @@ func (a *App) scriptArguments(task GenerationTask, snapshot executionSnapshot, i
 		if withFiles && transport == "https" { address, err := a.assetTaskURL(task.UserID, asset.ID, snapshot.Policy); if err != nil { return nil, err }; row["url"] = address }
 		if withFiles && transport == "data" {
 			if asset.Bytes > (snapshot.Policy.JSONBytes/4)*3 { return nil, problem(400, "asset_encoding_limit", "Base64 素材超过脚本 JSON 边界，请为此模型改用 file 或 https") }
-			a.assetFiles.RLock(); name, err := a.assetPath(asset.Path); var data []byte
+			a.assetFiles.RLock(); name, err := a.assetOriginalPath(asset); var data []byte
 			if err == nil { var file *os.File; file, err = os.Open(name); if err == nil { data, err = io.ReadAll(io.LimitReader(file, asset.Bytes+1)); file.Close(); if int64(len(data)) != asset.Bytes { err = errors.New("asset size changed") } } }; a.assetFiles.RUnlock()
 			if err != nil { return nil, err }; row["dataUrl"] = "data:"+asset.MimeType+";base64,"+base64.StdEncoding.EncodeToString(data)
 		}
@@ -100,7 +100,7 @@ func (a *App) scriptArguments(task GenerationTask, snapshot executionSnapshot, i
 }
 
 func (a *App) validateScriptInput(userID string, snapshot executionSnapshot, input generationInput, tools ...[]map[string]any) error {
-	if snapshot.Script == nil { return problem(400, "script_required", "模型尚未选择接口脚本版本") }; scripts := map[string]string{}; if err := json.Unmarshal(snapshot.Script.Scripts, &scripts); err != nil { return err }; if scripts["validate"] == "" { return nil }
+	if snapshot.Script == nil { return problem(400, "script_required", "模型尚未选择接口插件版本") }; scripts := map[string]string{}; if err := json.Unmarshal(snapshot.Script.Scripts, &scripts); err != nil { return err }; if scripts["validate"] == "" { return nil }
 	arguments, err := a.scriptArguments(GenerationTask{UserID: userID}, snapshot, input, false); if err != nil { return err }
 	if len(tools) > 0 { arguments["tools"] = tools[0] }
 	value, err := a.runScript(a.ctx, snapshot, "validate", scripts["validate"], arguments); if err != nil { return problem(400, "interface_validation_failed", "参数校验阶段："+providerError(&scriptPreparationError{cause: err})) }
@@ -109,11 +109,11 @@ func (a *App) validateScriptInput(userID string, snapshot executionSnapshot, inp
 
 // Public diagnostics identify the failing stage without exposing script values or credentials.
 type scriptRuntimeError struct { stage string; cause error }
-func (e *scriptRuntimeError) Error() string { return e.stage+"失败，请核对接口脚本及已配置运行边界" }
+func (e *scriptRuntimeError) Error() string { return e.stage+"失败，请核对接口插件及已配置运行边界" }
 func (e *scriptRuntimeError) Unwrap() error { return e.cause }
 
 type scriptPreparationError struct { cause error }
-func (e *scriptPreparationError) Error() string { return "接口脚本调用准备失败，尚未提交供应商" }
+func (e *scriptPreparationError) Error() string { return "接口插件调用准备失败，尚未提交供应商" }
 func (e *scriptPreparationError) Unwrap() error { return e.cause }
 
 func scriptRequestURL(baseURL, requestPath string) (string, error) {
@@ -153,7 +153,7 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 			for _, raw := range parts { part := object(raw); field := text(part["name"]); if field == "" { return errors.New("multipart field name required") }
 				if id := text(part["assetId"]); id != "" {
 					var asset Asset; if err := a.db.Where("id = ? AND user_id = ? AND save_state = ? AND EXISTS (SELECT 1 FROM task_assets WHERE task_assets.task_id = ? AND task_assets.asset_id = assets.id AND released = ?)", id, task.UserID, "saved", leaseID, false).First(&asset).Error; err != nil { return err }
-					name, err := a.assetPath(asset.Path); if err != nil { return err }; file, err := os.Open(name); if err != nil { return err }
+					name, err := a.assetOriginalPath(asset); if err != nil { return err }; file, err := os.Open(name); if err != nil { return err }
 					header := make(http.Header); header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": field, "filename": asset.Title})); header.Set("Content-Type", asset.MimeType)
 					output, err := form.CreatePart(textproto.MIMEHeader(header)); if err == nil { _, err = io.Copy(output, file) }; file.Close(); if err != nil { return err }
 				} else if err := form.WriteField(field, text(part["value"])); err != nil { return err }
@@ -258,15 +258,15 @@ func (a *App) executeModelScript(ctx context.Context, task GenerationTask, lease
 		if id := text(parsed["upstreamId"]); id != "" { arguments["upstreamId"] = id }
 		if follow := object(parsed["request"]); len(follow) > 0 {
 			if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, &scriptParseError{phase: "后续只读请求"} }
-			if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口脚本 progress 必须为供应商提供的 0–100 数值", cause: err} }
+			if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口插件 progress 必须为供应商提供的 0–100 数值", cause: err} }
 			previous := object(arguments["previousResult"]); for _, key := range []string{"usage", "usageState", "progress"} { if parsed[key] != nil { previous[key] = parsed[key] } }; arguments["previousResult"] = previous
 			response, err = a.scriptRequest(ctx, task, leaseID, snapshot, follow, arguments, onStream); if err != nil { return providerResult{}, &scriptParseError{phase: "后续查询", cause: err} }; phase = "followup"; if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }; continue
 		}
-		if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口脚本 progress 必须为供应商提供的 0–100 数值", cause: err} }
+		if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口插件 progress 必须为供应商提供的 0–100 数值", cause: err} }
 		var result providerResult; if json.Unmarshal(encode(parsed), &result) != nil || !includes([]string{"queued", "running", "completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) { return result, &scriptParseError{phase: "结果状态"} }
 		if result.Progress == nil { result.Progress, _ = scriptProgress(object(arguments["previousResult"])) }
 		if result.UpstreamID == "" { result.UpstreamID = text(arguments["upstreamId"]) }
-		if includes([]string{"queued", "running"}, result.Status) && (strings.TrimSpace(result.UpstreamID) == "" || scripts["query"] == "") { return result, &scriptParseError{phase: "查询依据", detail: "接口脚本 result 返回排队或运行状态，但缺少 upstreamId 或 query 阶段；请管理员核对响应编号映射"} }
+		if includes([]string{"queued", "running"}, result.Status) && (strings.TrimSpace(result.UpstreamID) == "" || scripts["query"] == "") { return result, &scriptParseError{phase: "查询依据", detail: "接口插件 result 返回排队或运行状态，但缺少 upstreamId 或 query 阶段；请管理员核对响应编号映射"} }
 		a.logEvent(ctx, slog.LevelDebug, "script.result_normalized", slog.String("status", result.Status), slog.Bool("has_upstream_id", result.UpstreamID != ""), slog.Bool("has_progress", result.Progress != nil))
 		if result.ResponseFile != "" && result.ResponseFile != text(response["responseFile"]) { return providerResult{}, &scriptParseError{phase: "文件标识"} }
 		if outputs := array(parsed["outputs"]); len(outputs) > 0 { if task.ID == "" { return providerResult{}, errors.New("media outputs require a persistent generation task") }; data := []map[string]any{}; for _, raw := range outputs { output := object(raw); if text(output["url"]) == "" && text(output["b64_json"]) == "" { return providerResult{}, &scriptParseError{phase: "成品"} }; data = append(data, map[string]any{"url": output["url"], "b64_json": output["b64_json"]}) }; saved, err := a.persistProviderResponse(task.ID, io.NopCloser(strings.NewReader(string(encode(map[string]any{"data": data}))))); if err != nil { return providerResult{}, err }; result.ResponseFile = saved.ResponseFile }

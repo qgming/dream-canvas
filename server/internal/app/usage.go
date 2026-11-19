@@ -97,10 +97,7 @@ type usageEntryView struct {
 	ModelID string `json:"modelId"`
 	Capability string `json:"capability"`
 	State string `json:"state"`
-	Corrected bool `json:"corrected"`
 	Usage map[string]any `json:"usage"`
-	Pricing publicModelPricing `json:"pricing"`
-	PointsMilli *string `json:"pointsMilli"`
 	StartedAt time.Time `json:"startedAt"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -111,24 +108,20 @@ type usageModelSummary struct {
 	ModelID string `json:"modelId"`
 	Capability string `json:"capability"`
 	CallCount int `json:"callCount"`
-	PointsMilli string `json:"pointsMilli"`
 	PendingCount int `json:"pendingCount"`
 }
 
 type usageSummary struct {
-	PointsMilli string `json:"pointsMilli"`
 	CallCount int `json:"callCount"`
 	PendingCount int `json:"pendingCount"`
 	ByModel []usageModelSummary `json:"byModel"`
 }
 
 func usageEntryViewFor(entry UsageEntry) usageEntryView {
-	var usage, snapshot map[string]any
-	_ = json.Unmarshal(entry.Usage, &usage); if usage == nil { usage = map[string]any{} }
-	_ = json.Unmarshal(entry.Pricing, &snapshot); if snapshot == nil { snapshot = map[string]any{} }
+	var usage map[string]any
+	_ = json.Unmarshal(entry.Usage, &usage)
 	pricing, _ := parseModelPricing(entry.Pricing)
-	var points *string; if entry.PointsMilli != nil { value := strconv.FormatInt(*entry.PointsMilli, 10); points = &value }
-	return usageEntryView{ID: entry.ID, UserID: entry.UserID, ProjectID: entry.ProjectID, TaskID: entry.TaskID, TurnID: entry.TurnID, ChannelID: entry.ChannelID, ModelID: entry.ModelID, Capability: entry.Capability, State: entry.State, Corrected: entry.Corrected, Usage: publicUsageValues(usage, pricing), Pricing: projectPublicModelPricing(entry.Pricing, text(snapshot["pointsPerYuan"])), PointsMilli: points, StartedAt: entry.StartedAt, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt}
+	return usageEntryView{ID: entry.ID, UserID: entry.UserID, ProjectID: entry.ProjectID, TaskID: entry.TaskID, TurnID: entry.TurnID, ChannelID: entry.ChannelID, ModelID: entry.ModelID, Capability: entry.Capability, State: entry.State, Usage: publicUsageValues(usage, pricing), StartedAt: entry.StartedAt, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt}
 }
 
 func publicUsageUnits(pricing modelPricing) map[string]bool {
@@ -182,7 +175,7 @@ func publicUsageQuantity(value any) bool {
 
 func publicUsageCostKey(key string) bool {
 	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "", " ", "", ".", "").Replace(key))
-	for _, marker := range []string{"cost", "price", "pricing", "amount", "fee", "tax", "expense", "discount", "currency", "exchangerate", "pointsperyuan", "billing", "charge", "invoice"} {
+	for _, marker := range []string{"cost", "price", "pricing", "amount", "fee", "tax", "expense", "discount", "currency", "exchangerate", "points", "billing", "charge", "invoice"} {
 		if strings.Contains(normalized, marker) { return true }
 	}
 	return false
@@ -196,21 +189,17 @@ func (a *App) ListUsage(userID string, projects []string, filters map[string]str
 	for _, key := range []string{"from", "to"} { if value := filters[key]; value != "" { parsed, err := time.Parse(time.RFC3339Nano, value); if err != nil { return nil, problem(400, "invalid_date", "统计日期需要完整时区时间") }; operator := ">="; if key == "to" { operator = "<=" }; query = query.Where("started_at "+operator+" ?", parsed) } }
 	if err := query.Order("started_at DESC, id").Find(&entries).Error; err != nil { return nil, err }
 	views := make([]usageEntryView, 0, len(entries))
-	summary := usageSummary{PointsMilli: "0", ByModel: []usageModelSummary{}}
-	total, indexes := new(big.Int), map[string]int{}
+	summary := usageSummary{ByModel: []usageModelSummary{}}
+	indexes := map[string]int{}
 	for _, entry := range entries {
 		views = append(views, usageEntryViewFor(entry))
 		key := entry.ChannelID+"\n"+entry.ModelID+"\n"+entry.Capability
 		index, exists := indexes[key]
-		if !exists { summary.ByModel = append(summary.ByModel, usageModelSummary{ChannelID: entry.ChannelID, ModelID: entry.ModelID, Capability: entry.Capability, PointsMilli: "0"}); index = len(summary.ByModel)-1; indexes[key] = index }
+		if !exists { summary.ByModel = append(summary.ByModel, usageModelSummary{ChannelID: entry.ChannelID, ModelID: entry.ModelID, Capability: entry.Capability}); index = len(summary.ByModel)-1; indexes[key] = index }
 		group := &summary.ByModel[index]
 		summary.CallCount++; group.CallCount++
-		if entry.PointsMilli == nil { summary.PendingCount++; group.PendingCount++ } else {
-			value := big.NewInt(*entry.PointsMilli); total.Add(total, value)
-			amount, _ := new(big.Int).SetString(group.PointsMilli, 10); amount.Add(amount, value); group.PointsMilli = amount.String()
-		}
+		if entry.State != "actual" { summary.PendingCount++; group.PendingCount++ }
 	}
-	summary.PointsMilli = total.String()
 	return gin.H{"entries": views, "summary": summary}, nil
 }
 
@@ -278,9 +267,6 @@ func publicUsageJSON(raw JSON) (usageEntryView, error) {
 	if err := json.Unmarshal(raw, &source); err != nil { return value, err }
 	if err := json.Unmarshal(raw, &value); err != nil { return value, err }
 	pricing, err := parseModelPricing(source.Pricing); if err != nil { return value, err }
-	var snapshot struct { PointsPerYuan string `json:"pointsPerYuan"` }
-	if err := json.Unmarshal(source.Pricing, &snapshot); err != nil { return value, err }
-	value.Pricing = projectPublicModelPricing(source.Pricing, snapshot.PointsPerYuan)
 	value.Usage = publicUsageValues(value.Usage, pricing)
 	return value, nil
 }

@@ -43,7 +43,8 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
     (Array.isArray(ops) ? ops : []).forEach((op, index) => {
         if (!op?.type) return;
         if (op.type === "add_node") {
-            const nodeType = op.nodeType && isRegisteredNodeType(op.nodeType) ? op.nodeType : CanvasNodeType.Text;
+            const nodeType = op.nodeType || CanvasNodeType.Text;
+            if (!isRegisteredNodeType(nodeType)) throw new Error(i18n.t("nodePlugins.unavailable"));
             const spec = getNodeSpec(nodeType);
             const node: CanvasNodeData = {
                 id: op.id || `${nodeType}-${Date.now()}-${index}`,

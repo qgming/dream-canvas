@@ -1,10 +1,12 @@
 import appI18n from "@/i18n";
-import { useCallback, useEffect, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import { Hand, MousePointer2 } from "lucide-react";
 
 import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
+import { uploadMediaFile } from "@/services/file-storage";
 import { captureSession } from "@/services/api/client";
 import { useGenerationTarget } from "./use-generation-target";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -12,7 +14,6 @@ import { decodeChannelModel, resolveModelParameters, selectableModelsByCapabilit
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
-import { ensurePluginsLoaded } from "@/lib/canvas/plugin-loader";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasNodeToolbarItem, CanvasPluginAi, CanvasPluginHost, GenerateOptions } from "@/types/canvas-plugin";
 import type { ReferenceImage } from "@/types/image";
@@ -34,16 +35,17 @@ type PluginHostParams = {
     applyAgentOps: (ops?: CanvasAgentOp[]) => unknown;
     startGenerationRequest: (targetNodeId: string, originNodeId: string) => AbortController;
     finishGenerationRequest: (targetNodeId: string, controller: AbortController) => void;
+    stopGeneration: (nodeId: string) => void;
 };
 
 /**
  * Plugin node host capabilities: expose host-side AI generation, canvas access, and panel controls
- * through plugin-callable host/ai objects. Loads installed remote plugins on mount and returns renderers for plugin panels and toolbars.
+ * through plugin-callable host/ai objects; returns renderers for plugin panels and toolbars.
  */
 export function usePluginHost(params: PluginHostParams) {
     const { t } = useTranslation();
     const openModelSettings = useOpenModelSettings();
-    const { projectId, effectiveConfig, isAiConfigReady, theme, nodesRef, connectionsRef, viewportRef, setNodes, setDialogNodeId, applyAgentOps, startGenerationRequest, finishGenerationRequest } = params;
+    const { projectId, effectiveConfig, isAiConfigReady, theme, nodesRef, connectionsRef, viewportRef, setNodes, setDialogNodeId, applyAgentOps, startGenerationRequest, finishGenerationRequest, stopGeneration } = params;
     const prepareTarget = useGenerationTarget(projectId);
     const assertSession = useRef(captureSession()).current;
 
@@ -86,6 +88,7 @@ export function usePluginHost(params: PluginHostParams) {
         };
         const saveTarget = (nodeId: string, mode: ModelCapability, prompt: string, config: AiConfig, signal?: AbortSignal) => {
             assertSession();
+            if (signal?.aborted) throw new DOMException(appI18n.t("errors.waitStopped"), "AbortError");
             setNodes((nodes) => nodes.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: "loading", errorDetails: undefined, generationMode: mode, prompt, model: config.model, modelParameters: { ...node.metadata?.modelParameters, [config.model]: config.modelParameters || {} } } } : node));
             return target(nodeId, signal);
         };
@@ -120,8 +123,13 @@ export function usePluginHost(params: PluginHostParams) {
                 const { config, nodeId } = generationConfig("video", options);
                 return runGeneration(nodeId, options?.signal, async (signal) => {
                     const references = await toReferences(options?.references, signal);
+                    const videos = await Promise.all((options?.videos || []).map(async (url, index) => {
+                        const asset = await uploadMediaFile(url, "video");
+                        assertSession();
+                        return { id: `plugin-video-${index}`, name: `video-${index + 1}`, type: asset.mimeType, url: asset.url, storageKey: asset.storageKey };
+                    }));
                     const bound = await saveTarget(nodeId, "video", prompt, config, signal);
-                    const file = await storeGeneratedVideo(await requestVideoGeneration(config, prompt, references, { ...bound, signal }));
+                    const file = await storeGeneratedVideo(await requestVideoGeneration(config, prompt, references, { ...bound, signal, videos }));
                     return { url: file.url, mimeType: file.mimeType, width: file.width, height: file.height, durationMs: file.durationMs };
                 });
             },
@@ -139,8 +147,9 @@ export function usePluginHost(params: PluginHostParams) {
             // List configured models for a capability; labels use the model name without the channel prefix.
             listModels: (capability) => selectableModelsByCapability(effectiveConfig, capability as ModelCapability | undefined).map((value) => ({ value, label: decodeChannelModel(value)?.model || value })),
             defaultModel: (capability) => buildGenerationConfig(effectiveConfig, undefined, capability).model,
+            stopGeneration: (nodeId) => { if (nodeId) stopGeneration(nodeId); },
         };
-    }, [assertSession, effectiveConfig, isAiConfigReady, nodesRef, openModelSettings, prepareTarget, setNodes, startGenerationRequest, finishGenerationRequest, t]);
+    }, [assertSession, effectiveConfig, isAiConfigReady, nodesRef, openModelSettings, prepareTarget, setNodes, startGenerationRequest, finishGenerationRequest, stopGeneration, t]);
 
     const pluginHost = useMemo<CanvasPluginHost>(
         () => ({
@@ -172,7 +181,7 @@ export function usePluginHost(params: PluginHostParams) {
             const Panel = getNodeDefinition(panelNode.type)?.Panel;
             if (!Panel) return null;
             const ctx = buildNodeContext(pluginHost, panelNode, theme, viewportRef.current.k);
-            return <Panel ctx={ctx} onClose={() => setDialogNodeId(null)} />;
+            return <Panel key={panelNode.id} ctx={ctx} onClose={() => setDialogNodeId(null)} />;
         },
         [pluginHost, theme],
     );
@@ -190,7 +199,7 @@ export function usePluginHost(params: PluginHostParams) {
                 id: "node-interaction-toggle",
                 title: t(interactive ? "canvas.plugins.interactiveTitle" : "canvas.plugins.movableTitle"),
                 label: t(interactive ? "canvas.plugins.move" : "canvas.plugins.interact"),
-                icon: interactive ? "✋" : "🖐",
+                icon: interactive ? <Hand className="size-4" /> : <MousePointer2 className="size-4" />,
                 active: interactive,
                 onClick: () => pluginHost.updateMetadata(node.id, { interactive: !interactive }),
             };
@@ -198,11 +207,6 @@ export function usePluginHost(params: PluginHostParams) {
         },
         [pluginHost, t, theme],
     );
-
-    // Load installed remote plugins on startup.
-    useEffect(() => {
-        void ensurePluginsLoaded();
-    }, []);
 
     return { pluginHost, renderPluginPanel, buildNodeToolbarItems };
 }

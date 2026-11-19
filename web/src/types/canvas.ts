@@ -61,6 +61,7 @@ export type CanvasNodeMetadata = {
     texts?: CanvasNodeText[];
     primaryTextId?: string;
     references?: string[];
+    referenceOrder?: string[];
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;
@@ -74,6 +75,7 @@ export type CanvasNodeMetadata = {
     videoTaskProvider?: "server";
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
+    [key: string]: unknown;
 };
 
 export type CanvasNodeData = {

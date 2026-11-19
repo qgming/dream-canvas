@@ -96,6 +96,9 @@ func (a *App) cleanAsset(id string) error {
 	defer a.notify(asset.UserID)
 	if asset.DeleteState == "deleted" { return nil }
 	if asset.DeleteState != "pending" { return problem(409, "not_deleting", "资产尚未确认删除") }
+	var repairing int64
+	if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ? AND state <> ?", asset.ID, "repair_suffix", "done").Count(&repairing).Error; err != nil { return err }
+	if repairing > 0 { return problem(409, "asset_repair_pending", "等待文件后缀修复及旧副本清理完成后删除") }
 	var active int64
 	if err := a.db.Model(&TaskAsset{}).Where("asset_id = ? AND released = ?", asset.ID, false).Count(&active).Error; err != nil { return err }
 	if active > 0 { a.db.Model(&asset).Update("error", "等待使用该素材的任务结束后清理"); return problem(409, "asset_in_use", "等待任务结束后清理") }
@@ -121,7 +124,7 @@ func (a *App) cleanAsset(id string) error {
 		if err == nil { err = os.Remove(preview) }
 		if err != nil && !errors.Is(err, os.ErrNotExist) { a.db.Model(&asset).Update("error", "缩略图清理失败，请检查目录权限后重试"); return err }
 	}
-	name, err := a.assetPath(asset.Path)
+	name, err := a.assetOriginalPath(asset)
 	if err == nil { err = os.Remove(name) }
 	if errors.Is(err, os.ErrNotExist) { err = nil }
 	if err != nil {

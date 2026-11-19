@@ -1,17 +1,7 @@
-# 3D 全景节点插件
+# panorama 内置节点
 
-梦想画布画布节点插件:查看 360° 等距柱状(equirectangular)全景图,可拖拽旋转。可从上游图片节点自动取图。three.js 运行时从 CDN 按需加载,不打进插件体积。
+查看 360° 等距柱状全景图，可读取上游图片或使用宿主生成面板。
 
-## 构建
+此目录源码由前端直接打包，默认启用。管理员在「设置 → 节点插件」统一控制启停，普通用户无需安装。修改源码后由应用开发服务加载，发布时随应用构建；独立目录的构建产物只供源码开发参考，不自动安装。
 
-```bash
-npm install
-npm run build      # 产物 dist/panorama.js,并同步到 web/public/plugins/panorama.js
-npm run dev        # watch
-```
-
-## 安装
-
-画布 → 左上菜单「节点插件」→ 安装 URL 填 `/plugins/panorama.js`(或托管后的公网 URL)。连接一个全景图片节点到本节点即可查看。
-
-插件契约见 `plugins/canvas/README.md`。
+节点运行约定见 [节点插件说明](../README.md)。

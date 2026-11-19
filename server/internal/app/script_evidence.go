@@ -31,13 +31,14 @@ func (a *App) ModelScriptEvidence(userID, adapterID, taskID string) (any, error)
 	if selected == nil { return nil, problem(404, "debug_task_missing", "此脚本的任务不存在或无权读取") }
 	var snapshot executionSnapshot
 	if json.Unmarshal(selected.Snapshot, &snapshot) != nil { return nil, problem(409, "invalid_snapshot", "调试任务快照无法读取，未覆盖原记录") }
-	configuration := gin.H{"channelId": snapshot.ChannelID, "channelVersion": snapshot.ChannelVersion, "baseUrl": snapshot.BaseURL, "model": snapshot.Model, "scriptVersionId": snapshot.Model.AdapterVersionID, "draftRevision": selected.DebugRevision, "input": selected.Input}
+	model := snapshot.Model; model.Pricing = nil
+	configuration := gin.H{"channelId": snapshot.ChannelID, "channelVersion": snapshot.ChannelVersion, "baseUrl": snapshot.BaseURL, "model": model, "scriptVersionId": snapshot.Model.AdapterVersionID, "draftRevision": selected.DebugRevision, "input": selected.Input}
 	if snapshot.Script != nil { configuration["scriptFingerprint"] = digest(string(snapshot.Script.Files)) }
 	view["configuration"], view["configurationFingerprint"] = configuration, digest(string(encode(configuration)))
 	redact, err := a.assistantRedactor(snapshot); if err != nil { return nil, err }
 	view["task"], view["responseState"] = selected, "unavailable"
 	var usage UsageEntry; err = a.db.First(&usage, "id = ? AND user_id = ?", "task:"+selected.ID, userID).Error
-	if err == nil { view["usage"] = usage } else if !errors.Is(err, gorm.ErrRecordNotFound) { return nil, err }
+	if err == nil { view["usage"] = usageEntryViewFor(usage) } else if !errors.Is(err, gorm.ErrRecordNotFound) { return nil, err }
 	if terminalTask(selected.Status) && !selected.ResponseCleanupPending && selected.RawResponseFile == "" { view["responseState"] = "cleaned"
 	} else if selected.RawResponseFile != "" {
 		if selected.RawResponseFile != selected.ID+".script.json" { return nil, problem(409, "invalid_response_file", "调试响应标识无效") }

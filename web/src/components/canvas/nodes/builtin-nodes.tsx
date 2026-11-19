@@ -5,7 +5,7 @@ import i18n from "@/i18n";
 import { NODE_SPECS } from "@/constant/canvas";
 import { registerNodeDefinitions } from "@/lib/canvas/node-registry";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import type { CanvasNodeDefinition, CanvasNodeResource } from "@/types/canvas-plugin";
+import type { CanvasNodeDefinition, CanvasNodeResource, CanvasPlugin } from "@/types/canvas-plugin";
 
 // Extensible metadata for built-in nodes, reusing NODE_SPECS for size and initial metadata.
 // Rendering remains in canvas-node's internal renderer, so no Content component is provided.
@@ -28,12 +28,13 @@ const BUILTIN_DEFINITIONS: CanvasNodeDefinition[] = [
     { type: CanvasNodeType.Group, title: i18n.t("canvas.node.group"), icon: <Group className={iconClass} />, },
 ].map((def) => {
     const spec = NODE_SPECS[def.type];
-    return { ...def, get title() { return spec.title; }, defaultSize: { width: spec.width, height: spec.height }, defaultMetadata: spec.metadata };
+    return { ...def, builtinRenderer: true, get title() { return spec.title; }, defaultSize: { width: spec.width, height: spec.height }, defaultMetadata: spec.metadata };
 });
 
 let registered = false;
+export const BUILTIN_NODE_PLUGINS: CanvasPlugin[] = BUILTIN_DEFINITIONS.map((node) => ({ id: `builtin-${node.type}`, name: node.title, version: "1.0.0", nodes: [node] }));
 export function registerBuiltinNodes() {
     if (registered) return;
     registered = true;
-    registerNodeDefinitions(BUILTIN_DEFINITIONS, "builtin");
+    for (const plugin of BUILTIN_NODE_PLUGINS) registerNodeDefinitions(plugin.nodes, plugin.id);
 }

@@ -19,7 +19,7 @@ func (a *App) probeMedia(ctx context.Context, asset *Asset, policy executionPoli
 	if asset.Kind != "video" && asset.Kind != "audio" { return }
 	if asset.MimeType == "audio/pcm" { asset.ProbeError = "无头 PCM 的采样率与声道信息未核实，原件保留，请下载后按接口格式读取"; return }
 	probe, err := exec.LookPath("ffprobe"); if err != nil { asset.ProbeError = "服务器未安装 ffprobe，时长与编码信息尚未核实"; return }
-	name, err := a.assetPath(asset.ID); if err != nil { asset.ProbeError = "原件路径无法读取"; return }
+	name, err := a.assetOriginalPath(*asset); if err != nil { asset.ProbeError = "原件路径无法读取"; return }
 	// Upload/result writers already hold their transfer slot and file lease. Do not
 	// acquire a second file gate while holding that lease (cleanup uses the same gates).
 	a.previewMu.Lock(); defer a.previewMu.Unlock()

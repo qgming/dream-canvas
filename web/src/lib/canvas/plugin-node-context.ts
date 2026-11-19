@@ -27,6 +27,7 @@ export function buildNodeContext(host: CanvasPluginHost, node: CanvasNodeData, t
             generateImage: (prompt, options) => host.ai.generateImage(prompt, { ...options, nodeId: node.id }),
             generateVideo: (prompt, options) => host.ai.generateVideo(prompt, { ...options, nodeId: node.id }),
             generateText: (prompt, options) => host.ai.generateText(prompt, { ...options, nodeId: node.id }),
+            stopGeneration: () => host.ai.stopGeneration(node.id),
         },
         openPanel: () => host.openPanel(node.id),
         closePanel: () => host.closePanel(),

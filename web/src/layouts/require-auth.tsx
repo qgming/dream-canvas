@@ -20,6 +20,8 @@ import { useWorkbenchDraftStore } from "@/stores/use-workbench-draft-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { useCanvasTasks } from "@/hooks/use-canvas-tasks";
 import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
+import { canvasPluginCatalog } from "@/services/api/canvas-plugins";
+import { resetCanvasPlugins, syncCanvasPlugins } from "@/lib/canvas/plugin-loader";
 
 export default function RequireAuth() {
     const { i18n } = useTranslation();
@@ -30,8 +32,11 @@ export default function RequireAuth() {
     const refresh = useAuthStore((state) => state.refresh);
     const queryClient = useQueryClient();
     const [scope, setScope] = useState<string | null>(null);
+    const [pluginError, setPluginError] = useState("");
+    const [pluginRetry, setPluginRetry] = useState(0);
     useCanvasTasks(scope === user?.id ? user?.id : undefined);
     const catalog = useQuery({ queryKey: ["model-catalog", user?.id], queryFn: modelCatalog, enabled: Boolean(user && scope === user.id) });
+    const plugins = useQuery({ queryKey: ["canvas-plugin-catalog", user?.id], queryFn: canvasPluginCatalog, enabled: Boolean(user && scope === user.id) });
 
     useEffect(() => { void refresh(); }, [refresh]);
     useEffect(() => {
@@ -41,6 +46,8 @@ export default function RequireAuth() {
     }, []);
     useEffect(() => {
         queryClient.clear();
+        resetCanvasPlugins();
+        setPluginError("");
         useCanvasStore.getState().reset();
         useAssetStore.getState().reset();
         useConfigStore.getState().reset();
@@ -54,6 +61,12 @@ export default function RequireAuth() {
         if (user) { void useCanvasStore.getState().loadProjects(); void useAssetStore.getState().loadAssets(); void useConfigStore.getState().load(); void useWorkbenchDraftStore.getState().load(); }
     }, [queryClient, user?.id]);
     useEffect(() => { if (catalog.data && scope === user?.id) useConfigStore.getState().setCatalog(catalog.data); }, [catalog.data, scope, user?.id]);
+    useEffect(() => {
+        if (!plugins.data || scope !== user?.id) return;
+        let cancelled = false;
+        void syncCanvasPlugins(plugins.data).then(() => { if (!cancelled) setPluginError(""); }).catch((error: unknown) => { if (!cancelled) setPluginError(error instanceof Error ? error.message : String(error)); });
+        return () => { cancelled = true; };
+    }, [plugins.data, pluginRetry, scope, user?.id]);
     useEffect(() => { if (user && scope === user.id) void useAgentSkillStore.getState().loadSkills(); }, [user?.id, scope, i18n.resolvedLanguage]);
     useEffect(() => {
         const refresh = () => { void useAssetStore.getState().loadAssets(); };
@@ -70,7 +83,7 @@ export default function RequireAuth() {
             if (refreshing) { pending = true; return; }
             refreshing = true;
             pending = false;
-            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), useAgentSkillStore.getState().loadSkills(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] }), queryClient.invalidateQueries({ queryKey: ["prompts"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
+            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), useAgentSkillStore.getState().loadSkills(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugins"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin"] }), queryClient.invalidateQueries({ queryKey: ["prompts"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
             window.dispatchEvent(new Event("server-changed"));
         };
         const connect = () => {
@@ -94,7 +107,7 @@ export default function RequireAuth() {
     if (error) return <div className="flex h-dvh items-center justify-center bg-background p-6"><Alert type="error" title={appI18n.t("workspace.serviceUnavailable")} description={error} action={<Button onClick={() => void refresh()}>{appI18n.t("workspace.retry")}</Button>} /></div>;
     if (!user) return <Navigate to="/login" state={{ from: `${pathname}${search}` }} replace />;
     if (scope !== user.id) return <div className="flex h-dvh items-center justify-center bg-background"><Spin /></div>;
-    return <Outlet key={user.id} />;
+    return <>{plugins.error || pluginError ? <div className="fixed inset-x-6 top-3 z-[200] mx-auto max-w-2xl"><Alert type="error" title={appI18n.t("nodePlugins.loadFailed")} description={plugins.error?.message || pluginError} action={<Button loading={plugins.isFetching} onClick={() => { void plugins.refetch().then(() => setPluginRetry((value) => value + 1)); }}>{appI18n.t("workspace.retry")}</Button>} /></div> : null}<Outlet key={user.id} /></>;
 }
 
 export function RequireAdmin() {

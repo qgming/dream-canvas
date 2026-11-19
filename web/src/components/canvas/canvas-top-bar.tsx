@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Download, Images, Keyboard, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Redo2, Trash2, Undo2, Upload, X } from "lucide-react";
+import { Check, Download, Images, Keyboard, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Menu } from "@/components/ui/popover";
 import { Dialog } from "@/components/ui/dialog";
@@ -27,7 +27,6 @@ export function CanvasTopBar({
     onDeleteProject,
     onExportProject,
     onImportImage,
-    onOpenPlugins,
     onUndo,
     onRedo,
 }: {
@@ -47,7 +46,6 @@ export function CanvasTopBar({
     onDeleteProject: () => void;
     onExportProject: () => void;
     onImportImage: () => void;
-    onOpenPlugins: () => void;
     onUndo: () => void;
     onRedo: () => void;
 }) {
@@ -123,7 +121,6 @@ export function CanvasTopBar({
                 </div>
 
                 <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-                    <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}><Puzzle className="size-4" /></Button>
                     <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></Button>
                 </div>
             </div>
@@ -133,6 +130,7 @@ export function CanvasTopBar({
                     <Shortcut keys={[t("canvas.shortcut.wheel")]} value={t("canvas.shortcut.zoom")} />
                     <Shortcut keys={[t("canvas.shortcut.zoomSlider")]} value={t("canvas.shortcut.preciseZoom")} />
                     <Shortcut keys={[t("canvas.shortcut.drag")]} value={t("canvas.shortcut.boxSelect")} />
+                    <Shortcut keys={[t("canvas.shortcut.rightClick")]} value={t("canvas.shortcut.addNode")} />
                     <Shortcut keys={["Shift / Cmd", t("canvas.shortcut.click")]} value={t("canvas.shortcut.addSelection")} />
                     <Shortcut keys={["Ctrl / Cmd", "A"]} value={t("canvas.shortcut.selectAll")} />
                     <Shortcut keys={["Ctrl / Cmd", "C / V"]} value={t("canvas.shortcut.copyPaste")} />

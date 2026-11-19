@@ -31,6 +31,7 @@ import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { retryAssetCleanup, retryAssetSync, listAssetVoices, saveAssetVoice } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 import { useConfigStore } from "@/stores/use-config-store";
+import { AssetFilenameRepair } from "./asset-filename-repair";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -278,6 +279,7 @@ export default function AssetsPage() {
                         <Button variant="ghost" onClick={() => assetInputRef.current?.click()}>{t("assets.import")}</Button>
                         <Button variant="default" disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
                     </>} />
+                    <AssetFilenameRepair />
                     <div className="mb-3 mt-6">
                         <SearchInput className="w-full sm:max-w-sm" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
                     </div>

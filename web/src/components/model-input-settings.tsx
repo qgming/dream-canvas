@@ -9,19 +9,8 @@ import { Input, NumberInput, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/controls";
 import { Badge } from "@/components/ui/display";
 import { ModelInputFields } from "@/components/model-parameters";
-import type { Capability, ModelPricing, ParameterControl, ParameterOverrides, PricingRates } from "@/services/api/channels";
+import type { ParameterControl, ParameterOverrides } from "@/services/api/channels";
 import { applyInputOverrides, inputLabel } from "@/lib/model-inputs";
-
-type PricingRate = PricingRates[string];
-type PricingTier = NonNullable<ModelPricing["tiers"]>[number];
-
-const pricingUnits = ["uncached_input_tokens", "cached_tokens", "output_tokens", "images", "seconds", "characters", "requests"];
-const recommendedUnits: Record<Capability, string[]> = {
-    text: ["uncached_input_tokens", "cached_tokens", "output_tokens", "requests"],
-    image: ["images", "requests"],
-    video: ["seconds", "requests"],
-    audio: ["characters", "seconds", "requests"],
-};
 
 function overrideError(control: ParameterControl, options: { label?: string; value: unknown }[]) {
     if (control.options?.length && !options.length) return "optionsRequired";
@@ -96,102 +85,5 @@ export function ModelInputSettings({ controls, value = {}, onChange }: { control
     return <div className="space-y-2">
         <p className="text-xs leading-5 text-muted-foreground">{t("modelScripts.overridesHint")}</p>
         {effective.length ? <div className="divide-y divide-border rounded-lg border border-border">{effective.map((control) => <ParameterRow key={control.key} control={control} base={controls.find((item) => item.key === control.key) || control} override={value[control.key]} onChange={(next) => update(control.key, next)} />)}</div> : <p className="text-sm text-muted-foreground">{t("modelScripts.noInputs")}</p>}
-    </div>;
-}
-
-function RateTable({ rates, units, recommended = [], onChange }: { rates: Record<string, PricingRate>; units: string[]; recommended?: string[]; onChange: (rates: Record<string, PricingRate>) => void }) {
-    const { t } = useTranslation();
-    const ordered = [...Object.keys(rates)].sort((left, right) => units.indexOf(left) - units.indexOf(right));
-    const change = (unit: string, key: keyof PricingRate, next: string) => {
-        const updated = { ...rates[unit], [key]: key !== "per" && next === "" ? undefined : next };
-        onChange({ ...rates, [unit]: updated });
-    };
-    return <div className="space-y-2">
-        <div className="overflow-x-auto rounded-lg border border-border">
-            <div className="min-w-[42rem]"><div className="grid grid-cols-[minmax(10rem,1fr)_5rem_minmax(7rem,.8fr)_minmax(7rem,.8fr)_2.5rem] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"><span>{t("modelScripts.unit")}</span><span>{t("modelScripts.per")}</span><span>{t("modelScripts.amount")}</span><span>{t("modelScripts.points")}</span><span /></div>
-            {ordered.length ? ordered.map((unit) => <div key={unit} className="grid grid-cols-[minmax(10rem,1fr)_5rem_minmax(7rem,.8fr)_minmax(7rem,.8fr)_2.5rem] items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
-                <span className="min-w-0 break-words text-xs">{t(`modelScripts.units.${unit}`, { defaultValue: unit })}</span>
-                {(["per", "amount", "points"] as const).map((key) => <Input key={key} inputMode="decimal" aria-label={`${t(`modelScripts.${key}`)} ${unit}`} value={rates[unit][key] || ""} placeholder={key === "per" ? "1" : t("modelScripts.unknown")} onChange={(event) => change(unit, key, event.target.value)} />)}
-                <Button size="icon" variant="ghost" aria-label={t("common.delete")} onClick={() => { const next = { ...rates }; delete next[unit]; onChange(next); }}>×</Button>
-            </div>) : <p className="px-3 py-6 text-center text-sm text-muted-foreground">{t("modelScripts.noRates")}</p>}</div>
-        </div>
-        <Choice value={undefined} placeholder={t("modelScripts.addRate")} options={units.filter((unit) => !rates[unit]).map((unit) => ({ value: unit, label: <span className="flex items-center gap-2"><span>{t(`modelScripts.units.${unit}`, { defaultValue: unit })}</span>{recommended.includes(unit) ? <Badge>{t("modelScripts.recommended")}</Badge> : null}</span> }))} onChange={(unit) => onChange({ ...rates, [unit]: { per: "1" } })} />
-    </div>;
-}
-
-function defaultConditionValue(control: ParameterControl): string | number | boolean {
-    if (control.type === "switch") return typeof control.default === "boolean" ? control.default : true;
-    if (control.options?.length) return control.options[0].value;
-    if (control.suggestions?.length) return control.suggestions[0].value;
-    if (control.type === "number" && typeof control.default === "number") return control.default;
-    return "";
-}
-
-function ConditionValue({ control, value, onChange }: { control: ParameterControl; value: string | number | boolean; onChange: (value: string | number | boolean) => void }) {
-    const { t } = useTranslation();
-    if (control.type === "switch") return <Choice value={String(value)} options={[{ value: "true", label: t("modelScripts.true") }, { value: "false", label: t("modelScripts.false") }]} onChange={(next) => onChange(next === "true")} />;
-    if (control.type === "select" || control.options?.length) return <Choice searchable value={JSON.stringify(value)} options={control.options?.map((option) => ({ value: JSON.stringify(option.value), label: inputLabel(option) }))} onChange={(next) => onChange(JSON.parse(next))} />;
-    if (control.type === "number") return <NumberInput value={typeof value === "number" ? value : null} min={control.min} max={control.max} step={control.step} onChange={(next) => onChange(next ?? "")} />;
-    return <Input value={typeof value === "string" ? value : String(value)} onChange={(event) => onChange(event.target.value)} />;
-}
-
-function TierCard({ tier, index, controls, units, onChange, onRemove }: { tier: PricingTier; index: number; controls: ParameterControl[]; units: string[]; onChange: (tier: PricingTier) => void; onRemove: () => void }) {
-    const { t } = useTranslation();
-    const available = controls.filter((control) => !(control.key in tier.conditions));
-    const updateCondition = (key: string, value: string | number | boolean) => onChange({ ...tier, conditions: { ...tier.conditions, [key]: value } });
-    return <div className="space-y-3 rounded-lg border border-border p-3">
-        <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-medium">{t("modelScripts.tier", { index: index + 1 })}</h4><Button size="sm" variant="ghost" onClick={onRemove}>{t("common.delete")}</Button></div>
-        <div className="space-y-2">
-            {Object.keys(tier.conditions).length === 0 ? <p role="alert" className="text-xs text-destructive">{t("modelScripts.conditionRequired")}</p> : null}
-            {Object.entries(tier.conditions).map(([key, value], conditionIndex) => {
-                const control = controls.find((item) => item.key === key);
-                return <div key={key} className="grid items-end gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                    <div className="text-xs"><span className="text-muted-foreground">{conditionIndex ? <Badge>{t("modelScripts.and")}</Badge> : null}</span><p className="mt-1 break-all font-mono">{key}</p></div>
-                    {control ? <><ConditionValue control={control} value={value} onChange={(next) => updateCondition(key, next)} /><Button size="icon" variant="ghost" aria-label={t("common.delete")} onClick={() => { const conditions = { ...tier.conditions }; delete conditions[key]; onChange({ ...tier, conditions }); }}>×</Button></> : <p className="text-xs text-destructive">{t("modelScripts.conditionControlMissing")}</p>}
-                </div>;
-            })}
-            {available.length ? <Choice value={undefined} placeholder={t("modelScripts.addCondition")} options={available.map((control) => ({ value: control.key, label: `${inputLabel(control)} · ${control.key}` }))} onChange={(key) => { const control = controls.find((item) => item.key === key)!; updateCondition(key, defaultConditionValue(control)); }} /> : <p className="text-xs text-muted-foreground">{t("modelScripts.noMoreConditions")}</p>}
-        </div>
-        <p className="text-xs leading-5 text-muted-foreground">{t("modelScripts.tierRatesReplace")}</p>
-        <RateTable rates={tier.rates} units={units} onChange={(rates) => onChange({ ...tier, rates })} />
-    </div>;
-}
-
-export function ModelPricingFields({ value = {}, onChange, capability = "image", controls = [] }: { value: ModelPricing; onChange: (value: ModelPricing) => void; capability?: Capability; controls?: ParameterControl[] }) {
-    const { t } = useTranslation();
-    const [currencyOpen, setCurrencyOpen] = useState(Boolean(value.exchangeRate || value.currency && value.currency !== "CNY"));
-    const rates = value.rates || {};
-    const tiers = value.tiers || [];
-    const preferred = recommendedUnits[capability] || [];
-    const units = [...new Set([...preferred, ...Object.keys(rates), ...pricingUnits])];
-    const tierUnits = [...new Set([...preferred, ...tiers.flatMap((tier) => Object.keys(tier.rates)), ...pricingUnits])];
-    const conditionControls = controls.filter((control) => ["text", "textarea", "number", "switch", "select"].includes(control.type));
-    const ambiguous = new Set<number>();
-    for (let left = 0; left < tiers.length; left++) {
-        for (let right = left + 1; right < tiers.length; right++) {
-            const overlap = !Object.entries(tiers[left].conditions).some(([key, value]) => key in tiers[right].conditions && JSON.stringify(value) !== JSON.stringify(tiers[right].conditions[key]));
-            if (overlap) {
-                ambiguous.add(left);
-                ambiguous.add(right);
-            }
-        }
-    }
-    const changeRates = (next: PricingRates) => onChange({ ...value, currency: value.currency || "CNY", rates: next });
-    const changeTiers = (next: PricingTier[]) => onChange({ ...value, currency: value.currency || "CNY", tiers: next });
-    return <div className="space-y-5">
-        <div><h3 className="text-sm font-medium">{t("modelScripts.basePrice")}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("modelScripts.pricingHint")}</p></div>
-        <RateTable rates={rates} units={units} recommended={preferred} onChange={changeRates} />
-        <Disclosure title={<span className="flex items-center gap-2">{t("modelScripts.currencySettings")}<Badge>{value.currency || "CNY"}</Badge></span>} open={currencyOpen} onOpenChange={setCurrencyOpen}>
-            <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1.5 text-xs"><span className="font-medium">{t("modelScripts.currency")}</span><Input value={value.currency || "CNY"} maxLength={3} onChange={(event) => onChange({ ...value, currency: event.target.value.toUpperCase() })} /></label>
-                <label className="space-y-1.5 text-xs"><span className="font-medium">{t("modelScripts.exchangeRate")}</span><Input inputMode="decimal" placeholder={t("modelScripts.unknown")} value={value.exchangeRate || ""} onChange={(event) => onChange({ ...value, exchangeRate: event.target.value || undefined })} /></label>
-            </div>
-        </Disclosure>
-        <div className="space-y-3 border-t border-border pt-4">
-            <div><h3 className="text-sm font-medium">{t("modelScripts.priceTiers")}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("modelScripts.priceTiersHint")}</p></div>
-            {ambiguous.size ? <p role="alert" className="text-xs text-destructive">{t("modelScripts.ambiguousTiers")}</p> : null}
-            {tiers.map((tier, index) => <TierCard key={tier.id || index} tier={tier} index={index} controls={conditionControls} units={tierUnits} onChange={(next) => changeTiers(tiers.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={() => changeTiers(tiers.filter((_, itemIndex) => itemIndex !== index))} />)}
-            <Button size="sm" variant="ghost" onClick={() => changeTiers([...tiers, { conditions: {}, rates: {} }])}>{t("modelScripts.addTier")}</Button>
-        </div>
     </div>;
 }

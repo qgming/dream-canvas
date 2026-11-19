@@ -1,4 +1,6 @@
 import { getNodeSpec } from "@/constant/canvas";
+import i18n from "@/i18n";
+import { isNodeTypeEnabled } from "@/lib/canvas/node-registry";
 import { resolveModelParameters, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
@@ -6,6 +8,7 @@ import type { ReferenceImage } from "@/types/image";
 import { CanvasNodeType, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasNodeTypeId, type Position } from "@/types/canvas";
 
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
+    if (!isNodeTypeEnabled(type)) throw new Error(i18n.t("nodePlugins.unavailable"));
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const config = useConfigStore.getState().config;
@@ -41,12 +44,11 @@ export function referenceUrl(image: ReferenceImage) {
     return image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
 }
 
-export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeMetadata {
+export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, references: ReferenceImage[]): CanvasNodeMetadata {
     return {
         generationType: type,
         model: config.model,
         modelParameters: { [config.model]: resolveModelParameters(config, config.model, config.modelParameters) },
-        count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };
 }

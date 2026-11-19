@@ -1,17 +1,7 @@
-# HTML 节点插件
+# html 内置节点
 
-梦想画布画布节点插件:用沙箱 iframe 渲染 HTML。源码里的 `{{input}}` 会被替换为上游文本节点内容。
+在沙箱 iframe 中预览 HTML，支持用 {{input}} 引用上游文本。
 
-## 构建
+此目录源码由前端直接打包，默认启用。管理员在「设置 → 节点插件」统一控制启停，普通用户无需安装。修改源码后由应用开发服务加载，发布时随应用构建；独立目录的构建产物只供源码开发参考，不自动安装。
 
-```bash
-npm install
-npm run build      # 产物 dist/html.js,并同步到 web/public/plugins/html.js
-npm run dev        # watch
-```
-
-## 安装
-
-画布 → 左上菜单「节点插件」→ 安装 URL 填 `/plugins/html.js`(或托管后的公网 URL)。
-
-插件契约见 `plugins/canvas/README.md`。
+节点运行约定见 [节点插件说明](../README.md)。

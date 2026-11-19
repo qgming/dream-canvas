@@ -4,13 +4,12 @@ import localforage from "localforage";
 
 import { ApiError, captureSession } from "@/services/api/client";
 import { getPreference, savePreference } from "@/services/api/preferences";
-import type { ModelCatalog, ModelFeatures, ParameterControl, PointsPricing } from "@/services/api/channels";
+import type { ModelCatalog, ModelFeatures, ParameterControl } from "@/services/api/channels";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { inputVisible } from "@/lib/model-inputs";
 
 export type ModelCapability = "image" | "video" | "text" | "audio";
-export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
-export type ChannelModel = { id: string; name: string; label: string; version: number; features: ModelFeatures; capability: ModelCapability; parameters: ParameterControl[]; pricing: PointsPricing };
+export type ChannelModel = { id: string; name: string; label: string; version: number; features: ModelFeatures; capability: ModelCapability; parameters: ParameterControl[] };
 export type ModelChannel = { id: string; name: string; models: ChannelModel[] };
 export type AiConfig = {
     channelMode: "remote";
@@ -18,15 +17,12 @@ export type AiConfig = {
     orders: Record<string, string[]>;
     models: string[];
     model: string; imageModel: string; videoModel: string; textModel: string; audioModel: string; assistantModel: string;
-    systemPrompt: string; reasoningEffort: ReasoningEffort;
-    count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
     modelParameters?: Record<string, unknown>;
 };
-export type GenerationPreference = Pick<AiConfig, "count" | "canvasImageCount" | "nodeRegenerateBehavior" | "autoFocusOnSelect">;
+export type GenerationPreference = Pick<AiConfig, "nodeRegenerateBehavior" | "autoFocusOnSelect">;
 export const defaultConfig: AiConfig = {
     channelMode: "remote", channels: [], orders: {}, models: [], model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "", assistantModel: "",
-    systemPrompt: "", reasoningEffort: "auto", count: "1", canvasImageCount: "3",
     nodeRegenerateBehavior: "new-node", autoFocusOnSelect: false,
 };
 type ConfigStore = {
@@ -42,8 +38,6 @@ let editRevision = 0;
 let running: Promise<void> | null = null;
 let pendingWrite = Promise.resolve();
 const preference = (value?: Partial<GenerationPreference> | null): GenerationPreference => ({
-    count: value?.count ?? defaultConfig.count,
-    canvasImageCount: value?.canvasImageCount ?? defaultConfig.canvasImageCount,
     nodeRegenerateBehavior: value?.nodeRegenerateBehavior ?? defaultConfig.nodeRegenerateBehavior,
     autoFocusOnSelect: value?.autoFocusOnSelect ?? defaultConfig.autoFocusOnSelect,
 });
@@ -82,7 +76,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
-        const channels = catalog.channels.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, version: model.version, features: model.features, capability: model.capability, parameters: model.parameters, pricing: model.pricing })) }));
+        const channels = catalog.channels.map((channel) => ({ id: channel.id, name: channel.name, models: channel.models.map((model) => ({ id: model.id, name: model.model, label: model.name, version: model.version, features: model.features, capability: model.capability, parameters: model.parameters })) }));
         const next = { ...state.config, channels, orders: catalog.orders, models: modelOptionsFromChannels(channels) };
         return { config: { ...next, imageModel: firstModel(next, "image"), videoModel: firstModel(next, "video"), textModel: firstModel(next, "text"), audioModel: firstModel(next, "audio"), assistantModel: firstModel(next, "text", true) } };
     }),
@@ -156,7 +150,6 @@ export function resolveModelForCapability(config: AiConfig, current: string | un
     return current || preferred;
 }
 
-export const modelHasParameters = (config: AiConfig, value: string) => Boolean(findChannelModel(config, value));
 export const modelSupportsTools = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.features.tools === true;
 export const channelModelId = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.id;
 export function resolveModelParameters(config: AiConfig, model: string, overrides: Record<string, unknown> = {}) {

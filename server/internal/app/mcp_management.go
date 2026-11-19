@@ -13,7 +13,7 @@ func managementTools() []toolDefinition {
 	tool := func(name, description, scope string, fields map[string]any, required ...string) toolDefinition { return toolDefinition{name, description, scope, toolSchema(fields, required...)} }
 	return []toolDefinition{
 		tool("preference_get", "读取个人创作偏好；需要不限项目的授权", "read", map[string]any{"name": stringField("generation")}, "name"),
-		tool("preference_save", "按版本保存个人创作偏好；模型默认参数由管理员配置，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；仅支持 count/canvasImageCount/nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
+		tool("preference_save", "按版本保存个人画布交互偏好；生成参数使用模型接口插件定义，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；仅支持 nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
 		tool("asset_cleanup", "继续已确认的全局资产删除，不创建新的删除意愿", "edit", map[string]any{"assetId": stringField("待删除资产 ID")}, "assetId"),
 		tool("assistant_threads_list", "读取全局助手对话列表，需要单独的助手权限", "assistant", map[string]any{}),
 		tool("assistant_thread_get", "读取全局对话、轮次、消息与待确认项", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
@@ -28,6 +28,14 @@ func managementTools() []toolDefinition {
 		tool("token_revoke", "撤销自己的访问令牌，包括当前令牌", "account", map[string]any{"tokenId": stringField("令牌记录 ID")}, "tokenId"),
 		tool("password_change", "核对当前密码后修改自己的密码并撤销网页会话，不返回密码", "account", map[string]any{"currentPassword": stringField("当前密码"), "password": stringField("新密码")}, "currentPassword", "password"),
 		tool("admin_users_list", "管理员读取账号列表，不含密码", "admin", map[string]any{}),
+		tool("admin_canvas_plugins_list", "读取全站节点插件及启停、发布状态", "admin", map[string]any{}),
+		tool("admin_canvas_plugin_contract", "编写节点插件前先读取包、SDK、运行边界与发布约定", "admin", map[string]any{"locale": stringField("可选 zh-CN 或 en-US")}),
+		tool("admin_canvas_plugin_get", "读取节点插件、完整草稿及不可变发布版本；内置插件只读", "admin", map[string]any{"pluginId": stringField("插件 ID")}, "pluginId"),
+		tool("admin_canvas_plugin_create", "创建自建节点插件草稿，默认停用", "admin", map[string]any{"name": stringField("名称"), "description": stringField("说明")}, "name"),
+		tool("admin_canvas_plugin_draft_save", "按草稿版本保存完整节点插件 files 映射；不发布、不影响使用者，先读取契约与当前草稿", "admin", map[string]any{"pluginId": stringField("插件 ID"), "revision": numberField("草稿版本"), "files": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}, "pluginId", "revision", "files"),
+		tool("admin_canvas_plugin_publish", "仅由管理员主动确认后编译发布节点插件，代码将在使用者浏览器中执行", "admin", map[string]any{"pluginId": stringField("插件 ID"), "revision": numberField("草稿版本"), "version": numberField("插件记录版本"), "confirmed": map[string]any{"type": "boolean"}}, "pluginId", "revision", "version", "confirmed"),
+		tool("admin_canvas_plugin_enabled", "仅由管理员主动确认后按版本调整全站节点插件启停，已有节点内容保留", "admin", map[string]any{"pluginId": stringField("插件 ID"), "version": numberField("插件记录版本"), "enabled": map[string]any{"type": "boolean"}, "confirmed": map[string]any{"type": "boolean"}}, "pluginId", "version", "enabled", "confirmed"),
+		tool("admin_canvas_plugin_delete", "仅由管理员主动确认后按版本删除未被项目引用的自建节点插件，内置不可删除", "admin", map[string]any{"pluginId": stringField("插件 ID"), "version": numberField("插件记录版本"), "confirmed": map[string]any{"type": "boolean"}}, "pluginId", "version", "confirmed"),
 		tool("admin_task_recover_query", "管理员主动核对本人任务的原提交响应并补充其中已有的查询编号；不改脚本快照，不重新生成", "admin", map[string]any{"taskId": stringField("任务 ID"), "upstreamId": stringField("原响应中的可靠任务编号"), "expectedUpdatedAt": stringField("读取任务的 updatedAt"), "confirmed": map[string]any{"type": "boolean"}}, "taskId", "upstreamId", "expectedUpdatedAt", "confirmed"),
 		tool("admin_user_create", "管理员主动创建账号", "admin", map[string]any{"username": stringField("用户名"), "password": stringField("初始密码"), "role": map[string]any{"type": "string", "enum": []string{"admin", "user"}}}, "username", "password", "role"),
 		tool("admin_user_disable", "管理员停用或恢复账号；不能停用自身", "admin", map[string]any{"userId": stringField("账号 ID"), "disabled": map[string]any{"type": "boolean"}}, "userId", "disabled"),
@@ -37,7 +45,7 @@ func managementTools() []toolDefinition {
 		tool("admin_model_ordering_save", "按版本保存管理员模型排序；跨渠道排序只影响空白入口首项，不自动切换已有选择或执行路由", "admin", map[string]any{"version": numberField("读取到的排序版本"), "orders": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "array", "items": stringField("渠道或模型记录 ID")}}}, "version", "orders"),
 		tool("admin_channel_save", "创建或按版本修改渠道；凭据仅写入，省略 credential 表示保留现有值", "admin", map[string]any{"channelId": stringField("修改时填写，新建留空"), "config": objectField("name/baseUrl/credential/enabled/version")}, "config"),
 		tool("admin_channel_delete", "管理员明确确认后按版本移除渠道及其模型和音色关联；保留已提交任务快照、资产和历史用量", "admin", map[string]any{"channelId": stringField("渠道 ID"), "version": numberField("读取到的渠道版本"), "confirmed": map[string]any{"type": "boolean"}}, "channelId", "version", "confirmed"),
-		tool("admin_model_save", "创建或按版本修改渠道模型，明确绑定脚本不可变版本、参数与价格", "admin", map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("修改时填写，新建留空"), "config": objectField("model/name/capability/adapterId/adapterVersionId/parameterOverrides/pricing/enabled/version")}, "channelId", "config"),
+		tool("admin_model_save", "创建或按版本修改渠道模型，明确绑定接口插件不可变版本与参数", "admin", map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("修改时填写，新建留空"), "config": objectField("model/name/capability/adapterId/adapterVersionId/parameterOverrides/enabled/version")}, "channelId", "config"),
 		tool("admin_models_save", "原子添加同一渠道的多个模型；任一配置失败时全部保留为未写入", "admin", map[string]any{"channelId": stringField("渠道 ID"), "models": map[string]any{"type": "array", "items": objectField("完整模型配置，结构同 admin_model_save.config")}}, "channelId", "models"),
 		tool("admin_channel_templates", "读取内置渠道模板；模型初始关闭", "admin", map[string]any{}),
 		tool("admin_channel_install", "从模板创建渠道和初始关闭的模型，不调用供应商", "admin", map[string]any{"template": stringField("openai/seedance/minimax"), "name": stringField("可选名称"), "credential": stringField("仅写入的渠道凭据")}, "template", "credential"),
@@ -50,18 +58,16 @@ func managementTools() []toolDefinition {
 		tool("admin_storage_delete", "移除无文件引用的存储配置，不删除资产", "admin", map[string]any{"storageId": stringField("存储 ID")}, "storageId"),
 		tool("admin_script_check", "不调用供应商地编译脚本包，检查输入及请求映射", "admin", map[string]any{"files": objectField("完整文件映射"), "input": objectField("可选标准样例输入"), "baseUrl": stringField("预览地址"), "parameterOverrides": objectField("可选模型参数覆盖，与正式调用共用合并及校验")}, "files"),
         tool("admin_models_remote", "通过已保存渠道的标准 models 接口拉取模型 ID，不创建模型", "admin", map[string]any{"channelId": stringField("渠道 ID")}, "channelId"),
-        tool("admin_scripts_list", "查看内置与自建接口脚本目录", "admin", map[string]any{}),
-		tool("admin_script_contract", "读取接口脚本的脚本、素材、参数与工具调用约定；编写草稿前先读取，不含凭据", "admin", map[string]any{"locale": stringField("可选 zh-CN 或 en-US")} ),
+        tool("admin_scripts_list", "查看内置与自建接口插件目录", "admin", map[string]any{}),
+		tool("admin_script_contract", "读取接口插件的脚本、素材、参数与工具调用约定；编写草稿前先读取，不含凭据", "admin", map[string]any{"locale": stringField("可选 zh-CN 或 en-US")} ),
 		tool("admin_script_get", "读取脚本、草稿和发布版本；内置脚本只读", "admin", map[string]any{"adapterId": stringField("脚本 ID")}, "adapterId"),
-		tool("admin_script_delete", "管理员明确确认后按版本删除未被渠道模型引用的自建接口脚本、草稿与发布版本；保留任务快照、资产和用量，内置不可删除", "admin", map[string]any{"adapterId": stringField("自建脚本 ID"), "version": numberField("读取到的脚本记录版本"), "confirmed": map[string]any{"type": "boolean"}}, "adapterId", "version", "confirmed"),
-		tool("admin_script_create", "创建自建接口脚本：提供 name/capability 创建空白包，或提供 files 导入整包；可复制自建脚本，禁止复制内置脚本", "admin", map[string]any{"name": stringField("空白或复制脚本的名称"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "description": stringField("说明"), "copyFrom": stringField("可选自建源脚本 ID，不可与 files 同时使用"), "files": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "可选整包文件映射，从 script.json 读取元数据，仅保存草稿"}}),
+		tool("admin_script_delete", "管理员明确确认后按版本删除未被渠道模型引用的自建接口插件、草稿与发布版本；保留任务快照、资产和用量，内置不可删除", "admin", map[string]any{"adapterId": stringField("自建脚本 ID"), "version": numberField("读取到的脚本记录版本"), "confirmed": map[string]any{"type": "boolean"}}, "adapterId", "version", "confirmed"),
+		tool("admin_script_create", "创建自建接口插件：提供 name/capability 创建空白包，或提供 files 导入整包；可复制自建脚本，禁止复制内置脚本", "admin", map[string]any{"name": stringField("空白或复制脚本的名称"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "description": stringField("说明"), "copyFrom": stringField("可选自建源脚本 ID，不可与 files 同时使用"), "files": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "可选整包文件映射，从 script.json 读取元数据，仅保存草稿"}}),
 		tool("admin_script_draft_save", "按版本保存完整脚本文件包；script.json 的 entry 指向具名阶段导出模块、inputs 指向可视控件定义，JS 可包内相对 import；内置脚本禁止修改", "admin", map[string]any{"adapterId": stringField("脚本 ID"), "revision": numberField("读取版本"), "files": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "完整相对路径到 UTF-8 文件内容的映射，包含 script.json 和参数 JSON；缺少的文件表示删除"}}, "adapterId", "revision", "files"),
 		tool("admin_script_publish", "仅由管理员主动发布自建脚本；无需先付费调试，不自动升级模型绑定", "admin", map[string]any{"adapterId": stringField("脚本 ID"), "revision": numberField("草稿版本"), "scriptVersion": numberField("脚本记录版本"), "confirmed": map[string]any{"type": "boolean"}}, "adapterId", "revision", "scriptVersion", "confirmed"),
 		tool("admin_script_test", "仅由管理员主动发起真实调试，可能产生费用，返回持久任务", "admin", map[string]any{"adapterId": stringField("脚本 ID"), "config": objectField("channelId/model（完整模型配置）/revision（0 测试已发布版本）/prompt/parameters/references/confirmCharges，必须确认费用")}, "adapterId", "config"),
 		tool("admin_script_evidence", "读取当前用户使用此脚本的正式或测试任务、配置快照、用量及已保存的脱敏响应；不发起调用，记录不能证明其他模型或参数可用", "admin", map[string]any{"adapterId": stringField("脚本 ID"), "taskId": stringField("可选任务 ID，省略读取最近一次")}, "adapterId"),
-		tool("admin_usage_list", "按用户、项目、渠道、模型、能力及开始执行时间查看全站积分用量与汇总，不返回成本", "admin", map[string]any{"filters": objectField("userId/projectId/channelId/modelId/capability/from/to")}),
-		tool("admin_usage_correct", "人工修正成本或积分并保存原值及依据；省略字段保留原值，显式 null 表示未知，整数最小单位以字符串传入", "admin", map[string]any{"entryId": stringField("用量记录 ID"), "costMicros": map[string]any{"anyOf": []any{stringField("人民币百万分之一元"), map[string]any{"type": "null"}}, "description": "省略保留原值，null 清为未知"}, "pointsMilli": map[string]any{"anyOf": []any{stringField("千分之一积分"), map[string]any{"type": "null"}}, "description": "省略保留原值，null 清为未知"}, "reason": stringField("修正依据")}, "entryId", "reason"),
-		tool("admin_usage_corrections", "读取用量修正审计历史", "admin", map[string]any{"entryId": stringField("用量记录 ID")}, "entryId"),
+		tool("admin_usage_list", "按用户、项目、渠道、模型、能力及开始执行时间查看全站调用次数与实际、估算或未知用量，不返回积分或价格", "admin", map[string]any{"filters": objectField("userId/projectId/channelId/modelId/capability/from/to")}),
 	}
 }
 
@@ -77,6 +83,15 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 		err = a.db.Transaction(func(tx *gorm.DB) error { if err := tx.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { return err }; return tx.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error }); if err == nil { a.signalWork() }; return map[string]any{"deleteState": "pending"}, true, err
 	}
 	switch name {
+	case "canvas_nodes_list": value, err = a.ListCanvasNodes()
+	case "admin_canvas_plugins_list": value, err = a.ListCanvasPlugins()
+	case "admin_canvas_plugin_contract": value = canvasPluginContract(read("locale"))
+	case "admin_canvas_plugin_get": value, err = a.GetCanvasPlugin(read("pluginId"))
+	case "admin_canvas_plugin_create": value, err = a.CreateCanvasPlugin(p.User, read("name"), read("description"))
+	case "admin_canvas_plugin_draft_save": var request struct { Revision uint64 `json:"revision"`; Files map[string]string `json:"files"` }; if err = decode(input, &request); err == nil { value, err = a.SaveCanvasPluginDraft(p.User, read("pluginId"), request.Revision, request.Files) }
+	case "admin_canvas_plugin_publish": var request struct { Revision uint64 `json:"revision"`; Version uint64 `json:"version"`; Confirmed bool `json:"confirmed"` }; if err = decode(input, &request); err == nil { value, err = a.PublishCanvasPlugin(p.User, read("pluginId"), request.Revision, request.Version, request.Confirmed) }
+	case "admin_canvas_plugin_enabled": var request struct { Version uint64 `json:"version"`; Enabled *bool `json:"enabled"`; Confirmed bool `json:"confirmed"` }; if err = decode(input, &request); err == nil { if !request.Confirmed || request.Enabled == nil { return nil, true, problem(400, "confirmation_required", "节点插件启停须由管理员主动确认") }; value, err = a.SetCanvasPluginEnabled(read("pluginId"), request.Version, *request.Enabled) }
+	case "admin_canvas_plugin_delete": var request struct { Version uint64 `json:"version"`; Confirmed bool `json:"confirmed"` }; if err = decode(input, &request); err == nil { err = a.DeleteCanvasPlugin(read("pluginId"), request.Version, request.Confirmed) }
 	case "assistant_threads_list": rows := []AssistantThread{}; err = a.db.Where("user_id = ?", p.User.ID).Order("updated_at DESC").Find(&rows).Error; return rows, true, err
 	case "assistant_thread_get": value, err = a.GetAssistantThread(p.User.ID, read("threadId"))
 	case "assistant_thread_create": value, err = a.CreateAssistantThread(p.User.ID, read("title"))
@@ -122,8 +137,6 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "admin_script_test": var request scriptTestInput; if err = decode(input["config"], &request); err == nil { value, err = a.TestModelScript(p.User, read("adapterId"), request) }
 	case "admin_script_evidence": value, err = a.ModelScriptEvidence(p.User.ID, read("adapterId"), read("taskId"))
 	case "admin_usage_list": filters := map[string]string{}; if input["filters"] != nil { err = decode(input["filters"], &filters) }; if err == nil { value, err = a.ListUsage("", nil, filters) }
-	case "admin_usage_correct": var request usageCorrectionInput; if err = decode(input, &request); err == nil { err = a.CorrectUsage(p.User.ID, read("entryId"), request) }
-	case "admin_usage_corrections": rows := []UsageCorrection{}; err = a.db.Where("entry_id = ?", read("entryId")).Order("created_at").Find(&rows).Error; return rows, true, err
 	default: return nil, false, nil
 	}
 	if value == nil && err == nil { value = map[string]any{"saved": true} }; return value, true, err

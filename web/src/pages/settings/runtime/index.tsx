@@ -183,9 +183,6 @@ export default function RuntimePage() {
                 })}
             </Disclosure>
 
-            <SettingsGroup title={t("execution.groups.points")} onReset={() => resetGroup(["pointsPerYuan"])}>
-                <Field layout="horizontal" name="pointsPerYuan" label={t("execution.pointsRatio")} description={t("execution.pointsHint")} schema={z.string().regex(/^(?:\d+(?:\.\d+)?)?$/, t("ui.invalidValue"))}><Input inputMode="decimal" /></Field>
-            </SettingsGroup>
         </EditorForm> : null}
     </section>;
 }

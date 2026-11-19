@@ -18,7 +18,7 @@ type channelTemplate struct {
 func channelTemplates() []channelTemplate {
     definitions, _ := builtinScripts()
     model := func(id, name, adapterID string) ChannelModel {
-        for _, script := range definitions { if script.ID == adapterID { return ChannelModel{Model: id, Name: name, Capability: script.Capability, AdapterID: script.ID, AdapterVersionID: builtinVersionID(script), ParameterOverrides: JSON(`{}`), Parameters: script.Parameters, Pricing: JSON(`{}`)} } }
+        for _, script := range definitions { if script.ID == adapterID { return ChannelModel{Model: id, Name: name, Capability: script.Capability, AdapterID: script.ID, AdapterVersionID: builtinVersionID(script), ParameterOverrides: JSON(`{}`), Parameters: script.Parameters} } }
         return ChannelModel{}
     }
     return []channelTemplate{

@@ -8,7 +8,7 @@ func canvasTools() []toolDefinition {
 		"projectId": stringField("明确的目标项目 ID"), "version": numberField("读取到的项目版本"),
 		"ops": map[string]any{"type": "array", "minItems": 1, "items": toolSchema(map[string]any{
 			"type": map[string]any{"type": "string", "enum": []string{"add_node", "update_node", "delete_node", "connect_nodes", "delete_connection"}},
-			"node": object("add_node 的完整节点，类型支持 text/image/video/audio/config/group 和已安装的画布节点插件"),
+			"node": object("add_node 的完整节点；先用 canvas_nodes_list 读取已发布且启用的节点类型、默认尺寸和 metadata"),
 			"id": stringField("update_node/delete_node/delete_connection 的明确编号；connect_nodes 可选连线编号"),
 			"patch": object("update_node 的 title、position、width、height、metadata；metadata 按字段合并，null 清除字段，保留其他参数与内容"),
 			"fromNodeId": stringField("connect_nodes 的起点节点 ID"), "toNodeId": stringField("connect_nodes 的终点节点 ID"),

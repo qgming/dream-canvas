@@ -1,23 +1,7 @@
-# Markdown 节点插件
+# markdown 内置节点
 
-梦想画布画布节点插件:在画布里编辑与渲染 Markdown。
+在画布编辑与预览 Markdown，输出文本资源。
 
-## 构建
+此目录源码由前端直接打包，默认启用。管理员在「设置 → 节点插件」统一控制启停，普通用户无需安装。修改源码后由应用开发服务加载，发布时随应用构建；独立目录的构建产物只供源码开发参考，不自动安装。
 
-```bash
-npm install
-npm run build      # 产物 dist/markdown.js,并同步到 web/public/plugins/markdown.js
-npm run dev        # watch,改动自动构建
-```
-
-## 安装
-
-画布 → 左上菜单「节点插件」→ 安装 URL 填 `/plugins/markdown.js`(或托管后的公网 URL)。
-
-## 本地开发
-
-`npm run dev` 起 watch,在 `web/.env.local` 加 `VITE_DEV_PLUGINS=/plugins/markdown.js`,起画布后改 `src/index.jsx` 刷新页面即生效,无需反复安装。
-
-插件契约见 `plugins/canvas/README.md`。
-
-> 本插件演示了独立 CSS 文件用法:`src/styles.css` 经 esbuild `text` loader 打进 bundle,通过插件 `css` 字段自动注入/清理。
+节点运行约定见 [节点插件说明](../README.md)。

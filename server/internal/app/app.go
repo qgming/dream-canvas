@@ -56,7 +56,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -71,6 +71,7 @@ func Open(root string) (*App, error) {
 	service.clients.entries = map[string]onlineClient{}
 	if err := service.openLogger(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := service.installBuiltinScripts(); err != nil { stop(); conn.Close(); return nil, err }
+	if err := service.installBuiltinCanvasPlugins(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := db.Model(&Asset{}).Where("save_state = ?", "saving").Updates(map[string]any{"save_state": "failed", "error": "服务在文件保存完成前停止，原件尚未可靠保留，请重新上传"}).Error; err != nil { conn.Close(); return nil, err }
 	var pending []Asset
 	if err := db.Where("delete_state = ?", "pending").Find(&pending).Error; err != nil { conn.Close(); return nil, err }
@@ -170,8 +171,6 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/tasks/:id/resume", a.resumeTask)
 	authed.POST("/tasks/:id/project-version", a.taskProjectVersion)
 	authed.GET("/usage", a.listUsage)
-	authed.POST("/usage/quote", a.quoteUsage)
-	authed.GET("/usage/:id/corrections", a.usageCorrectionsForUser)
 	authed.GET("/assistant/threads", a.listAssistantThreads)
 	authed.POST("/assistant/threads", a.createAssistantThread)
 	authed.GET("/assistant/threads/:id", a.getAssistantThread)
@@ -210,6 +209,9 @@ func (a *App) Router(web string) *gin.Engine {
 		c.Next()
 	})
 	admin.GET("/users", a.listUsers)
+	admin.GET("/assets/filename-repair", a.assetFilenameRepairStatus)
+	admin.POST("/assets/filename-repair", a.queueAssetFilenameRepair)
+	a.canvasPluginRoutes(authed, admin)
 	admin.POST("/tasks/:id/recover-query", a.recoverTaskQuery)
 	admin.POST("/users", a.createUser)
 	admin.PATCH("/users/:id", a.updateUser)
@@ -228,8 +230,6 @@ func (a *App) Router(web string) *gin.Engine {
 	admin.PUT("/storages/:id", a.saveStorage)
 	admin.DELETE("/storages/:id", a.deleteStorage)
 	admin.GET("/usage", a.listUsage)
-	admin.POST("/usage/:id/corrections", a.correctUsage)
-	admin.GET("/usage/:id/corrections", a.usageCorrections)
 	admin.POST("/channels", a.saveChannel)
 	admin.GET("/channels/:channelId", a.getChannelForEditing)
 	admin.PUT("/channels/:channelId", a.saveChannel)

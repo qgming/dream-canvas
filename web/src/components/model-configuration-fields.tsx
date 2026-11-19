@@ -9,13 +9,12 @@ import { Switch } from "@/components/ui/controls";
 import { Notice, Spinner } from "@/components/ui/display";
 import { Button } from "@/components/ui/button";
 import { useDiscardChanges } from "@/hooks/use-discard-changes";
-import { ModelInputSettings, ModelPricingFields } from "@/components/model-input-settings";
+import { ModelInputSettings } from "@/components/model-input-settings";
 import { getModelScript, listModelScripts, type Capability, type ModelInput } from "@/services/api/channels";
-import { applyInputOverrides } from "@/lib/model-inputs";
 
-export type ModelConfigurationSection = "basic" | "parameters" | "pricing";
+export type ModelConfigurationSection = "basic" | "parameters";
 export const defaultAdapter = (capability: Capability) => ({ text: "openai-chat", image: "openai-image", audio: "openai-tts", video: "openai-video" })[capability];
-export const blankModel = (capability: Capability = "image"): ModelInput => ({ model: "", name: "", capability, adapterId: defaultAdapter(capability), adapterVersionId: "", enabled: true, version: 0, parameterOverrides: {}, pricing: {} });
+export const blankModel = (capability: Capability = "image"): ModelInput => ({ model: "", name: "", capability, adapterId: defaultAdapter(capability), adapterVersionId: "", enabled: true, version: 0, parameterOverrides: {} });
 
 export function ModelConfigurationFields({ section, onCreateScript, onViewScript }: { section: ModelConfigurationSection; onCreateScript: (capability: Capability) => void; onViewScript: (id: string) => void }) {
     const { t } = useTranslation();
@@ -39,13 +38,6 @@ export function ModelConfigurationFields({ section, onCreateScript, onViewScript
         {error ? <Notice type="error" title={error.message} action={<Button onClick={retry}>{t("workspace.retry")}</Button>} /> : null}
         {script.isLoading ? <Spinner label={t("settings.loading")} /> : null}
         {!error && version ? <Field key={`${adapterId}:${version.id}`} name="parameterOverrides"><ModelInputSettings controls={version.parameters} value={{}} onChange={() => undefined} /></Field> : null}
-        {!script.isLoading && !error && !version ? <Notice type="error" title={t("modelScripts.versionMissing")} /> : null}
-    </div>;
-
-    if (section === "pricing") return <div className="space-y-4">
-        {error ? <Notice type="error" title={error.message} action={<Button onClick={retry}>{t("workspace.retry")}</Button>} /> : null}
-        {script.isLoading ? <Spinner label={t("settings.loading")} /> : null}
-        {!error && version ? <Field key={`${adapterId}:${version.id}:pricing`} name="pricing"><ModelPricingFields capability={capability} controls={applyInputOverrides(version.parameters, overrides)} value={{}} onChange={() => undefined} /></Field> : null}
         {!script.isLoading && !error && !version ? <Notice type="error" title={t("modelScripts.versionMissing")} /> : null}
     </div>;
 

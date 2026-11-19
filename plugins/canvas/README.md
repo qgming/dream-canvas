@@ -1,170 +1,42 @@
 # 梦想画布节点插件
 
-在浏览器画布内扩展节点类型，使用画布中的「节点插件」管理器加载。外部 Agent 统一通过业务服务的远程 MCP 接入，配置方式见 [项目说明](../../README.md#快速开始)；画布节点插件与服务端接口脚本分别管理。
+画布节点由服务端目录统一管理，管理员入口为「设置 → 节点插件」。普通用户直接使用已启用节点，不提供个人安装、URL 安装、官方市场或本地发现开关。节点插件与调用供应商的服务端「接口插件」分别管理。
 
-给画布扩展自定义节点。每个插件是一个**独立目录**,用 **TypeScript** 编写,自带 `package.json` / `build.mjs` / `src/index.tsx` / `dist/`,互不耦合,可单独构建、发布、升级。
+文本、图片、视频、音频、生成配置、组，以及本目录的 Markdown、SVG、HTML、3D 全景、便利贴、超分均为内置节点插件，默认启用。前六种复用宿主媒体与创作控件，本目录六种节点源码由 Vite 按需打包，无需分别构建或安装。内置实现随应用代码更新，管理页只控制启停。
 
-内置节点只有文本、图片、视频、音频、生成配置、组六种;其余节点(Markdown、SVG、HTML、3D 全景、便利贴……)都是插件。
+内置生成节点及全景共用 624px 底部创作面板；Markdown、HTML、SVG 与便利贴共用宿主内容编辑器，点击 / 双击或工具栏编辑时打开，节点内保留渲染预览。输入与颜色即时保存，放大编辑复用同一内容，源码保留等宽字体与行号；便利贴颜色在底栏调色图标中调整。此处内置实现直接复用应用共享组件与依赖，不要求独立导出插件 bundle，自建包仍遵循下方导入边界。
 
-作者只写节点 UI 与逻辑,**类型、JSX、宿主 React、构建全部由 [`@dream-canvas/plugin-sdk`](./sdk/README.md) 提供**,写 TSX 全程有代码提示;产物仍是宿主加载器现有契约的 ESM(React external、宿主单例)。
+超分节点接收一张图片或一段视频，支持上游连线、资料库与上传，使用同样的紧凑底部面板，仅选择模型与模型实际声明的目标参数，无提示词输入。后端仅针对 `upscale:media` 的空提示词补入保留原内容的默认指令；接口不使用提示词时无需处理该字段。源素材绑定仅发生在此节点，不改变普通节点首尾帧或命名素材的语义，结果沿用持久任务、私有资产、自动保存与恢复。模型适用条件与现有 DMC 直链限制见 [超分说明](upscale/README.md)。
 
-## 目录约定
+## 自建节点
 
-```
-plugins/canvas/
-  sdk/            # 插件 SDK(类型 + automatic JSX 运行时 + 构建助手)
-  template/       # 起步模板:复制它开始写新插件
-  markdown/       # 每个插件一个独立目录
-    package.json
-    build.mjs     # 一行 buildPlugin,产物名取目录名 → dist/markdown.js
-    tsconfig.json
-    src/index.tsx # 插件源码(默认导出 definePlugin(...))
-    README.md
-  svg/ html/ panorama/ sticky-note/ ...
-```
+1. 管理员在节点插件页新建，服务端分配固定插件 ID 并生成 `plugin.json` 与 `index.tsx` 草稿。
+2. 在文件编辑器修改完整包，可添加包内 JS、TS、JSX、TSX、JSON、CSS 模块；先保存草稿，再由管理员确认发布。保存草稿不影响已发布代码。
+3. 发布使用服务端已有 esbuild 编译并保存整个包及编译结果，不执行插件代码。新建插件发布后还需在列表启用；已启用插件发布新版本后通知使用者重新读取。
+4. 助手先读取 `admin_canvas_plugin_contract` 与 `admin_canvas_plugin_get`，再以 `admin_canvas_plugin_draft_save` 保存完整文件映射。助手不提供发布、启停或删除工具。
 
-## 快速开始
+`plugin.json` 声明 `schemaVersion: 1`、固定 `id`、`name`、`description`、`entry` 和 `nodes`。每个节点包含 `type`、`title`、`defaultSize` 和可选 `defaultMetadata`，类型必须以当前插件 ID 加冒号开头；已发布类型保持稳定。节点清单供网页、助手和 MCP 共用，不依赖浏览器在线。
 
-```bash
-cp -r plugins/canvas/template plugins/canvas/my-plugin
-cd plugins/canvas/my-plugin
-# 改 package.json 的 name;改 src/index.tsx 里的 id / nodes[].type
-npm install
-npm run dev        # watch 构建,产物同步到 web/public/plugins/my-plugin.js
-npm run typecheck  # tsc --noEmit,类型自检
-```
+入口默认导出 `definePlugin({...})`。从 `@dream-canvas/plugin-sdk` 引入 `definePlugin` 与 React hooks，从 `./plugin.json` 引入节点定义，再为节点补充 `icon`、`Content`、可选 `Panel`、`toolbar`、`resource` 和交互选项。JSX 使用宿主 React 单例，CSS 以字符串导入并赋给插件 `css`。
 
-产物名取**目录名**,复制后记得把目录改成插件名。
+只解析包内相对模块以及宿主 `react` 和 `@dream-canvas/plugin-sdk`，不安装 npm、不解析远程模块、不读取服务器文件、不运行系统命令。已有 Markdown 和全景内置实现暂时沿用运行时按需加载的 marked / three.js；这一源码内置依赖不构成自建包的外部导入入口。
 
-## 构建 / 发布 / 升级
+## 宿主能力
 
-```bash
-cd plugins/canvas/<name>
-npm install
-npm run build   # → dist/<name>.js,并同步到 web/public/plugins/<name>.js
-npm run dev     # watch,改动自动构建并同步
-```
+`Content({ ctx })` 中可使用：
 
-把 `dist/<name>.js` 托管到任意静态地址(CDN、GitHub Raw、对象存储),用户在画布「节点插件」管理器填该 URL 安装。升级时重新构建覆盖同一 URL,用户点「更新」即可。
-
-## 官方插件注册表
-
-本仓库插件通过 [`registry/`](./registry/README.md) 集中构建并同步到 `web/public/plugins/official/`，画布「节点插件」面板的官方插件区默认读取本地清单。未构建时显示空列表；需要自行托管时可用 `VITE_PLUGIN_REGISTRY_URL` 指定清单地址。第三方插件仍支持通过 JS URL 安装。
-
-## 本地开发
-
-`npm run dev` 起 watch,产物会同步到 `web/public/plugins/<name>.js`。此后有两种方式在画布里用到它:
-
-**方式一(推荐):自动发现。** 画布启动时会扫描 `web/public/plugins/` 下的插件,自动加入「节点插件」管理器列表,**默认关闭**;打开开关即启用。无需手动填 URL,启用时会按文件重新拉取,配合 watch 改完刷新即最新。
-
-**方式二:`VITE_DEV_PLUGINS`。** 在 `web/.env.local` 声明(逗号分隔多个),这些插件每次刷新页面都**重新拉取并直接激活**(不缓存、不落库、无开关):
-
-```env
-VITE_DEV_PLUGINS=/plugins/markdown.js,/plugins/svg.js
-```
-
-再起画布 `web`(`npm run dev`)。流程即:改 `src/index.tsx` → watch 自动构建 → 刷新画布看到最新效果,无需反复安装。
-
-## 用 SDK 写插件
-
-默认导出 `definePlugin({...})`(对象形式,**无需再 `const { React } = runtime`**):
-
-```tsx
-import { definePlugin, useState } from "@dream-canvas/plugin-sdk";
-import type { CanvasNodeContentProps } from "@dream-canvas/plugin-sdk";
-
-function Content({ ctx }: CanvasNodeContentProps) {
-    const [n, setN] = useState(0);
-    return (
-        <button onMouseDown={(e) => e.stopPropagation()} onClick={() => setN((v) => v + 1)} style={{ color: ctx.theme.node.text }}>
-            {ctx.node.title}: {n}
-        </button>
-    );
-}
-
-export default definePlugin({
-    id: "my-plugin",
-    name: "我的插件",
-    version: "1.0.0",
-    css: "…",                 // 可选:插件样式,自动注入/清理
-    nodes: [ /* CanvasNodeDefinition[] */ ],
-    setup(app) { return () => {}; }, // 可选,返回清理函数;app 含 injectCSS/emit/on
-});
-```
-
-SDK 导出的 hooks(`useState/useEffect/useMemo/useRef/...`)运行时转发宿主 React,类型来自 `@types/react`。SDK 与依赖接入见 [`sdk/README.md`](./sdk/README.md)。
-
-### CanvasNodeDefinition
-
-```ts
-{
-    type: string;                 // 建议 "<pluginId>:<name>",全局唯一
-    title: string;                // 创建菜单/默认标题
-    icon: ReactNode;              // emoji 字符串或任意 ReactNode
-    description?: string;
-    defaultSize: { width, height };
-    defaultMetadata?: object;     // 新建节点初始 metadata(文本内容放 content)
-    minimapColor?: string;
-    showInCreateMenu?: boolean;   // 默认 true
-    hasSourceHandle?: boolean;    // 右侧输出连接点,默认 true
-    keepAspectRatio?: (node) => boolean;
-    resource?: (node) => { kind: "text"|"image"|"video"|"audio", text?, url? } | null; // 作为上游输入被消费时输出什么
-    Content: ({ ctx }) => ReactNode;         // 节点主体渲染
-    Panel?: ({ ctx, onClose }) => ReactNode; // 可选:节点下方面板
-    toolbar?: (ctx) => Array<{ id, title, label, icon, onClick, danger? }>; // 追加到 hover 工具栏
-    onDoubleClick?: (ctx) => boolean;        // 返回 true 表示已处理双击
-}
-```
-
-### ctx:节点与画布交互接口
-
-`Content` / `Panel` / `toolbar` 都会拿到 `ctx`(类型 `CanvasNodeContext`):
-
-| 能力 | 说明 |
+| 接口 | 用途 |
 | --- | --- |
-| `ctx.node` | 当前节点数据(含 `metadata.content` 等) |
-| `ctx.theme` / `ctx.scale` | 当前画布主题 token 与缩放,用来让 UI 跟随主题 |
-| `ctx.updateMetadata(patch)` | 更新自身 metadata(如保存内容) |
-| `ctx.updateNode(patch)` | 更新自身 title/width/height |
-| `ctx.getNode(id)` / `ctx.getNodes()` / `ctx.getConnections()` | 读画布 |
-| `ctx.getUpstream()` / `ctx.getDownstream()` | 取上/下游相连节点 |
-| `ctx.applyOps(ops)` | 用画布指令集增删节点/连线、选择、触发生成(见下) |
-| `ctx.emit(event, payload)` / `ctx.on(event, handler)` | 节点/插件间事件通信 |
-| `ctx.ai` | 绑定当前项目和节点，经业务后端提交生成；按渠道模型的声明传递参数，真实链路仍待验收 |
-| `ctx.storage` | 按账号与插件隔离的浏览器偏好缓存；项目内容写入节点 metadata，媒体引用服务端资产 |
+| `node`、`theme`、`scale`、`isSelected` | 当前节点、主题、缩放与选中状态 |
+| `updateMetadata(patch)`、`updateNode(patch)` | 编辑项目内容、标题和尺寸，沿用全局自动保存与历史 |
+| `getNode/getNodes/getConnections/getUpstream/getDownstream` | 读取当前画布和连接关系 |
+| `applyOps(ops)` | 增删改节点与连线、选择、视口和生成指令 |
+| `ai.generateImage/generateVideo/generateText` | 通过同一服务端渠道模型和任务业务调用，提交前保存明确目标 |
+| `openPanel/closePanel` | 控制节点面板 |
+| `storage` | 按账号与插件隔离的浏览器偏好；业务正文写入 metadata，媒体使用稳定服务端资产引用 |
 
-> `metadata` 的**内置字段**(content、status、model…)是强类型;插件写入的**自定义字段**读出为 `unknown`,按需 `as` 断言(参考 `sticky-note` 的 `pluginColor`)。
+节点可声明 `hidePanel`、`interactionToggle`、`forceInteractive`、`transparentBackground`、`keepAspectRatio` 或 `useBuiltinPanel`。输入控件的 pointerdown、keydown、wheel 要阻止穿透画布；滚动区使用 `data-canvas-no-zoom`，样式沿用 `ctx.theme` 和全站语义 token。SDK 类型见 [sdk/src/types.ts](sdk/src/types.ts)。
 
-`ctx.ai.generateImage` 的 `images` 返回当前账号可访问的稳定资产地址；无需转换成 Base64，可直接预览并保存到节点。生成前会保存目标节点并检查项目版本，保存失败或发生冲突时不提交供应商。完整后端化范围与当前限制见 [Unreleased](../../CHANGELOG.md#后端化规划实施与验收)。
+停用后创建菜单隐藏该类型，新建项目节点与新的节点生成在服务端同样校验；已有节点内容保留并显示不可用，重新启用后恢复。停用不取消已提交任务、不删除资产。被项目或撤销历史引用的自建插件拒绝删除，可停用；删除须由管理员确认并检查记录版本。
 
-生成选项统一使用 `parameters` 传递当前渠道模型声明的参数，例如默认 `/videos` 适配的 `ctx.ai.generateVideo(prompt, { model, parameters: { seconds: 6 } })`。参数名和类型以该模型的有效输入定义为准，尺寸、时长与供应商单次返回张数均放在此对象中；不支持未声明参数。本次明确参数覆盖节点已保存值，仍缺省时依次取管理员模型默认值和脚本默认值，提交前固定到节点与任务记录中。个人偏好不保存默认模型或参数；没有已有选择的入口采用管理员排序中首个启用适用模型，已有失效选择须重新选择，不自动切换渠道。
-
-### 画布指令集(ctx.applyOps)
-
-```ts
-ctx.applyOps([
-    { type: "add_node", id?, nodeType, title?, x?, y?, width?, height?, metadata? },
-    { type: "update_node", id, patch?, metadata? },
-    { type: "delete_node", id? | ids? },
-    { type: "connect_nodes", fromNodeId, toNodeId },
-    { type: "delete_connections", id? | ids? | all? },
-    { type: "select_nodes", ids },
-    { type: "set_viewport", viewport },
-    { type: "run_generation", nodeId, mode?, prompt? },
-]);
-```
-
-## 重依赖 / 资源
-
-- **重依赖**(three.js、marked 等):不要打进 bundle,运行时 `await import("https://esm.sh/...")` 动态加载(esbuild 自动 external);在 `src/env.d.ts` 声明该模块以通过 tsc。参考 `panorama/`、`markdown/`。
-- **CSS**:写独立 `.css`,`import css from "./styles.css"` 拿到字符串(esbuild `text` loader),放到 `css` 字段自动注入/清理;`src/env.d.ts` 声明 `*.css`。参考 `markdown/`。
-- **HTML**:HTML 节点把 HTML 字符串塞进 sandbox iframe 的 `srcDoc`,自带 `<style>`,不需要插件级 CSS。参考 `html/`。
-
-## 兼容说明
-
-加载器仍接受**默认导出为工厂函数** `(runtime) => CanvasPlugin`(用 `runtime.React`)或**普通对象**;老的 JS 插件无需改动即可运行。SDK 的 automatic JSX 让新插件走对象形式,更简洁。
-
-## 注意
-
-- 插件代码会在画布页面内**直接执行**，可访问当前账号页面、草稿及同源 API；渠道密钥保存在业务后端。插件不是隔离环境，只应安装可信来源。
-- 交互控件记得 `onMouseDown={(e) => e.stopPropagation()}`(避免触发节点拖拽),滚动区域加 `onWheel={(e) => e.stopPropagation()}` 与容器 `data-canvas-no-zoom`(避免被画布缩放拦截)。
+节点代码在使用者浏览器内执行，可访问页面和当前账号获授权的同源业务接口；这与服务端接口插件的 QuickJS WASM 隔离环境不同。发布确认会明确显示此运行边界。完整本轮实施和未验收事项见 [CHANGELOG](../../CHANGELOG.md#unreleased)。

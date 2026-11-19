@@ -23,7 +23,7 @@ export function AgentChatComposer({
     onAddFiles,
     onRemoveAttachment,
     left,
-    estimate,
+    model,
 }: {
     prompt: string;
     attachments?: AgentChatAttachment[];
@@ -38,7 +38,7 @@ export function AgentChatComposer({
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
-    estimate?: ReactNode;
+    model?: ReactNode;
 }) {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,8 +77,8 @@ export function AgentChatComposer({
                         ) : null}
                         {left}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                        {!sending ? estimate : null}
+                    <div className="flex min-w-0 items-center justify-end gap-1.5">
+                        {model}
                         {sending && onStop ? (
                             <Tooltip title={t("agent.composer.stop")} placement="top"><Button variant="destructive" size="icon" loading={stopping} icon={<Square className="size-4" />} onClick={() => void onStop()} aria-label={t("agent.composer.stop")} /></Tooltip>
                         ) : (

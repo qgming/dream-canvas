@@ -21,7 +21,6 @@ import { useOpenModelSettings } from "@/hooks/use-open-model-settings";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelInputFields, ModelParameters } from "@/components/model-parameters";
-import { PointsEstimate } from "@/components/points-estimate";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
@@ -550,14 +549,13 @@ export default function VideoPage() {
                                     {!visibleReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-muted-foreground">{!materialControls.length ? t("videoWorkbench.noReferencesNeeded") : referenceDragTarget ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
                                 </div>
                             </div> : null}
-                            <GenerationSettings model={model} onModelChange={setSelectedModel} />
                             {keyframeMode ? <ModelInputFields key={`${model}:mode`} controls={[keyframeMode]} value={{ workbench_mode: displayedMode }} compact disabled={running} onChange={updateMode} /> : <ModelParameters key={`${model}:mode`} config={effectiveConfig} model={model} value={parameters[model]} compact section="mode" disabled={running} onChange={updateParameters} />}
                             <ModelParameters key={`${model}:parameters`} config={effectiveConfig} model={model} value={parameters[model]} compact section="parameters" references={visibleReferences} disabled={running} onChange={updateParameters} />
                         </div>
 
-                        <div className="mt-auto pt-6">
-                            <div className="mb-2 flex justify-end"><PointsEstimate model={model} parameters={parameters[model]} prompt={prompt} /></div>
-                            <Button variant="default" size="lg" className="w-full" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
+                        <div className="mt-auto flex min-w-0 items-center justify-end gap-2 pt-6">
+                            <ModelPicker config={effectiveConfig} value={model} onChange={setSelectedModel} capability="video" disabled={!draftReady || running} onMissingConfig={openModelSettings} className="min-w-0" />
+                            <Button variant="default" className="shrink-0" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
                         </div>
@@ -597,7 +595,6 @@ export default function VideoPage() {
             </Dialog>
             <Dialog title={t("workbench.settings")} side="bottom" className="h-[82dvh]" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="space-y-4" inert={!draftReady}>
-                    <GenerationSettings model={model} onModelChange={setSelectedModel} />
                     {keyframeMode ? <ModelInputFields key={`${model}:mode`} controls={[keyframeMode]} value={{ workbench_mode: displayedMode }} compact disabled={running} onChange={updateMode} /> : <ModelParameters key={`${model}:mode`} config={effectiveConfig} model={model} value={parameters[model]} compact section="mode" disabled={running} onChange={updateParameters} />}
                     <ModelParameters key={`${model}:parameters`} config={effectiveConfig} model={model} value={parameters[model]} compact section="parameters" references={visibleReferences} disabled={running} onChange={updateParameters} />
                 </div>
@@ -605,19 +602,6 @@ export default function VideoPage() {
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} initialType="video" />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
-    );
-}
-
-function GenerationSettings({ model, onModelChange }: { model: string; onModelChange: (model: string) => void }) {
-    const config = useEffectiveConfig();
-    const openModelSettings = useOpenModelSettings();
-    const { t } = useTranslation();
-
-    return (
-        <label className="block min-w-0">
-            <span className="mb-1.5 block text-xs">{t("workbench.model")}</span>
-            <ModelPicker config={config} value={model} onChange={onModelChange} capability="video" fullWidth onMissingConfig={openModelSettings} />
-        </label>
     );
 }
 

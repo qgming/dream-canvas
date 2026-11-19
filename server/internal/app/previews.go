@@ -29,7 +29,7 @@ func (a *App) assetPreview(c *gin.Context) {
 		if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { respondError(c, err); return }
 		if asset.DeleteState != "" { respondError(c, problem(410, "asset_deleted", "资产已删除")); return }
 		if asset.PreviewPath == "" {
-			original, err := a.assetPath(asset.ID)
+			original, err := a.assetOriginalPath(asset)
 			if err != nil { respondError(c, err); return }
 			if asset.Kind == "video" {
 				policy, policyErr := a.executionPolicy(); if policyErr != nil { respondError(c, policyErr); return }

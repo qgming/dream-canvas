@@ -245,12 +245,6 @@ export function ModelDialog({ entry, model, onClose, onSaved }: { entry: Channel
                     disabled: selected < 0,
                     children: selected >= 0 ? <ModelConfigurationFields section="parameters" onCreateScript={setCreate} onViewScript={(id) => void viewScript(id)} /> : null,
                 },
-                {
-                    key: "pricing",
-                    label: t("modelScripts.pricing"),
-                    disabled: selected < 0,
-                    children: selected >= 0 ? <ModelConfigurationFields section="pricing" onCreateScript={setCreate} onViewScript={(id) => void viewScript(id)} /> : null,
-                },
             ]} />
         </EditorForm>
         <Dialog title={t("modelScripts.create")} open={Boolean(create)} busy={scriptBusy} onClose={() => setCreate(null)} footer={<Button type="submit" form="model-new-script" loading={scriptBusy}>{t("common.save")}</Button>}>
