@@ -787,6 +787,7 @@ export default {
     "submittedContent": "Submitted input",
     "saved": "Saved",
     "savingFile": "Saving",
+    "canvasResultUnapplied": "The result is saved, but its target was changed or removed. View it in tasks or assets.",
     "saveFileFailed": "Save failed",
     "local": "Local only",
     "syncPending": "Awaiting sync",

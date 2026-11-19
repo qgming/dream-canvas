@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 
 import { captureSession } from "@/services/api/client";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { GenerationOptions } from "@/services/api/tasks";
-import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
 type Target = Required<Pick<GenerationOptions, "projectId" | "projectVersion" | "nodeId" | "batchId">>;
 type Preparation = { nodeId: string; signal?: AbortSignal; assertSession: () => void; resolve: (target: Target) => void; reject: (error: unknown) => void; stop: () => void };
 const interrupted = () => new DOMException(i18n.t("errors.waitStopped"), "AbortError");
 
-export function useGenerationTarget(projectId: string, nodes: MutableRefObject<CanvasNodeData[]>, connections: MutableRefObject<CanvasConnection[]>) {
+export function useGenerationTarget(projectId: string) {
     const [revision, setRevision] = useState(0);
     const pending = useRef(new Set<Preparation>());
     const mounted = useRef(true);
@@ -23,7 +22,7 @@ export function useGenerationTarget(projectId: string, nodes: MutableRefObject<C
             pending.current.clear();
         };
     }, []);
-    // A requested render commits newly created nodes before reading refs and saving the target version.
+    // Coalesce requests from this render and flush the authoritative store before submission.
     useEffect(() => {
         const batch = [...pending.current];
         if (!batch.length) return;
@@ -32,7 +31,6 @@ export function useGenerationTarget(projectId: string, nodes: MutableRefObject<C
             catch (error) { pending.current.delete(request); request.stop(); request.reject(error); }
         }
         if (!pending.current.size) return;
-        useCanvasStore.getState().updateProject(projectId, { nodes: nodes.current, connections: connections.current });
         void useCanvasStore.getState().ensureSaved(projectId).then((project) => {
             for (const request of batch) {
                 if (!pending.current.has(request)) continue;
@@ -47,7 +45,7 @@ export function useGenerationTarget(projectId: string, nodes: MutableRefObject<C
         }, (error: unknown) => {
             for (const request of batch) { if (!pending.current.delete(request)) continue; request.stop(); request.reject(error); }
         });
-    }, [revision, projectId, nodes, connections]);
+    }, [revision, projectId]);
     return useCallback((nodeId: string, signal?: AbortSignal): Promise<Target> => new Promise((resolve, reject) => {
         if (!mounted.current || signal?.aborted) { reject(interrupted()); return; }
         const abort = () => { pending.current.delete(request); request.stop(); reject(interrupted()); };

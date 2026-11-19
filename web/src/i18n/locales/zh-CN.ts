@@ -787,6 +787,7 @@ export default {
     "submittedContent": "提交内容",
     "saved": "已保存",
     "savingFile": "保存中",
+    "canvasResultUnapplied": "成品已保存，目标结果已修改或移除；请在任务或资产库查看成品",
     "saveFileFailed": "保存失败",
     "local": "仅本地",
     "syncPending": "等待同步",

@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.88.0
 	github.com/disintegration/imaging v1.6.2
+	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/evanw/esbuild v0.28.1
 	github.com/fastschema/qjs v0.0.6
 	github.com/gabriel-vasile/mimetype v1.4.8
@@ -18,6 +19,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/openai/openai-go/v3 v3.20.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
+	github.com/wI2L/jsondiff v0.7.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.43.0
 	golang.org/x/term v0.43.0

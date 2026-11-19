@@ -44,7 +44,7 @@ export function usePluginHost(params: PluginHostParams) {
     const { t } = useTranslation();
     const openModelSettings = useOpenModelSettings();
     const { projectId, effectiveConfig, isAiConfigReady, theme, nodesRef, connectionsRef, viewportRef, setNodes, setDialogNodeId, applyAgentOps, startGenerationRequest, finishGenerationRequest } = params;
-    const prepareTarget = useGenerationTarget(projectId, nodesRef, connectionsRef);
+    const prepareTarget = useGenerationTarget(projectId);
     const assertSession = useRef(captureSession()).current;
 
     // Host capabilities available to plugin nodes; methods receive nodeId and are not bound to a specific node.
@@ -100,7 +100,7 @@ export function usePluginHost(params: PluginHostParams) {
                 throw error;
             } finally {
                 signal?.removeEventListener("abort", abort);
-                setNodes((nodes) => nodes.map((node) => node.id === nodeId && node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: appI18n.t("errors.waitStopped") } } : node));
+                if (!controller.signal.aborted) setNodes((nodes) => nodes.map((node) => node.id === nodeId && node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: appI18n.t("errors.waitStopped") } } : node));
                 finishGenerationRequest(nodeId, controller);
             }
         };

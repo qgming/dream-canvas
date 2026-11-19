@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -192,7 +193,7 @@ func (a *App) applyTaskResult(task GenerationTask, ids []string, content string)
 	err := a.db.Transaction(func(tx *gorm.DB) error { return a.applyTaskResultTx(tx, task, ids, content) })
 	if err == nil { return nil }
 	var p *Problem
-	if errors.As(err, &p) { return a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("apply_error", p.Message).Error }
+	if errors.As(err, &p) { a.logEvent(a.ctx, slog.LevelWarn, "task.result_unapplied", slog.String("task_id", task.ID), slog.String("project_id", task.ProjectID), slog.String("reason", p.Code)); return a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("apply_error", p.Message).Error }
 	return err
 }
 
@@ -210,17 +211,25 @@ func (a *App) applyTaskResultTx(tx *gorm.DB, task GenerationTask, ids []string, 
 	var parameters map[string]any; if err := json.Unmarshal(input.Parameters, &parameters); err != nil { return err }
 	var controls []parameterControl; if err := json.Unmarshal(snapshot.Model.Parameters, &controls); err != nil { return err }
 	for _, control := range controls { if id, ok := parameters[control.Key].(string); ok && control.Type == "asset" && id != "" { parameters[control.Key] = "asset:"+id } }
-	if !onlyTaskUpdates(tx, project.ID, input.BatchID, task.ProjectVersion, project.Version) { return problem(409, "version_conflict", "项目在提交后已被编辑，未覆盖；成品保留在资产库和任务记录") }
+	var target map[string]any
+	if json.Unmarshal(task.TargetNode, &target) != nil { return problem(409, "target_missing", "任务目标快照无法读取，成品保留在任务与资产库") }
 	found := false
 	for _, raw := range array(document["nodes"]) {
 		node := object(raw)
 		if node["id"] != task.NodeID { continue }
 		found = true
+		if err := taskTargetWritable(node, target, input); err != nil { return err }
+		var newer int64
+		if err := tx.Model(&GenerationTask{}).Where("project_id = ? AND node_id = ? AND created_at > ? AND (COALESCE(json_extract(input, '$.resultSlotId'), '') IN (?, '') OR ? = '')", task.ProjectID, task.NodeID, task.CreatedAt, input.ResultSlotID, input.ResultSlotID).Count(&newer).Error; err != nil { return err }
+		if newer > 0 { return problem(409, "target_replaced", "目标已有较新的生成请求，本次成品仍保留在任务与资产库") }
 		metadata := object(node["metadata"])
+		original := object(target["metadata"])
 		model := task.ChannelID+"::"+snapshot.Model.Model
-		modelParameters := object(metadata["modelParameters"]); modelParameters[model] = parameters
-		metadata["model"], metadata["modelParameters"], metadata["generationMode"] = model, modelParameters, task.Capability
-		if input.Prompt != "" { metadata["prompt"] = input.Prompt }
+		modelParameters := object(metadata["modelParameters"])
+		if reflect.DeepEqual(modelParameters[model], object(original["modelParameters"])[model]) { modelParameters[model] = parameters }; metadata["modelParameters"] = modelParameters
+		if reflect.DeepEqual(metadata["model"], original["model"]) { metadata["model"] = model }
+		if reflect.DeepEqual(metadata["generationMode"], original["generationMode"]) { metadata["generationMode"] = task.Capability }
+		if input.Prompt != "" && reflect.DeepEqual(metadata["prompt"], original["prompt"]) { metadata["prompt"] = input.Prompt }
 		status, message := "success", ""
 		if task.Status == "failed" || task.Status == "cancelled" || task.Status == "interrupted" { status, message = "error", task.Error }
 		metadata["status"], metadata["errorDetails"] = status, message
@@ -256,7 +265,7 @@ func (a *App) applyTaskResultTx(tx *gorm.DB, task GenerationTask, ids []string, 
 			}
 			if primary {
 				for key, value := range media { if key != "id" { metadata[key] = value } }
-				if (asset.Kind == "image" || asset.Kind == "video") && asset.Width > 0 && asset.Height > 0 && metadata["freeResize"] != true {
+				if (asset.Kind == "image" || asset.Kind == "video") && asset.Width > 0 && asset.Height > 0 && metadata["freeResize"] != true && reflect.DeepEqual(node["width"], target["width"]) && reflect.DeepEqual(node["height"], target["height"]) {
 					width, _ := node["width"].(float64); height, _ := node["height"].(float64)
 					ratio := float64(asset.Width)/float64(asset.Height)
 					if width/height > ratio { width = height*ratio } else { height = width/ratio }
@@ -273,17 +282,44 @@ func (a *App) applyTaskResultTx(tx *gorm.DB, task GenerationTask, ids []string, 
 	data := encode(document)
 	refs, err := validateDocument(data); if err != nil { return err }
 	if err := checkAssets(tx, task.UserID, refs); err != nil { return err }
+	if err := recordProjectRevision(tx, project); err != nil { return err }
 	result := tx.Model(&Project{}).Where("id = ? AND version = ?", project.ID, project.Version).Updates(map[string]any{"document": data, "version": project.Version+1, "updated_at": time.Now()})
 	if result.Error != nil { return result.Error }; if result.RowsAffected != 1 { return problem(409, "version_conflict", "项目已更新，成品未覆盖编辑") }
 	if err := replaceReferences(tx, project.ID, refs); err != nil { return err }
-	return tx.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"applied": true, "applied_version": project.Version+1, "apply_error": ""}).Error
+	project.Document, project.Version = data, project.Version+1
+	if err := recordProjectRevision(tx, project); err != nil { return err }
+	return tx.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(map[string]any{"applied": true, "applied_version": project.Version, "apply_error": ""}).Error
 }
 
-// Only result writes can advance a submitted version without invalidating its sibling tasks.
-func onlyTaskUpdates(tx *gorm.DB, projectID, batchID string, before, after uint64) bool {
-	if before > after { return false }; if before == after { return true }
-	var count int64
-	return tx.Model(&GenerationTask{}).Where("project_id = ? AND applied = ? AND applied_version > ? AND applied_version <= ? AND json_extract(input, '$.batchId') = ?", projectID, true, before, after, batchID).Count(&count).Error == nil && uint64(count) == after-before
+func taskTargetWritable(node, target map[string]any, input generationInput) error {
+	conflict := func() error { return problem(409, "target_changed", "目标结果已被修改或移除，成品保留在任务与资产库") }
+	if node["type"] != target["type"] { return conflict() }
+	current, original := object(node["metadata"]), object(target["metadata"])
+	if input.ResultSlotID != "" {
+		key := "images"; if input.Capability == "text" { key = "texts" }
+		find := func(metadata map[string]any) map[string]any { for _, raw := range array(metadata[key]) { slot := object(raw); if slot["id"] == input.ResultSlotID { return slot } }; return nil }
+		current, original = find(current), find(original)
+		if current == nil || original == nil { return conflict() }
+	}
+	for _, key := range []string{"content", "storageKey"} {
+		if reflect.DeepEqual(current[key], original[key]) { continue }
+		if key == "content" && input.Capability == "text" && current["status"] == "loading" { continue }
+		return conflict()
+	}
+	return nil
+}
+
+func checkTaskTargetVersion(tx *gorm.DB, project Project, input generationInput, target JSON) error {
+	if input.ProjectVersion == project.Version { return nil }
+	var base ProjectRevision
+	if err := tx.First(&base, "project_id = ? AND version = ?", project.ID, input.ProjectVersion).Error; err != nil { return problem(409, "version_conflict", "原始画布版本不可用，请同步后提交生成") }
+	var document map[string]any; if err := json.Unmarshal(base.Document, &document); err != nil { return err }
+	var current map[string]any; if err := json.Unmarshal(target, &current); err != nil { return err }
+	for _, raw := range array(document["nodes"]) {
+		node := object(raw); if node["id"] != input.NodeID { continue }
+		return taskTargetWritable(current, node, input)
+	}
+	return problem(409, "target_missing", "原始版本中没有目标节点，请同步后提交")
 }
 
 func (a *App) taskProjectVersion(c *gin.Context) {
@@ -294,11 +330,7 @@ func (a *App) taskProjectVersion(c *gin.Context) {
 	var project Project
 	var submitted generationInput
 	if json.Unmarshal(task.Input, &submitted) != nil { respondError(c, problem(409, "invalid_task", "任务提交内容无法读取")); return }
-	err := a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&project, "id = ? AND user_id = ?", task.ProjectID, task.UserID).Error; err != nil { return err }
-		if input.Version < task.ProjectVersion || !onlyTaskUpdates(tx, project.ID, submitted.BatchID, input.Version, project.Version) { return problem(409, "version_conflict", "项目包含其他页面或工具的编辑，请保留本地内容并重新读取") }
-		return nil
-	})
+	err := a.db.First(&project, "id = ? AND user_id = ?", task.ProjectID, task.UserID).Error
 	if err != nil { respondError(c, err); return }; c.JSON(200, gin.H{"project": project, "targetNode": task.TargetNode, "resultSlotId": submitted.ResultSlotID})
 }
 

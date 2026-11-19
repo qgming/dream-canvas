@@ -4,7 +4,7 @@ import "encoding/json"
 
 func canvasTools() []toolDefinition {
 	object := func(description string) map[string]any { return map[string]any{"type": "object", "description": description} }
-	return []toolDefinition{{"canvas_apply_ops", "在服务端按项目版本原子编辑节点与连线；无需在线浏览器。读取 project_get 后传完整新增节点（id/type/title/position/width/height/metadata）；更新 patch 合并 metadata，删除节点仅解除资产引用；失败不保存任何操作", "edit", toolSchema(map[string]any{
+	return []toolDefinition{{"canvas_apply_ops", "在服务端按读取版本原子编辑节点与连线并合并无关并发修改；无需在线浏览器。读取 project_get 后传完整新增节点（id/type/title/position/width/height/metadata）；更新 patch 合并 metadata，删除节点仅解除资产引用；失败不保存任何操作", "edit", toolSchema(map[string]any{
 		"projectId": stringField("明确的目标项目 ID"), "version": numberField("读取到的项目版本"),
 		"ops": map[string]any{"type": "array", "minItems": 1, "items": toolSchema(map[string]any{
 			"type": map[string]any{"type": "string", "enum": []string{"add_node", "update_node", "delete_node", "connect_nodes", "delete_connection"}},
@@ -20,7 +20,11 @@ func (a *App) ApplyCanvasOperations(p Principal, input map[string]any) (Project,
 	var request struct { ProjectID string `json:"projectId"`; Version uint64 `json:"version"`; Ops []struct { Type string `json:"type"`; Node map[string]any `json:"node"`; ID string `json:"id"`; Patch map[string]any `json:"patch"`; From string `json:"fromNodeId"`; To string `json:"toNodeId"` } `json:"ops"` }
 	if json.Unmarshal(encode(input), &request) != nil || len(request.Ops) == 0 { return Project{}, problem(400, "invalid_operations", "请提供有效的节点或连线操作") }
 	project, err := a.GetProject(p.User.ID, request.ProjectID); if err != nil { return project, err }
-	if project.Version != request.Version { return project, problem(409, "version_conflict", "项目已更新，请重新读取后编辑节点") }
+	if project.Version != request.Version {
+		var revision ProjectRevision
+		if err := a.db.First(&revision, "project_id = ? AND version = ?", project.ID, request.Version).Error; err != nil { return project, problem(409, "version_conflict", "原始画布版本不可用，请重新读取后编辑节点") }
+		project.Title, project.Document = revision.Title, revision.Document
+	}
 	var document map[string]any; if json.Unmarshal(project.Document, &document) != nil { return project, problem(409, "invalid_document", "项目内容无法读取") }
 	nodes, connections := array(document["nodes"]), array(document["connections"])
 	find := func(rows []any, id string) int { for index, raw := range rows { if object(raw)["id"] == id { return index } }; return -1 }

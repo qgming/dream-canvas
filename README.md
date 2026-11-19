@@ -2,7 +2,7 @@
 
 面向影视、短剧与 AI 视频创作的无限画布，供个人与小团队自托管使用，基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) v0.20.0 二次开发，由 [qgming](https://github.com/qgming) 维护。React、TypeScript、Vite 前端沿用暖灰浅深主题、shadcn/ui + Radix 与 Animate UI 动效，Go、Gin、GORM、SQLite 后端统一管理账号、项目、私有资产、渠道、任务、助手与统计；业务及组件细节参考 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat)。
 
-当前处于后端化实施与验收阶段。**文本与图片模型接入已通过用户在本项目中的实际测试**，此前构建的正常使用及自建接口脚本删除已获用户确认。灵感库合并、提示词去标签与内置内容已完成前后端构建重启；上一版灵感库紧凑卡片及资产库 Tabs、去勾选与动画分页也已完成前端构建和 HTTP 可用性检查，预览停在登录页。最新资产库居中分页、两行卡片与资产去标签尚未重新构建；内部界面、动效与真实生成仍待验收，视频、TTS、Agent、安全、恢复与性能专项继续独立跟踪。完整进度和待办集中在 [CHANGELOG](CHANGELOG.md#unreleased)。
+当前处于后端化实施与验收阶段。**文本与图片模型接入已通过用户在本项目中的实际测试**，此前构建的正常使用及自建接口脚本删除已获用户确认。当前画布自动保存、并发编辑、持久撤销与进度恢复，以及灵感库、资产库最新调整已完成前后端构建启动和 HTTP 可用性检查；本批内部界面、交互与真实生成仍待验收，视频、TTS、Agent、安全、恢复与性能专项继续独立跟踪。完整进度和待办集中在 [CHANGELOG](CHANGELOG.md#unreleased)。
 
 ## 核心功能
 

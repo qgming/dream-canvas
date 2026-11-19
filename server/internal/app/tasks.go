@@ -60,11 +60,11 @@ func (a *App) CreateTask(userID string, input generationInput) (GenerationTask, 
 		}
 		if input.ProjectID != "" {
 			var project Project; if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
-			if !onlyTaskUpdates(tx, project.ID, input.BatchID, input.ProjectVersion, project.Version) { return problem(409, "version_conflict", "项目已更新，请重新读取后提交") }
 			if input.NodeID != "" {
 				var document struct { Nodes []json.RawMessage `json:"nodes"` }; if err := json.Unmarshal(project.Document, &document); err != nil { return err }
 				for _, raw := range document.Nodes { var node struct { ID string `json:"id"` }; if err := json.Unmarshal(raw, &node); err != nil { return err }; if node.ID == input.NodeID { task.TargetNode = raw; break } }
 				if len(task.TargetNode) == 0 { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
+				if err := checkTaskTargetVersion(tx, project, input, task.TargetNode); err != nil { return err }
 			}
 		}
 		for _, reference := range input.References {
@@ -90,7 +90,6 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		if input.ProjectID != "" {
 			var project Project
 			if err := tx.First(&project, "id = ? AND user_id = ?", input.ProjectID, userID).Error; err != nil { return err }
-			if !onlyTaskUpdates(tx, project.ID, input.BatchID, input.ProjectVersion, project.Version) { return problem(409, "version_conflict", "目标项目已更新，请重新读取后提交") }
 			if input.NodeID != "" {
 				var document struct { Nodes []struct { ID string `json:"id"` } `json:"nodes"` }
 				if json.Unmarshal(project.Document, &document) != nil { return problem(409, "invalid_document", "目标项目内容无法读取") }

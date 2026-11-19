@@ -18,6 +18,8 @@ import { modelCatalog } from "@/services/api/channels";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useWorkbenchDraftStore } from "@/stores/use-workbench-draft-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
+import { useCanvasTasks } from "@/hooks/use-canvas-tasks";
+import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
 
 export default function RequireAuth() {
     const { i18n } = useTranslation();
@@ -28,6 +30,7 @@ export default function RequireAuth() {
     const refresh = useAuthStore((state) => state.refresh);
     const queryClient = useQueryClient();
     const [scope, setScope] = useState<string | null>(null);
+    useCanvasTasks(scope === user?.id ? user?.id : undefined);
     const catalog = useQuery({ queryKey: ["model-catalog", user?.id], queryFn: modelCatalog, enabled: Boolean(user && scope === user.id) });
 
     useEffect(() => { void refresh(); }, [refresh]);
@@ -73,13 +76,18 @@ export default function RequireAuth() {
         const connect = () => {
             if (source || useAuthStore.getState().user?.id !== user.id) return;
             source = new EventSource("/api/events");
+            source.onopen = refresh;
             source.addEventListener("changed", (event) => { const { topic } = JSON.parse((event as MessageEvent<string>).data) as { topic?: string }; if (!topic || topic === "all") refresh(); else { if (topic === "prompts") void queryClient.invalidateQueries({ queryKey: ["prompts"] }); if (topic === "skills") void useAgentSkillStore.getState().loadSkills(); window.dispatchEvent(new CustomEvent("server-changed", { detail: topic })); } });
-            source.onerror = () => { if (source?.readyState === EventSource.CLOSED) { source.close(); source = undefined; } };
+            source.onerror = () => {
+                for (const task of Object.values(useGenerationProgressStore.getState().tasks)) if (["queued", "waiting_assets", "submitting", "running", "saving"].includes(task.status)) useGenerationProgressStore.getState().receive({ ...task, status: "disconnected", error: appI18n.t("errors.taskDisconnected") });
+                if (source?.readyState === EventSource.CLOSED) { source.close(); source = undefined; }
+            };
         };
         const focused = () => { connect(); refresh(); };
         connect();
         window.addEventListener("focus", focused);
-        return () => { source?.close(); source = undefined; window.removeEventListener("focus", focused); };
+        window.addEventListener("online", focused);
+        return () => { source?.close(); source = undefined; window.removeEventListener("focus", focused); window.removeEventListener("online", focused); };
     }, [user?.id, scope, queryClient]);
 
     if (!ready) return <div className="flex h-dvh items-center justify-center bg-background"><Spin label={appI18n.t("workspace.readingSession")} /></div>;

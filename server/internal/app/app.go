@@ -56,7 +56,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -189,6 +189,8 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/projects", a.createProject)
 	authed.GET("/projects/:id", a.getProject)
 	authed.PUT("/projects/:id", a.saveProject)
+	authed.GET("/projects/:id/history", a.projectHistory)
+	authed.POST("/projects/:id/revert", a.revertProject)
 	authed.GET("/assets", a.listAssets)
 	authed.POST("/assets", a.uploadAsset)
 	authed.POST("/assets/text", a.createTextAsset)

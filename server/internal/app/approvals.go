@@ -63,6 +63,7 @@ func (a *App) DecideApproval(userID, id string, accept bool) (Approval, error) {
 				if result.Error != nil { return result.Error }
 				if result.RowsAffected == 0 { return problem(409, "version_conflict", "项目已更新，请重新确认要删除的版本") }
 				if err := tx.Delete(&AssetReference{}, "project_id = ?", approval.TargetID).Error; err != nil { return err }
+				if err := tx.Delete(&ProjectRevision{}, "project_id = ?", approval.TargetID).Error; err != nil { return err }
 			case "delete_asset":
 				if err := tx.Model(&Asset{}).Where("id = ? AND user_id = ? AND delete_state = ?", approval.TargetID, approval.UserID, "").Updates(map[string]any{"delete_state": "pending", "error": ""}).Error; err != nil { return err }
 				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: approval.TargetID, Kind: "delete"}).Error; err != nil { return err }

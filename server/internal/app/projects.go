@@ -14,7 +14,10 @@ type projectInput struct {
 	ID string `json:"id"`
 	Title string `json:"title"`
 	Version uint64 `json:"version"`
+	OperationID string `json:"operationId,omitempty"`
 	Document JSON `json:"document"`
+	RevertsVersion uint64 `json:"-"`
+	ExpectedVersion uint64 `json:"-"`
 }
 
 func (a *App) ListProjects(userID string, allowed []string) ([]Project, error) {
@@ -60,6 +63,7 @@ func (a *App) CreateProject(userID string, input projectInput) (Project, error) 
 			if err != nil { return err }
 		}
 		if err := tx.Create(&project).Error; err != nil { return err }
+		if err := recordProjectRevision(tx, project); err != nil { return err }
 		return replaceReferences(tx, project.ID, refs)
 	})
 	if err == nil { a.notify(userID) }
@@ -81,15 +85,25 @@ func (a *App) SaveProject(userID, id string, input projectInput) (Project, error
 	if err != nil { return project, err }
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&project, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
-		if input.Version != project.Version { return problem(409, "version_conflict", "项目已在其他页面或工具中更新，未保存内容已保留") }
+		if input.RevertsVersion != 0 && input.ExpectedVersion != project.Version { return problem(409, "version_conflict", "画布已更新，请同步后重试撤销") }
+		if err := recordProjectRevision(tx, project); err != nil { return err }
+		if input.Version != project.Version {
+			var base ProjectRevision
+			if err := tx.First(&base, "project_id = ? AND version = ?", id, input.Version).Error; err != nil { return problem(409, "version_conflict", "缺少原始画布版本，未保存内容已保留，请核对后重试") }
+			merged, err := mergeProject(Project{Title: base.Title, Document: base.Document}, Project{Title: input.Title, Document: input.Document}, project)
+			if err != nil { return err }
+			input.Title, input.Document = merged.Title, merged.Document
+		}
+		refs, err = validateDocument(input.Document); if err != nil { return err }
 		if err := checkAssets(tx, userID, refs); err != nil { return err }
-		result := tx.Model(&Project{}).Where("id = ? AND user_id = ? AND version = ?", id, userID, input.Version).Updates(map[string]any{
-			"title": strings.TrimSpace(input.Title), "document": input.Document, "version": input.Version + 1, "updated_at": time.Now(),
+		result := tx.Model(&Project{}).Where("id = ? AND user_id = ? AND version = ?", id, userID, project.Version).Updates(map[string]any{
+			"title": strings.TrimSpace(input.Title), "document": input.Document, "version": project.Version + 1, "updated_at": time.Now(),
 		})
 		if result.Error != nil { return result.Error }
 		if result.RowsAffected != 1 { return problem(409, "version_conflict", "项目已更新，未保存内容已保留") }
 		if err := replaceReferences(tx, id, refs); err != nil { return err }
-		return tx.First(&project, "id = ?", id).Error
+		if err := tx.First(&project, "id = ?", id).Error; err != nil { return err }
+		return recordProjectRevision(tx, project, input)
 	})
 	if err == nil { a.notify(userID) }
 	return project, err

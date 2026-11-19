@@ -7,6 +7,7 @@ import { captureSession } from "@/services/api/client";
 
 import i18n from "@/i18n";
 import { useAgentStore } from "@/stores/use-agent-store";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasConnection, CanvasNodeData, ContextMenuState, ViewportTransform } from "@/types/canvas";
@@ -64,7 +65,7 @@ export function useAgentBridge(params: AgentBridgeParams) {
         return false;
     };
     const publish = useRef<() => void>(() => {});
-    const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
+    const canUndo = useCanvasStore((state) => Boolean(state.histories[projectId]?.past.length));
     const projectTitle = title || i18n.t("canvas.project.untitled");
 
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(() => ({ projectId, title: projectTitle, nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }), [connections, projectTitle, nodes, projectId, selectedNodeIds, viewport]);
@@ -131,7 +132,6 @@ export function useAgentBridge(params: AgentBridgeParams) {
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
             viewportRef.current = next.viewport;
-            setAgentUndoSnapshot(before);
             setNodes(next.nodes);
             setConnections(next.connections);
             setSelectedNodeIds(new Set(next.selectedNodeIds));
@@ -152,25 +152,14 @@ export function useAgentBridge(params: AgentBridgeParams) {
         [projectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
-        if (!agentUndoSnapshot) return null;
-        nodesRef.current = agentUndoSnapshot.nodes;
-        connectionsRef.current = agentUndoSnapshot.connections;
-        selectedNodeIdsRef.current = new Set(agentUndoSnapshot.selectedNodeIds);
-        viewportRef.current = agentUndoSnapshot.viewport;
-        setNodes(agentUndoSnapshot.nodes);
-        setConnections(agentUndoSnapshot.connections);
-        setSelectedNodeIds(new Set(agentUndoSnapshot.selectedNodeIds));
-        setSelectedConnectionId(null);
-        setViewport(agentUndoSnapshot.viewport);
-        setContextMenu(null);
-        setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: projectTitle };
-    }, [agentUndoSnapshot, projectTitle, projectId]);
+        void useCanvasStore.getState().undo(projectId).catch((error: unknown) => notify.error(error instanceof Error ? error.message : i18n.t("workspace.operationFailed")));
+        return null;
+    }, [projectId, notify]);
 
     useEffect(() => {
-        setAgentCanvasContext({ clientId, snapshot: agentSnapshot, applyOps: applyAgentOps, undoOps: undoAgentOps, canUndo: Boolean(agentUndoSnapshot) });
+        setAgentCanvasContext({ clientId, snapshot: agentSnapshot, applyOps: applyAgentOps, undoOps: undoAgentOps, canUndo });
         return () => setAgentCanvasContext(null);
-    }, [clientId, agentSnapshot, applyAgentOps, agentUndoSnapshot, setAgentCanvasContext, undoAgentOps]);
+    }, [clientId, agentSnapshot, applyAgentOps, canUndo, setAgentCanvasContext, undoAgentOps]);
 
     return { applyAgentOps };
 }

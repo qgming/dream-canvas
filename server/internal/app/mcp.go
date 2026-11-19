@@ -27,7 +27,7 @@ func stringField(description string) map[string]any { return map[string]any{"typ
 func numberField(description string) map[string]any { return map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": description} }
 
 func businessTools() []toolDefinition {
-	projectFields := map[string]any{"projectId": stringField("明确的目标项目 ID"), "title": stringField("项目名称"), "version": numberField("读取到的项目版本，保存时必须匹配"), "document": map[string]any{"type": "object", "description": "完整画布文档，包含 nodes、connections 及画布设置"}}
+	projectFields := map[string]any{"projectId": stringField("明确的目标项目 ID"), "title": stringField("项目名称"), "version": numberField("本次修改基于的读取版本"), "document": map[string]any{"type": "object", "description": "完整画布文档，包含 nodes、connections 及画布设置"}}
 	return append([]toolDefinition{
 		{"clients_list", "列出当前用户授权项目的在线画布客户端，不猜测活动页面", "read", toolSchema(map[string]any{})},
 		{"client_get", "读取明确在线客户端的选区、节点编号、视口与状态版本", "read", toolSchema(map[string]any{"clientId": stringField("明确客户端 ID")}, "clientId")},
@@ -37,8 +37,10 @@ func businessTools() []toolDefinition {
 		{"client_command_get", "查询页面操作的 pending、applied、rejected 或 interrupted 结果", "read", toolSchema(map[string]any{"commandId": stringField("操作 ID")}, "commandId")},
 		{"projects_list", "读取有权限的项目及版本", "read", toolSchema(map[string]any{})},
 		{"project_get", "读取指定项目，不能猜测浏览器活动项目", "read", toolSchema(map[string]any{"projectId": stringField("项目 ID")}, "projectId")},
+		{"project_history", "读取项目统一撤销和重做历史；人工、助手、MCP 与生成结果使用相同历史", "read", toolSchema(map[string]any{"projectId": stringField("项目 ID")}, "projectId")},
+		{"project_revert", "按当前版本撤销或重做历史栈顶部的一次修改，作为新版本自动保存；不删除资产或取消已提交生成", "edit", toolSchema(map[string]any{"projectId": stringField("项目 ID"), "version": numberField("当前项目版本"), "targetVersion": numberField("project_history 的 past 或 future 栈顶版本")}, "projectId", "version", "targetVersion")},
 		{"project_create", "创建项目；仅未限制项目的令牌可用", "edit", toolSchema(map[string]any{"title": stringField("项目名称"), "document": map[string]any{"type": "object"}}, "title", "document")},
-		{"project_save", "按版本保存节点、连线和设置，冲突时返回错误，不覆盖服务端更新", "edit", toolSchema(projectFields, "projectId", "title", "version", "document")},
+		{"project_save", "提交相对读取版本的节点、连线和设置修改；服务端合并无关并发修改，同字段按提交顺序保存，目标已删除或结构冲突时保留服务端内容并报错", "edit", toolSchema(projectFields, "projectId", "title", "version", "document")},
 		{"assets_list", "读取私人资产库元数据；工作台文件须手动保存才进入资产库，项目范围令牌仅返回范围内项目引用的素材", "read", toolSchema(map[string]any{})},
 		{"asset_get", "读取私人资产元数据及保存、同步、删除状态", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
@@ -132,13 +134,23 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	}
 	if value, handled, err := a.callManagement(ctx, p, name, input); handled { return value, err }
 	if p.FixedProject && name == "project_create" && p.TargetProjectID != "" { return nil, problem(409, "target_project_fixed", "本轮已固定目标项目，创建其他项目请开启下一轮") }
-	if p.FixedProject && includes([]string{"project_get", "project_save", "canvas_apply_ops"}, name) && (projectID == "" || projectID != p.TargetProjectID) { return nil, problem(409, "target_project_required", "请操作本轮明确的目标项目；未选择项目时可先创建一个项目") }
+	if p.FixedProject && includes([]string{"project_get", "project_save", "project_history", "project_revert", "canvas_apply_ops"}, name) && (projectID == "" || projectID != p.TargetProjectID) { return nil, problem(409, "target_project_required", "请操作本轮明确的目标项目；未选择项目时可先创建一个项目") }
 	if p.FixedProject && name == "generation_create" && projectID != p.TargetProjectID { return nil, problem(409, "target_project_fixed", "生成任务需要本轮明确的目标项目；无目标项目时可提交独立生成") }
 	switch name {
 	case "canvas_apply_ops": return a.ApplyCanvasOperations(p, input)
 	case "clients_list", "client_get", "client_select", "client_viewport", "client_navigate", "client_command_get": return a.clientBusiness(p, name, input)
 	case "projects_list": return a.ListProjects(p.User.ID, p.Projects)
 	case "project_get": return a.GetProject(p.User.ID, projectID)
+	case "project_history":
+		project, err := a.GetProject(p.User.ID, projectID); if err != nil { return nil, err }; return a.ProjectHistory(project)
+	case "project_revert":
+		target, ok := input["targetVersion"].(float64); if !ok || math.IsNaN(target) || math.IsInf(target, 0) || target < 1 || target > 9007199254740991 || math.Trunc(target) != target { return nil, problem(400, "invalid_version", "请提供历史栈顶部的有效版本") }
+		if _, err := a.GetProject(p.User.ID, projectID); err != nil { return nil, err }
+		var revision ProjectRevision; if err := a.db.First(&revision, "project_id = ? AND version = ?", projectID, uint64(target)-1).Error; err != nil { return nil, err }
+		var operation ProjectRevision; if err := a.db.First(&operation, "project_id = ? AND version = ?", projectID, uint64(target)).Error; err != nil { return nil, err }
+		if operation.OperationID != "" { revision = ProjectRevision{}; if err := a.db.Where("project_id = ? AND version < ? AND (operation_id <> ? OR reverts_version <> 0)", projectID, uint64(target), operation.OperationID).Order("version DESC").First(&revision).Error; err != nil { return nil, err } }
+		refs, err := validateDocument(revision.Document); if err != nil { return nil, err }; for _, id := range refs { if err := a.checkTokenAsset(p, id); err != nil { return nil, err } }
+		return a.RevertProject(p.User.ID, projectID, version, uint64(target))
 	case "project_create":
 		if len(p.Projects) > 0 { return nil, problem(403, "project_scope", "限定项目的令牌不能创建其他项目") }
 		document, err := json.Marshal(input["document"])

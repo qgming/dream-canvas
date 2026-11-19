@@ -23,6 +23,7 @@
         "copy-to-clipboard": "^4.0.2",
         "dayjs": "^1.11.20",
         "dequal": "^2.0.3",
+        "fast-json-patch": "^3.1.1",
         "fflate": "^0.8.3",
         "file-saver": "^2.0.5",
         "i18next": "^26.3.6",

@@ -272,6 +272,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         resizeRef.current.isResizing = false;
         window.removeEventListener("mousemove", handleResizeMove);
         window.removeEventListener("mouseup", handleResizeUp);
+        window.removeEventListener("blur", handleResizeUp);
         onResizeEnd(data.id);
     }, [data.id, handleResizeMove, onResizeEnd]);
 
@@ -293,12 +294,15 @@ export const CanvasNode = React.memo(function CanvasNode({
         };
         window.addEventListener("mousemove", handleResizeMove);
         window.addEventListener("mouseup", handleResizeUp);
+        window.addEventListener("blur", handleResizeUp);
     };
 
     useEffect(() => {
         return () => {
             window.removeEventListener("mousemove", handleResizeMove);
             window.removeEventListener("mouseup", handleResizeUp);
+            window.removeEventListener("blur", handleResizeUp);
+            if (resizeRef.current.isResizing) handleResizeUp();
         };
     }, [handleResizeMove, handleResizeUp]);
 
@@ -465,7 +469,7 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot && props.node.type === CanvasNodeType.Image) return <ImageNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Text && props.node.metadata?.texts?.length && (props.node.metadata.status !== "error" || props.node.metadata.texts.some((text) => text.content))) return <TextContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
+    if (props.node.type !== CanvasNodeType.Text && props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
@@ -506,8 +510,11 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
 
 function CanvasGenerationProgress({ nodeId, slotId }: { nodeId: string; slotId?: string }) {
     const { id } = useParams();
-    const task = useGenerationProgressStore((state) => Object.values(state.tasks).find((task) => task.projectId === id && task.nodeId === nodeId && (!slotId || !task.input.resultSlotId || task.input.resultSlotId === slotId)));
-    return <GenerationProgress task={task} />;
+    const { t } = useTranslation();
+    const loaded = useGenerationProgressStore((state) => state.loaded);
+    const task = useGenerationProgressStore((state) => Object.values(state.tasks).filter((task) => task.projectId === id && task.nodeId === nodeId && (!slotId || !task.input.resultSlotId || task.input.resultSlotId === slotId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]);
+    const displayed = task?.status === "succeeded" && !task.applied ? { ...task, status: "confirmation_required", error: task.applyError || t("workspace.canvasResultUnapplied") } : task;
+    return <GenerationProgress task={displayed || (loaded ? { status: "interrupted", error: t("canvas.generation.interrupted") } : undefined)} />;
 }
 
 function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
@@ -553,6 +560,9 @@ function MissingPluginContent({ theme, type }: Pick<NodeContentRendererProps, "t
 
 function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, batchExpanded, onContentChange, onStopEditing, onToggleBatch, onSetBatchPrimary }: NodeContentRendererProps) {
     const { t } = useTranslation();
+    const { id } = useParams();
+    const tasks = useGenerationProgressStore((state) => state.tasks);
+    const streamed = Object.values(tasks).filter((task) => task.projectId === id && task.nodeId === node.id && task.capability === "text").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
     const texts = node.metadata?.texts || [];
@@ -560,7 +570,8 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     const isBatchRoot = batchCount > 1;
     const primaryTextId = node.metadata?.primaryTextId || texts[0]?.id;
     const primaryText = texts.find((text) => text.id === primaryTextId);
-    const content = primaryText?.content || node.metadata?.content || "";
+    const liveText = streamed.find((task) => !task.input.resultSlotId || task.input.resultSlotId === primaryTextId)?.text;
+    const content = (primaryText?.status || node.metadata?.status) === "loading" ? liveText || primaryText?.content || node.metadata?.content || "" : primaryText?.content ?? node.metadata?.content ?? "";
     const paddingClass = isBatchRoot ? "px-4 pb-4 pt-14" : "p-4";
 
     return (
@@ -591,9 +602,12 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                 ) : content ? (
                     <div className={`thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent font-mono ${paddingClass}`} style={textStyle} onWheel={(event) => event.stopPropagation()}>
                         {content}
+                        {(primaryText?.status || node.metadata?.status) === "loading" ? <div className="mt-3"><CanvasGenerationProgress nodeId={node.id} slotId={primaryTextId} /></div> : null}
                     </div>
+                ) : node.metadata?.status === "loading" && !primaryText ? (
+                    <LoadingContent node={node} theme={theme} />
                 ) : primaryText ? (
-                    <TextSlotStatus text={primaryText} />
+                    <TextSlotStatus nodeId={node.id} text={primaryText} />
                 ) : (
                     <div className="p-4 font-mono" style={{ color: theme.node.placeholder }}>
                         {t("canvas.node.editText")}
@@ -626,6 +640,9 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
     const { t } = useTranslation();
     const tokens = useMotionTokens();
     const reduceMotion = useShouldReduceMotion();
+    const { id } = useParams();
+    const liveText = useGenerationProgressStore((state) => Object.values(state.tasks).filter((task) => task.projectId === id && task.nodeId === node.id && task.capability === "text" && task.input.resultSlotId === text.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.text);
+    const content = text.status === "loading" ? liveText || text.content : text.content;
     const count = node.metadata?.texts?.length || 0;
     const columns = Math.min(count, 4);
     const rows = Math.ceil(count / columns);
@@ -644,10 +661,11 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            {text.content ? (
+            {content ? (
                 <>
                     <div className="thin-scrollbar h-full overflow-y-auto whitespace-pre-wrap break-words px-4 pb-4 pt-14 font-mono text-sm leading-6" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
-                        {text.content}
+                        {content}
+                        {text.status === "loading" ? <div className="mt-3"><CanvasGenerationProgress nodeId={node.id} slotId={text.id} /></div> : null}
                     </div>
                     <button type="button" className="pointer-events-none absolute right-2.5 top-2.5 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium opacity-0 transition hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10" style={{ color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onSetPrimary())}>
                         <Star className="size-3.5" style={{ color: theme.canvas.selectionStroke }} />
@@ -655,21 +673,20 @@ function ExpandedTextCard({ node, text, index, onSetPrimary }: { node: CanvasNod
                     </button>
                 </>
             ) : (
-                <TextSlotStatus text={text} />
+                <TextSlotStatus nodeId={node.id} text={text} />
             )}
         </motion.div>
     );
 }
 
-function TextSlotStatus({ text }: { text: CanvasNodeText }) {
+function TextSlotStatus({ nodeId, text }: { nodeId: string; text: CanvasNodeText }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const failed = text.status === "error";
     const loading = text.status === "loading";
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: theme.node.fill, color: failed ? theme.node.text : theme.node.activeStroke }}>
-            {failed ? <span className="text-xs leading-5">{text.errorDetails || t("canvas.node.failed")}</span> : loading ? <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} /> : <span className="text-xs">{t("apiErrors.noContent")}</span>}
-            {loading ? <span className="text-xs tracking-[0.2em]">{t("canvas.node.generating")}</span> : null}
+            {failed ? <span className="text-xs leading-5">{text.errorDetails || t("canvas.node.failed")}</span> : loading ? <CanvasGenerationProgress nodeId={nodeId} slotId={text.id} /> : <span className="text-xs">{t("apiErrors.noContent")}</span>}
         </div>
     );
 }
