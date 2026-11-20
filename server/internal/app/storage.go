@@ -196,7 +196,7 @@ func (a *App) prepareTaskAssets(task GenerationTask, snapshot executionSnapshot,
 func (a *App) dispatchFiles() {
 	policy, err := a.executionPolicy(); if err != nil { return }
 	var rows []FileOperation
-	if a.db.Where("(next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR state <> ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?))", time.Now(), "repair_suffix", "done", "delete", false).Order("created_at").Find(&rows).Error != nil { return }
+	if a.db.Where("kind IN ? AND (next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?))", []string{"sync", "delete"}, time.Now(), "delete", false).Order("created_at").Find(&rows).Error != nil { return }
 	active := 0; a.workMu.Lock(); for key := range a.active { if strings.HasPrefix(key, "file:") { active++ } }; a.workMu.Unlock()
 	for _, row := range rows { if active >= policy.TransferSlots { break }; if a.launch("file:"+row.AssetID, func(ctx context.Context) { a.runFileOperation(ctx, row) }) { active++ } }
 }
@@ -206,7 +206,6 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 	a.logEvent(ctx, slog.LevelDebug, "asset.operation_started", slog.Int("attempt", operation.Attempts+1))
 	policy, err := a.executionPolicy(); if err != nil { return }
 	ctx, cancel := context.WithTimeout(ctx, seconds(policy.TransferSeconds)); defer cancel()
-	if operation.Kind == "repair_suffix" { a.runAssetFilenameRepair(ctx, operation, policy); return }
 	var asset Asset
 	if err := a.db.First(&asset, "id = ?", operation.AssetID).Error; err != nil { if errors.Is(err, gorm.ErrRecordNotFound) { if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() } }; return }
 	if operation.Kind == "delete" { err = a.cleanAsset(asset.ID)

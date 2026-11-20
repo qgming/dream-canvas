@@ -14,6 +14,7 @@ import { Choice } from "@/components/ui/choice";
 import { DataTable } from "@/components/ui/data-table";
 import { Badge as Tag } from "@/components/ui/display";
 import { useState } from "react";
+import { Plus } from "lucide-react";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { createToken, listTokens, revokeToken, type AccessToken } from "@/services/api/tokens";
@@ -46,14 +47,14 @@ export default function AccessTokensPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader title={appI18n.t("workspace.accessTokens")} description={appI18n.t("workspace.tokenDescription")} actions={<Button variant="default" onClick={() => setCreating(true)}>{appI18n.t("workspace.createToken")}</Button>} />
+            <PageHeader title={appI18n.t("workspace.accessTokens")} description={appI18n.t("workspace.tokenDescription")} actions={<Button variant="default" icon={<Plus />} onClick={() => setCreating(true)}>{appI18n.t("workspace.createToken")}</Button>} />
             {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{appI18n.t("workspace.retry")}</Button>} /> : null}
             <DataTable<AccessToken> rowId="id" rows={query.data} loading={query.isLoading} failed={query.isError} columns={[
                 { title: appI18n.t("workspace.name"), dataIndex: "name", render: (name) => <span className="font-medium break-words">{name}</span> },
                 { title: appI18n.t("workspace.permissions"), render: (_, record) => <div className="flex flex-wrap gap-1">{record.scopes.map((scope) => <Tag key={scope}>{scopes.find((item) => item.value === scope)?.label || scope}</Tag>)}</div> },
                 { title: appI18n.t("workspace.projectScope"), render: (_, record) => <span className="break-words text-muted-foreground">{record.projects.length ? record.projects.map((id) => projects.find((project) => project.id === id)?.title || id).join("、") : appI18n.t("workspace.allProjects")}</span> },
                 { title: appI18n.t("workspace.status"), render: (_, record) => <Tag color={record.revoked ? undefined : "success"}>{record.revoked ? appI18n.t("workspace.revoked") : appI18n.t("workspace.valid")}</Tag> },
-                { title: appI18n.t("workspace.actions"), align: "right", render: (_, record) => <Button variant="ghost" size="sm" data-destructive disabled={record.revoked} onClick={() => confirmRevoke(record)}>{appI18n.t("workspace.revoke")}</Button> },
+                { title: appI18n.t("workspace.actions"), align: "right", render: (_, record) => <Button variant="outline" size="sm" data-destructive disabled={record.revoked} onClick={() => confirmRevoke(record)}>{appI18n.t("workspace.revoke")}</Button> },
             ]} />
             <Dialog title={appI18n.t("workspace.createAccessToken")} open={creating} busy={busy} onClose={() => setCreating(false)} bodyClassName="@container/settings" footer={<Button variant="default" type="submit" form="settings-create-token" loading={busy}>{appI18n.t("workspace.createToken")}</Button>}>
                 <EditorForm id="settings-create-token" className="space-y-0" initialValues={{ scopes: ["read"], projects: [] }} onSubmit={async (input) => {
@@ -68,7 +69,7 @@ export default function AccessTokensPage() {
                     <Field layout="horizontal" name="projects" label={appI18n.t("workspace.projectScope")} description={appI18n.t("workspace.projectScopeDescription")}><Choice multiple options={projects.map((project) => ({ value: project.id, label: project.title }))} placeholder={appI18n.t("workspace.allProjects")} /></Field>
                 </EditorForm>
             </Dialog>
-            <Dialog title={appI18n.t("workspace.saveAccessToken")} open={Boolean(secret)} onClose={() => setSecret("")} footer={<div className="flex flex-wrap items-center gap-2"><Button onClick={() => setSecret("")}>{appI18n.t("workspace.closeSaved")}</Button><Button variant="default" onClick={() => copy(config, appI18n.t("workspace.connectionCopied"))}>{appI18n.t("workspace.copyConnection")}</Button></div>}>
+            <Dialog title={appI18n.t("workspace.saveAccessToken")} open={Boolean(secret)} onClose={() => setSecret("")} cancelText={appI18n.t("workspace.closeSaved")} footer={<Button variant="default" onClick={() => copy(config, appI18n.t("workspace.connectionCopied"))}>{appI18n.t("workspace.copyConnection")}</Button>}>
                 <Alert type="warning" title={appI18n.t("workspace.tokenOnce")} description={appI18n.t("workspace.tokenOnceDescription")} className="mb-4" />
                 <label htmlFor="settings-token-secret" className="mb-2 block text-sm font-medium">{appI18n.t("settings.accessTokens")}</label>
                 <Textarea id="settings-token-secret" readOnly value={secret} autoSize spellCheck={false} className="mb-5 font-mono text-xs" />

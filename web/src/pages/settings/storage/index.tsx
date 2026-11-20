@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
+import { Plus, Save } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Notice, Badge } from "@/components/ui/display";
@@ -33,7 +34,7 @@ export default function StoragePage() {
     const [busy, setBusy] = useState(false);
     const open = (record?: StorageConfig) => { form.reset(record ? { ...record, accessKeyId: "", accessKeySecret: "" } : { ...templates[0], default: !query.data?.some((row) => row.storage.default), bucket: "", accessKeyId: "", accessKeySecret: "" }); setEditor({ record }); };
     return <section className="space-y-6">
-        <PageHeader title={t("storage.title")} description={t("storage.description")} actions={<Button onClick={() => open()}>{t("storage.add")}</Button>} />
+        <PageHeader title={t("storage.title")} description={t("storage.description")} actions={<Button variant="default" icon={<Plus />} onClick={() => open()}>{t("storage.add")}</Button>} />
         <Notice type="info" title={t("storage.singleActive")} description={t("storage.privateHint")} />
         {query.error ? <Notice type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         <DataTable<StorageConfig> rowId="id" rows={query.data?.map((row) => row.storage)} loading={query.isLoading} failed={query.isError} columns={[
@@ -41,12 +42,12 @@ export default function StoragePage() {
             { title: t("storage.template"), render: (_, row) => t(`storage.providers.${row.provider}`) },
             { title: "Bucket", dataIndex: "bucket" },
             { title: t("workspace.status"), render: (_, row) => <Badge>{t(row.default ? "storage.active" : "storage.inactive")}</Badge> },
-            { title: t("workspace.actions"), align: "right", render: (_, row) => <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => open(row)}>{t("workspace.edit")}</Button><Button variant="ghost" onClick={() => {
+            { title: t("workspace.actions"), align: "right", render: (_, row) => <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => open(row)}>{t("workspace.edit")}</Button><Button variant="outline" size="sm" data-destructive onClick={() => {
                 const assertSession = captureSession();
                 confirm({ title: t("storage.remove"), content: t("storage.removeHint"), destructive: true, onConfirm: async () => { assertSession(); await deleteStorage(row.id); assertSession(); await query.refetch(); } });
             }}>{t("storage.remove")}</Button></div> },
         ]} />
-        <Dialog title={t(editor?.record ? "storage.edit" : "storage.add")} open={Boolean(editor)} busy={busy} onClose={() => setEditor(null)} bodyClassName="@container/settings" footer={<Button type="submit" form="storage-editor" loading={busy}>{t("workspace.save")}</Button>}>
+        <Dialog title={t(editor?.record ? "storage.edit" : "storage.add")} open={Boolean(editor)} busy={busy} onClose={() => setEditor(null)} bodyClassName="@container/settings" footer={<Button variant="default" icon={<Save />} type="submit" form="storage-editor" loading={busy}>{t("workspace.save")}</Button>}>
             <EditorForm id="storage-editor" form={form} className="space-y-0" onSubmit={async (values) => {
                 const assertSession = captureSession(); setBusy(true);
                 try { await saveStorage(editor?.record?.id, { ...values, version: editor?.record?.version || 0, accessKeyId: values.accessKeyId?.trim() || undefined, accessKeySecret: values.accessKeySecret?.trim() || undefined }); assertSession(); form.reset(values); setEditor(null); await query.refetch(); notify.success(t("storage.saved")); }

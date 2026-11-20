@@ -66,7 +66,7 @@ function ParameterRow({ control, base, override, onChange }: { control: Paramete
             <div className="min-w-0">
                 {media ? <p className="text-xs leading-5 text-muted-foreground">{t("modelScripts.mediaScriptOwned")}</p> : <ModelInputFields defaultsOnly controls={[{ ...control, hidden: false, advanced: false, when: undefined }]} value={{}} onChange={(values) => updateDefault(values[control.key])} />}
             </div>
-            <div className="flex justify-end gap-1">{override ? <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>{t("modelScripts.resetField")}</Button> : null}<Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{t("modelScripts.fieldSettings")}</Button></div>
+            <div className="flex justify-end gap-2">{override ? <Button size="sm" variant="outline" onClick={() => onChange(undefined)}>{t("modelScripts.resetField")}</Button> : null}<Button size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{t("modelScripts.fieldSettings")}</Button></div>
         </div>
         <Disclosure title={t("modelScripts.advancedSettings")} open={open} onOpenChange={setOpen}>
             <AdvancedOverrideEditor control={base} current={override} effective={control} onChange={onChange} />
@@ -84,6 +84,6 @@ export function ModelInputSettings({ controls, value = {}, onChange }: { control
     };
     return <div className="space-y-2">
         <p className="text-xs leading-5 text-muted-foreground">{t("modelScripts.overridesHint")}</p>
-        {effective.length ? <div className="divide-y divide-border rounded-lg border border-border">{effective.map((control) => <ParameterRow key={control.key} control={control} base={controls.find((item) => item.key === control.key) || control} override={value[control.key]} onChange={(next) => update(control.key, next)} />)}</div> : <p className="text-sm text-muted-foreground">{t("modelScripts.noInputs")}</p>}
+        {effective.length ? <div className="divide-y divide-border rounded-lg border border-border bg-card">{effective.map((control) => <ParameterRow key={control.key} control={control} base={controls.find((item) => item.key === control.key) || control} override={value[control.key]} onChange={(next) => update(control.key, next)} />)}</div> : <p className="text-sm text-muted-foreground">{t("modelScripts.noInputs")}</p>}
     </div>;
 }

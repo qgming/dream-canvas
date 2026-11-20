@@ -72,7 +72,7 @@ func (a *App) CreateTask(userID string, input generationInput) (GenerationTask, 
 		for _, reference := range input.References {
 			var asset Asset
 			if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(400, "invalid_asset", "素材已删除或尚未可靠保存") }
-			if err := claimTaskAsset(tx, TaskAsset{TaskID: task.ID, AssetID: asset.ID}); err != nil { return err }
+			if err := tx.FirstOrCreate(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err }
 		}
 		return tx.Create(&task).Error
 	})
@@ -97,7 +97,7 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 				var document struct { Nodes []struct { ID string `json:"id"`; Type string `json:"type"` } `json:"nodes"` }
 				if json.Unmarshal(project.Document, &document) != nil { return problem(409, "invalid_document", "目标项目内容无法读取") }
 				found := false
-				for _, node := range document.Nodes { if node.ID == input.NodeID { if err := requireCanvasNodeType(tx, node.Type); err != nil { return err }; targetType = node.Type; if err := canvasNodeDefaultPrompt(node.Type, input); err != nil { return err }; found = true; break } }
+				for _, node := range document.Nodes { if node.ID == input.NodeID { if err := requireCanvasNodeType(tx, node.Type); err != nil { return err }; targetType = node.Type; found = true; break } }
 				if !found { return problem(409, "node_not_saved", "目标节点尚未保存，请先完成项目保存") }
 				if input.ResultSlotID != "" {
 					var value map[string]any; _ = json.Unmarshal(project.Document, &value)
@@ -109,7 +109,7 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 			}
 		}
 		if input.NodeID != "" && input.ProjectID == "" { return problem(400, "project_required", "节点任务需要明确目标项目") }
-		if strings.TrimSpace(input.Prompt) == "" && len(input.Messages) == 0 { return problem(400, "prompt_required", "请输入提示词或消息") }
+		if strings.TrimSpace(input.Prompt) == "" && len(input.Messages) == 0 && targetType != canvasUpscaleNodeType { return problem(400, "prompt_required", "请输入提示词或消息") }
 		var parameters map[string]any
 		if json.Unmarshal(input.Parameters, &parameters) != nil || parameters == nil { return problem(400, "invalid_parameters", "参数需要对象") }
 		if len(input.Messages) > 0 {
@@ -133,10 +133,15 @@ func (a *App) generationSnapshot(userID string, input *generationInput) (JSON, e
 		}
 		if err := validateCanvasUpscaleSource(targetType, *input); err != nil { return err }
 		if err := snapshotAssetInputs(tx, userID, channel.ID, input.References); err != nil { return err }
+		if targetType == canvasUpscaleNodeType && input.Capability == "image" {
+			var source Asset
+			if err := tx.Select("width", "height").First(&source, "id = ? AND user_id = ?", input.References[0].AssetID, userID).Error; err != nil { return err }
+			if err := canvasUpscaleImageSize(controls, parameters, source.Width, source.Height); err != nil { return err }
+		}
 		encoded, err := json.Marshal(parameters)
 		if err != nil { return err }
 		input.Parameters = encoded
-		return nil
+		return canvasNodeDefaultPrompt(targetType, input)
 	})
 	if err != nil { return nil, err }
 	return json.Marshal(map[string]any{"channelId": channel.ID, "channelVersion": channel.Version, "baseUrl": channel.BaseURL, "credential": channel.Secret, "model": model, "script": script})

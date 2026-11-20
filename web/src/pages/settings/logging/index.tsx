@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
+import { RefreshCw, Save } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/controls";
@@ -33,8 +34,8 @@ export default function LoggingPage() {
     return <section className="space-y-6">
         <PageHeader stickyActions title={t("logging.title")} description={t("logging.description")} actions={<>
             <span role="status" className="text-xs text-muted-foreground">{busy ? t("settings.savingChanges") : dirty ? t("workspace.unsaved") : query.data ? t("workspace.allSaved") : t("settings.loading")}</span>
-            <Button variant="ghost" disabled={busy || query.isFetching} onClick={reload}>{t("workspace.reload")}</Button>
-            <Button type="submit" form="logging-settings" loading={busy} disabled={!query.data || !dirty}>{t("workspace.save")}</Button>
+            <Button variant="outline" icon={<RefreshCw />} disabled={busy || query.isFetching} onClick={reload}>{t("workspace.reload")}</Button>
+            <Button variant="default" icon={<Save />} type="submit" form="logging-settings" loading={busy} disabled={!query.data || !dirty}>{t("workspace.save")}</Button>
         </>} />
         {query.error ? <Notice type="error" title={query.error.message} action={<Button disabled={busy || query.isFetching} onClick={reload}>{t("workspace.retry")}</Button>} /> : null}
         {query.data ? <EditorForm id="logging-settings" form={form} disabled={busy} className="space-y-8" onSubmit={async (values: LogSettings) => {

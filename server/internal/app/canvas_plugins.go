@@ -70,8 +70,7 @@ func (a *App) installBuiltinCanvasPlugins() error {
 		{"builtin-text", "文本", "text", 340, 240}, {"builtin-image", "图片", "image", 340, 240},
 		{"builtin-video", "视频", "video", 420, 236}, {"builtin-audio", "音频", "audio", 340, 120},
 		{"builtin-config", "生成配置", "config", 340, 240}, {"builtin-group", "组", "group", 760, 480},
-		{"markdown", "Markdown", "markdown:doc", 360, 300}, {"svg", "SVG", "svg:vector", 320, 320},
-		{"html", "HTML", "html:render", 420, 320}, {"panorama", "3D 全景", "panorama:viewer", 480, 300},
+		{"panorama", "3D 全景", "panorama:viewer", 480, 300},
 		{"sticky-note", "便利贴", "sticky-note:note", 240, 200},
 		{"upscale", "超分", canvasUpscaleNodeType, 420, 280},
 	}

@@ -262,7 +262,11 @@ func (a *App) applyTaskResultTx(tx *gorm.DB, task GenerationTask, ids []string, 
 				if primary { metadata["primaryImageId"] = input.ResultSlotID }
 			} else if task.Capability == "image" {
 				metadata["images"], metadata["primaryImageId"] = images, ids[0]
+			} else {
+				delete(metadata, "images"); delete(metadata, "primaryImageId")
+				if len(images) > 1 { metadata["mediaResults"], metadata["primaryMediaId"] = images, ids[0] } else { delete(metadata, "mediaResults"); delete(metadata, "primaryMediaId") }
 			}
+			if task.Capability == "image" { delete(metadata, "mediaResults"); delete(metadata, "primaryMediaId") }
 			if primary {
 				for key, value := range media { if key != "id" { metadata[key] = value } }
 				if (asset.Kind == "image" || asset.Kind == "video") && asset.Width > 0 && asset.Height > 0 && metadata["freeResize"] != true && reflect.DeepEqual(node["width"], target["width"]) && reflect.DeepEqual(node["height"], target["height"]) {

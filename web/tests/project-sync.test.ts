@@ -58,3 +58,27 @@ test("removing a node clears connections but keeps unrelated additions", () => {
     expect(result.connections).toEqual([]);
     expect(result.nodes.map((node) => node.id)).toContain("c");
 });
+
+test("video results arrive with a completed task without losing a concurrent move", () => {
+    const base = project();
+    base.nodes[0] = { ...base.nodes[0], type: "video", metadata: { status: "loading" } };
+    const local = structuredClone(base), remote = structuredClone(base);
+    local.nodes[0].position.x = 70;
+    remote.nodes[0].metadata = { status: "success", content: "/api/assets/one/file", storageKey: "asset:one", primaryMediaId: "one", mediaResults: ["one", "two"].map((id) => ({ id, status: "success", content: `/api/assets/${id}/file`, storageKey: `asset:${id}`, naturalWidth: 1920, naturalHeight: 1080, bytes: 1024, mimeType: "video/mp4", durationMs: 5000 })) };
+    const saved = rebaseProject(base, local, remote);
+    expect(saved.nodes[0].metadata).toEqual(remote.nodes[0].metadata);
+    expect(saved.nodes[0].position.x).toBe(70);
+});
+
+test("finishing a sibling result does not overwrite an explicitly selected primary", () => {
+    const base = project();
+    base.nodes[0].metadata = { status: "loading", content: "First", primaryTextId: "one", texts: [{ id: "one", content: "First", status: "success" }, { id: "two", content: "Second", status: "success" }, { id: "three", content: "", status: "loading" }] };
+    const local = structuredClone(base), remote = structuredClone(base);
+    local.nodes[0].metadata!.content = "Second";
+    local.nodes[0].metadata!.primaryTextId = "two";
+    remote.nodes[0].metadata!.status = "success";
+    remote.nodes[0].metadata!.texts![2] = { id: "three", content: "Third", status: "success" };
+    const saved = rebaseProject(base, local, remote);
+    expect(saved.nodes[0].metadata).toMatchObject({ content: "Second", primaryTextId: "two", status: "success" });
+    expect(saved.nodes[0].metadata!.texts![2].content).toBe("Third");
+});

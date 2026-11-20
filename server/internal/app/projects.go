@@ -167,7 +167,7 @@ func collectAssetReferences(data any) ([]string, error) {
 		case map[string]any:
 			for k, child := range v {
 				// Text bodies and prompts may contain URL examples; only explicit media fields are references.
-				if includes([]string{"title", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"}, k) { continue }
+				if includes([]string{"title", "name", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"}, k) { continue }
 				if _, ok := child.(string); k == "content" && ok { continue }
 				if err := walk(child, k); err != nil { return err }
 			}
@@ -213,7 +213,7 @@ func deletedAssetPlaceholders(document JSON, assets []Asset) (JSON, error) {
 		switch item := value.(type) {
 		case map[string]any:
 			for name, child := range item {
-				if includes([]string{"title", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"}, name) { continue }
+				if includes([]string{"title", "name", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"}, name) { continue }
 				item[name] = walk(child, name)
 			}
 		case []any:

@@ -23,7 +23,7 @@ export function Pagination({ current, pageSize, total, onChange, onPageSizeChang
                 {onPageSizeChange ? <li className="mx-1">
                     <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
                         <SelectTrigger className="h-8 w-auto gap-1.5 border-transparent px-2 text-xs" aria-label={t("ui.pageSize")}><SelectValue /></SelectTrigger>
-                        <SelectContent>{[10, 20, 50].map((size) => <SelectItem key={size} value={String(size)}>{t("ui.itemsPerPage", { count: size })}</SelectItem>)}</SelectContent>
+                        <SelectContent>{[20, 50, 100].map((size) => <SelectItem key={size} value={String(size)}>{t("ui.itemsPerPage", { count: size })}</SelectItem>)}</SelectContent>
                     </Select>
                 </li> : null}
                 <li><Button data-slot="pagination-link" variant="ghost" size="icon" className={linkClass} disabled={current >= pages} onClick={() => onChange(current + 1)} aria-label={t("ui.next")} title={t("ui.next")}><ChevronRight /></Button></li>

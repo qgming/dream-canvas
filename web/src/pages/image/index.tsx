@@ -406,7 +406,7 @@ export default function ImagePage() {
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
             <main className="flex min-h-0 flex-1 overflow-hidden">
-                <AnimatedSidePanel id="image-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border px-3 pb-4 pt-5">
+                <AnimatedSidePanel id="image-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border bg-sidebar px-3 pb-4 pt-5 text-sidebar-foreground">
                     <WorkbenchHistory
                         kind="image"
                         unavailable={logsLoading || Boolean(logsError)}
@@ -429,7 +429,7 @@ export default function ImagePage() {
                                 </Tooltip>
                                 <h1 className="truncate text-lg font-semibold">{t("imageWorkbench.title")}</h1>
                             </div>
-                            <Button variant="ghost" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
+                            <Button variant="outline" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} title={t("workbench.settings")} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
                         </header>
                         {logsError ? <Notice type="error" className="mb-4 shrink-0" title={logsError} action={<Button onClick={() => void refreshLogs()}>{t("workspace.retryRead")}</Button>} /> : logsLoading ? <p role="status" className="mb-4 shrink-0 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
                         {draftError ? <Notice type="error" className="mb-4 shrink-0" title={draftError} action={<Button onClick={() => draftReady ? retryDraftSave() : void loadDraft()}>{t(draftReady ? "workspace.retrySave" : "workspace.retryRead")}</Button>} /> : !draftReady ? <p role="status" className="mb-4 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
@@ -451,7 +451,7 @@ export default function ImagePage() {
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="flex items-center gap-1 text-base font-semibold">{t("imageWorkbench.references")}{referenceHelp ? <Tooltip title={referenceHelp} clickable placement="top"><Button size="icon" variant="ghost" className="size-5 text-muted-foreground [&_svg]:size-3.5" aria-label={t("ui.parameterHelp", { name: t("imageWorkbench.references") })}><CircleHelp /></Button></Tooltip> : null}</span>
+                                    <span className="flex items-center gap-1 text-base font-semibold">{t("imageWorkbench.references")}{referenceHelp ? <Tooltip title={referenceHelp} clickable placement="top"><Button size="icon" variant="ghost" className="size-5 [&_svg]:size-3.5" aria-label={t("ui.parameterHelp", { name: t("imageWorkbench.references") })}><CircleHelp /></Button></Tooltip> : null}</span>
                                     <div className="flex gap-2">
                                         <Button size="sm" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
@@ -511,7 +511,7 @@ export default function ImagePage() {
                             <ModelParameters key={model} config={effectiveConfig} model={model} value={parameterValues} compact disabled={running} onChange={(value) => setParameters((state) => ({ ...state, [model]: value }))} />
                         </div>
 
-                        <div className="mt-auto flex min-w-0 items-center justify-end gap-2 pt-6">
+                        <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-6">
                             <ModelPicker config={effectiveConfig} value={model} onChange={setSelectedModel} capability="image" disabled={!draftReady || running} onMissingConfig={openModelSettings} className="min-w-0" />
                             <Button variant="default" className="shrink-0" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
@@ -600,7 +600,7 @@ function ResultImageCard({
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     return (
-        <div className={cn("@container min-w-0 overflow-hidden rounded-lg border border-border bg-background", single && "xl:flex xl:h-full xl:min-h-min xl:flex-col")}>
+        <div className={cn("@container min-w-0 overflow-hidden rounded-lg border border-border bg-card text-card-foreground", single && "xl:flex xl:h-full xl:min-h-min xl:flex-col")}>
             <MediaPreview src={single ? image.dataUrl : previewUrlFor(image.storageKey) || image.dataUrl} previewSrc={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} gallery={gallery} style={{ "--result-image-ratio": image.width > 0 && image.height > 0 ? `${image.width} / ${image.height}` : "1 / 1" } as CSSProperties} triggerClassName={cn("relative [aspect-ratio:var(--result-image-ratio)]", single && "xl:min-h-0 xl:flex-1 xl:aspect-auto")} className="absolute inset-0 size-full object-contain" />
             <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2.5">
                 <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
@@ -626,11 +626,11 @@ function ResultImageCard({
 
 function PendingImageCard({ task, single }: { task?: GenerationTask; single: boolean }) {
     return (
-        <div className={cn("relative aspect-square overflow-hidden rounded-lg border border-dashed border-border bg-muted", single && "xl:h-full xl:aspect-auto")}>
+        <div className={cn("relative aspect-square overflow-hidden rounded-lg border border-dashed border-border bg-card", single && "xl:h-full xl:aspect-auto")}>
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
+                    backgroundImage: "radial-gradient(circle, var(--border) 1.4px, transparent 1.6px)",
                     backgroundSize: "16px 16px",
                 }}
             />

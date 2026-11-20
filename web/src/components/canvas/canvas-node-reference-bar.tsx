@@ -56,7 +56,7 @@ export function CanvasNodeReferenceBar({ nodeId, entries, kinds, help, square = 
         <div role="group" aria-label={title} className="flex min-w-0 flex-1 items-start gap-2">
             {list}
             {onAdd ? <Menu disabled={disabled} placement="bottomLeft" items={(["library", "canvas", "upload"] as const).map((source) => ({ key: source, label: t(`canvas.references.sources.${source}`), onClick: () => onAdd(nodeId, source) }))}>
-                <Button size="icon" className="size-14 rounded-lg bg-muted/40 text-muted-foreground [&_svg]:size-5" icon={<Plus />} title={addLabel} aria-label={addLabel} />
+                <Button size="icon" className="size-14 rounded-lg [&_svg]:size-5" icon={<Plus />} title={addLabel} aria-label={addLabel} />
             </Menu> : null}
         </div>
     );

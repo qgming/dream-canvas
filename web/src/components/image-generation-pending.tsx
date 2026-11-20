@@ -19,11 +19,11 @@ export function ImageGenerationPending({ className, label, compact = false }: { 
     const progress = Math.min(98, 10 + (1 - Math.exp(-tick / 28)) * 88);
 
     return (
-        <div className={cn("relative overflow-hidden bg-muted", compact ? "min-h-24" : "aspect-[4/3]", className)}>
+        <div className={cn("relative overflow-hidden bg-card", compact ? "min-h-24" : "aspect-[4/3]", className)}>
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
+                    backgroundImage: "radial-gradient(circle, var(--border) 1.4px, transparent 1.6px)",
                     backgroundSize: "16px 16px",
                     maskImage: "radial-gradient(ellipse at 38% 68%, black 0%, black 28%, transparent 60%)",
                 }}

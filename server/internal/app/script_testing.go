@@ -54,7 +54,7 @@ func (a *App) TestModelScript(user User, adapterID string, input scriptTestInput
 	snapshot := executionSnapshot{ChannelID: channel.ID, ChannelVersion: channel.Version, BaseURL: channel.BaseURL, Credential: channel.Secret, Model: model, Script: &version, Policy: policy}
 	if err := a.validateReferenceMedia(snapshot, request, user.ID); err != nil { return GenerationTask{}, err }; if err := a.validateScriptInput(user.ID, snapshot, request); err != nil { return GenerationTask{}, err }
 	task := GenerationTask{ID: identifier(), UserID: user.ID, ChannelID: channel.ID, ModelID: model.ID, Capability: model.Capability, Snapshot: encode(snapshot), Input: encode(request), Status: "queued", AssetIDs: JSON(`[]`), UsageState: "unknown", DebugRevision: version.DraftRevision}
-	err = a.db.Transaction(func(tx *gorm.DB) error { for _, reference := range request.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, user.ID, "saved", "").Error; err != nil { return err }; if err := claimTaskAsset(tx, TaskAsset{TaskID: task.ID, AssetID: asset.ID}); err != nil { return err } }; return tx.Create(&task).Error })
+	err = a.db.Transaction(func(tx *gorm.DB) error { for _, reference := range request.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, user.ID, "saved", "").Error; err != nil { return err }; if err := tx.FirstOrCreate(&TaskAsset{TaskID: task.ID, AssetID: asset.ID}).Error; err != nil { return err } }; return tx.Create(&task).Error })
 	if err == nil { a.signalWork(); a.notify(user.ID) }; return task, err
 }
 

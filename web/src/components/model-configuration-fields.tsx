@@ -51,8 +51,8 @@ export function ModelConfigurationFields({ section, onCreateScript, onViewScript
         {error ? <Notice type="error" title={error.message} action={<Button onClick={retry}>{t("workspace.retry")}</Button>} /> : null}
         <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-0 flex-1"><Field name="adapterVersionId" label={t("modelScripts.version")} schema={z.string().min(1)}><Choice options={script.data?.versions.map((entry) => ({ value: entry.id, label: `r${entry.draftRevision} · ${new Date(entry.createdAt).toLocaleString()}` }))} onChange={() => form.setValue("parameterOverrides", {}, { shouldDirty: true })} /></Field></div>
-            <Button variant="ghost" disabled={!adapterId} onClick={() => onViewScript(adapterId)}>{t("modelScripts.view")}</Button>
-            <Button variant="ghost" onClick={() => onCreateScript(capability)}>{t("modelScripts.create")}</Button>
+            <Button variant="outline" disabled={!adapterId} onClick={() => onViewScript(adapterId)}>{t("modelScripts.view")}</Button>
+            <Button variant="outline" onClick={() => onCreateScript(capability)}>{t("modelScripts.create")}</Button>
         </div>
         {script.isLoading ? <Spinner label={t("settings.loading")} /> : null}
         {script.data ? <p className="text-xs leading-5 text-muted-foreground">{script.data.script.description}</p> : null}

@@ -99,7 +99,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Updates(map[string]any{"version": thread.Version+1})
 		if result.Error != nil { return result.Error }; if result.RowsAffected != 1 { return problem(409, "version_conflict", "对话已更新，请重新读取后发送") }
 		if err := tx.Create(&turn).Error; err != nil { return err }
-		for _, reference := range prepared.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, user.ID, "saved", "").Error; err != nil { return problem(409, "attachment_deleted", "附件已删除或尚未保存，未提交轮次") }; if err := claimTaskAsset(tx, TaskAsset{TaskID: "turn:"+turn.ID, AssetID: asset.ID}); err != nil { return err } }
+		for _, reference := range prepared.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, user.ID, "saved", "").Error; err != nil { return problem(409, "attachment_deleted", "附件已删除或尚未保存，未提交轮次") }; if err := tx.FirstOrCreate(&TaskAsset{TaskID: "turn:"+turn.ID, AssetID: asset.ID}).Error; err != nil { return err } }
 		return appendAssistantItem(tx, &AssistantItem{ThreadID: thread.ID, TurnID: turn.ID, ID: identifier(), UserID: user.ID, Role: "user", Text: prompt, Detail: encode(map[string]any{"attachments": attachments, "references": references, "skill": skill, "parameters": parameters, "channelId": channel.ID, "modelId": model.ID})})
 	})
 	if err == nil { a.signalWork(); a.notify(user.ID) }
@@ -311,7 +311,7 @@ func (a *App) CreateSkillDraft(userID string, input skillDraftInput) (AssistantT
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&thread).Error; err != nil { return err }
 		if err := tx.Create(&turn).Error; err != nil { return err }
-		for _, reference := range prepared.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(409, "attachment_deleted", "素材已删除或尚未保存，未提交轮次") }; if err := claimTaskAsset(tx, TaskAsset{TaskID: "turn:"+turn.ID, AssetID: asset.ID}); err != nil { return err } }
+		for _, reference := range prepared.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, userID, "saved", "").Error; err != nil { return problem(409, "attachment_deleted", "素材已删除或尚未保存，未提交轮次") }; if err := tx.FirstOrCreate(&TaskAsset{TaskID: "turn:"+turn.ID, AssetID: asset.ID}).Error; err != nil { return err } }
 		return nil
 	})
 	if err == nil { a.notify(thread.UserID); a.signalWork() }; return turn, err

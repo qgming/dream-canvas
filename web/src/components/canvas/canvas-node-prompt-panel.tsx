@@ -102,23 +102,22 @@ export function CanvasNodePromptPanel({ node, nodes, connections, isRunning, onP
     const generationIcon = isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />;
     const modelPicker = <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} disabled={isRunning} onMissingConfig={openModelSettings} className={cn("min-w-0 max-w-48", singleLineFooter && "w-28 max-w-28 shrink-0 px-2 text-xs")} />;
     const parameterFields = (["mode", "parameters"] as const).map((section) => <ModelParameters key={`${config.model}:${section}`} config={config} model={config.model} value={modelParameters} section={section} compact inline references={references} disabled={isRunning} onChange={updateParameters} filterControls={primaryControl} />);
-    const editorActions = <div className="flex shrink-0 items-center gap-1">
-        <CanvasPromptLibrary onSelect={updatePrompt} type={mode === "audio" ? "text" : mode} />
-        <Button variant="ghost" size="icon" className="size-7 [&_svg]:size-3.5" icon={<Maximize2 />} onClick={() => setExpanded(true)} aria-label={expandLabel} title={expandLabel} />
-    </div>;
 
     return (
         <div
             data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore
-            className="flex max-h-[70dvh] min-h-0 flex-col rounded-xl border p-4 shadow-lg backdrop-blur"
+            className="flex max-h-[70dvh] min-h-0 flex-col rounded-xl border p-3 shadow-lg backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <div className="mb-3 flex min-w-0 shrink-0 items-start gap-2">
+            <div className="mb-2 flex min-w-0 shrink-0 items-start gap-2">
                 <CanvasNodeReferenceBar {...referenceBarProps} />
-                {editorActions}
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <CanvasPromptLibrary onSelect={updatePrompt} type={mode === "audio" ? "text" : mode} />
+                    <Button variant="ghost" size="icon" icon={<Maximize2 />} onClick={() => setExpanded(true)} aria-label={expandLabel} title={expandLabel} />
+                </div>
             </div>
             <div className="thin-scrollbar min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain">
                     {isConfigNode ? <CanvasConfigComposer nodeId={node.id} nodes={nodes} inputs={inputs} value={prompt} onChange={updatePrompt} /> : <CanvasPromptChipInput
@@ -131,7 +130,7 @@ export function CanvasNodePromptPanel({ node, nodes, connections, isRunning, onP
                         placeholderClassName={placeholderClassName}
                     />}
             </div>
-            <div className={cn("mt-3 flex min-w-0 shrink-0 gap-2", singleLineFooter ? "items-center" : "items-end")}>
+            <div className={cn("mt-2 flex min-w-0 shrink-0 gap-1", singleLineFooter ? "items-center" : "items-end")}>
                 <div className={cn("flex min-w-0 flex-1 items-center", singleLineFooter ? "thin-scrollbar -m-0.5 gap-1.5 overflow-x-auto overflow-y-hidden p-0.5" : "flex-wrap gap-2")}>
                     {isConfigNode ? <Select value={mode} disabled={isRunning} onValueChange={(value) => { const nextMode = value as CanvasGenerationMode; onConfigChange(node.id, { generationMode: nextMode, model: modelMatchesCapability(config, config.model, nextMode) ? config.model : firstModel(config, nextMode) }); }}>
                         <SelectTrigger size="sm" className="w-auto shrink-0 gap-1 px-2 text-xs" aria-label={t("canvas.configNode.outputType")}><SelectValue /></SelectTrigger>
@@ -155,7 +154,7 @@ export function CanvasNodePromptPanel({ node, nodes, connections, isRunning, onP
                 />
             </div>
             <Dialog title={t("canvas.promptPanel.editorTitle")} open={expanded} width={760} footer={null} onClose={() => setExpanded(false)}>
-                <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
+                <div data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar {...referenceBarProps} onAdd={onAddReference && ((nodeId, source) => { if (source !== "upload") setExpanded(false); onAddReference(nodeId, source); })} />
                     <div className="mt-2">{isConfigNode ? <CanvasConfigComposer nodeId={node.id} nodes={nodes} inputs={inputs} value={prompt} onChange={updatePrompt} className="h-[52dvh] min-h-80 max-h-none" /> : <CanvasPromptChipInput
                         value={prompt}

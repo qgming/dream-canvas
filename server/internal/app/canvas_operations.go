@@ -10,7 +10,7 @@ func canvasTools() []toolDefinition {
 			"type": map[string]any{"type": "string", "enum": []string{"add_node", "update_node", "delete_node", "connect_nodes", "delete_connection"}},
 			"node": object("add_node 的完整节点；先用 canvas_nodes_list 读取已发布且启用的节点类型、默认尺寸和 metadata"),
 			"id": stringField("update_node/delete_node/delete_connection 的明确编号；connect_nodes 可选连线编号"),
-			"patch": object("update_node 的 title、position、width、height、metadata；metadata 按字段合并，null 清除字段，保留其他参数与内容"),
+			"patch": object("update_node 的 title、position、width、height、metadata；title 设置自定义显示名称，不改变节点类型序号；metadata 按字段合并，null 清除字段，保留其他参数与内容"),
 			"fromNodeId": stringField("connect_nodes 的起点节点 ID"), "toNodeId": stringField("connect_nodes 的终点节点 ID"),
 		}, "type")},
 	}, "projectId", "version", "ops")}}
@@ -40,7 +40,7 @@ func (a *App) ApplyCanvasOperations(p Principal, input map[string]any) (Project,
 			for key, value := range op.Patch {
 				if !includes([]string{"title", "position", "width", "height", "metadata"}, key) { return project, problem(400, "invalid_node_patch", "节点修改仅支持名称、位置、尺寸和 metadata") }
 				if key == "metadata" { patch, ok := value.(map[string]any); if !ok { return project, problem(400, "invalid_node_patch", "metadata 需要对象") }; metadata := object(node["metadata"]); for name, value := range patch { if value == nil { delete(metadata, name) } else { metadata[name] = value } }; node[key] = metadata
-				} else { node[key] = value }
+				} else { node[key] = value; if key == "title" { node["name"] = value } }
 			}
 		case "delete_node":
 			index := find(nodes, op.ID); if index < 0 { return project, problem(404, "node_missing", "要删除的节点不存在") }

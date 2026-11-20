@@ -37,6 +37,6 @@ export function useCanvasTasks(owner?: string) {
         window.addEventListener("server-changed", changed);
         window.addEventListener("focus", refresh);
         window.addEventListener("online", refresh);
-        return () => { disposed = true; window.removeEventListener("server-changed", changed); window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); useGenerationProgressStore.setState({ tasks: {}, loaded: false }); };
+        return () => { disposed = true; window.removeEventListener("server-changed", changed); window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); useGenerationProgressStore.setState({ tasks: {}, requests: [], loaded: false }); };
     }, [owner, hydrated]);
 }

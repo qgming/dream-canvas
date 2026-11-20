@@ -128,3 +128,27 @@ test("remote project deletion preserves a failed local draft as a visible confli
     expect(useCanvasStore.getState().saves.p.status).toBe("conflict");
     expect(mocks.drafts.size).toBe(1);
 });
+
+test("node identities save with content edits and survive regenerated node objects", async () => {
+    const base = mount();
+    useCanvasStore.getState().updateProject("p", { nodes: [...base.nodes, { ...base.nodes[0], id: "second", title: "A second prompt" }] });
+    const saved = await useCanvasStore.getState().ensureSaved("p");
+    expect(saved.nodes.map((node) => node.identity)).toEqual([{ type: "text", number: 1, copy: 1 }, { type: "text", number: 2, copy: 1 }]);
+    useCanvasStore.getState().updateProject("p", { nodes: [{ ...base.nodes[0], id: "second", title: "Regenerated prompt", metadata: { content: "generated", status: "success" } }] });
+    const regenerated = await useCanvasStore.getState().ensureSaved("p");
+    expect(regenerated.nodes[0].identity).toEqual({ type: "text", number: 2, copy: 1 });
+    expect(regenerated.nodes[0].metadata?.content).toBe("generated");
+    expect(regenerated.nodes[0].title).toBe("Regenerated prompt");
+});
+
+test("renaming and asset names persist separately from the next automatic node number", async () => {
+    const base = mount();
+    useCanvasStore.getState().updateProject("p", { nodes: [{ ...base.nodes[0], name: "主角台词", title: "主角台词" }, { ...base.nodes[0], id: "asset", name: "资产库剧本", title: "资产库剧本" }] });
+    const named = await useCanvasStore.getState().ensureSaved("p");
+    useCanvasStore.getState().updateProject("p", { nodes: [{ ...base.nodes[0], title: "New generated title" }, named.nodes[1], { ...base.nodes[0], id: "new" }] });
+    const saved = await useCanvasStore.getState().ensureSaved("p");
+    expect(saved.nodes.map((node) => node.name)).toEqual(["主角台词", "资产库剧本", undefined]);
+    expect(saved.nodes.map((node) => node.identity?.number)).toEqual([1, 2, 3]);
+    expect(saved.nodes[0].title).toBe("主角台词");
+    expect(saved.nodes[0].metadata?.prompt).toBeUndefined();
+});

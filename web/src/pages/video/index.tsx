@@ -479,7 +479,7 @@ export default function VideoPage() {
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
             <main className="flex min-h-0 flex-1 overflow-hidden">
-                <AnimatedSidePanel id="video-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border px-3 pb-4 pt-5">
+                <AnimatedSidePanel id="video-history-panel" open={desktop && historyPanelOpen} width="var(--secondary-sidebar-width)" panelClassName="thin-scrollbar min-h-0 overflow-y-auto border-r border-border bg-sidebar px-3 pb-4 pt-5 text-sidebar-foreground">
                     <WorkbenchHistory kind="video" unavailable={logsLoading || Boolean(logsError)} logs={logs} activeLogId={previewLog?.id} onCreateSession={createSession} onDeleteLog={deleteLog} onPreviewLog={previewGenerationLog} />
                 </AnimatedSidePanel>
 
@@ -494,7 +494,7 @@ export default function VideoPage() {
                                 </Tooltip>
                                 <h1 className="truncate text-lg font-semibold">{t("videoWorkbench.title")}</h1>
                             </div>
-                            <Button variant="ghost" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
+                            <Button variant="outline" size="icon" className="lg:hidden" icon={<SlidersHorizontal />} title={t("workbench.settings")} aria-label={t("workbench.settings")} onClick={() => setSettingsOpen(true)} />
                         </header>
                         {logsError ? <Notice type="error" className="mb-4 shrink-0" title={logsError} action={<Button onClick={() => void refreshLogs()}>{t("workspace.retryRead")}</Button>} /> : logsLoading ? <p role="status" className="mb-4 shrink-0 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
                         {draftError ? <Notice type="error" className="mb-4 shrink-0" title={draftError} action={<Button onClick={() => draftReady ? retryDraftSave() : void loadDraft()}>{t(draftReady ? "workspace.retrySave" : "workspace.retryRead")}</Button>} /> : !draftReady ? <p role="status" className="mb-4 text-xs text-muted-foreground">{t("ui.loading")}</p> : null}
@@ -516,7 +516,7 @@ export default function VideoPage() {
 
                             {hasMaterials ? <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="flex items-center gap-1 text-base font-semibold">{t("videoWorkbench.references")}{referenceHelp ? <Tooltip title={referenceHelp} clickable placement="top"><Button variant="ghost" size="icon" className="size-5 text-muted-foreground [&_svg]:size-3.5" aria-label={t("ui.parameterHelp", { name: t("videoWorkbench.references") })}><CircleHelp /></Button></Tooltip> : null}</span>
+                                    <span className="flex items-center gap-1 text-base font-semibold">{t("videoWorkbench.references")}{referenceHelp ? <Tooltip title={referenceHelp} clickable placement="top"><Button variant="ghost" size="icon" className="size-5 [&_svg]:size-3.5" aria-label={t("ui.parameterHelp", { name: t("videoWorkbench.references") })}><CircleHelp /></Button></Tooltip> : null}</span>
                                     <div className="flex gap-2">
                                         <Button size="sm" disabled={running || !materialControls.some((control) => control.role === "image")} icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
@@ -553,7 +553,7 @@ export default function VideoPage() {
                             <ModelParameters key={`${model}:parameters`} config={effectiveConfig} model={model} value={parameters[model]} compact section="parameters" references={visibleReferences} disabled={running} onChange={updateParameters} />
                         </div>
 
-                        <div className="mt-auto flex min-w-0 items-center justify-end gap-2 pt-6">
+                        <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-6">
                             <ModelPicker config={effectiveConfig} value={model} onChange={setSelectedModel} capability="video" disabled={!draftReady || running} onMissingConfig={openModelSettings} className="min-w-0" />
                             <Button variant="default" className="shrink-0" icon={<Sparkles className="size-4" />} loading={running} disabled={!draftReady || !canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
@@ -608,7 +608,7 @@ export default function VideoPage() {
 function ResultVideoCard({ video, onSaveAsset }: { video: GeneratedVideo; onSaveAsset: (video: GeneratedVideo) => void }) {
     const { t } = useTranslation();
     return (
-        <div className="@container overflow-hidden rounded-lg border border-border bg-background">
+        <div className="@container overflow-hidden rounded-lg border border-border bg-card text-card-foreground">
             <video src={video.url} controls preload="none" className="aspect-video w-full bg-black object-contain" />
             <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2.5">
                 <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
@@ -637,7 +637,7 @@ function ResultVideoCard({ video, onSaveAsset }: { video: GeneratedVideo; onSave
 
 function PendingVideoCard({ task }: { task?: GenerationTask }) {
     return (
-        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-border bg-muted  ">
+        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-border bg-card">
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ">
                 <GenerationProgress task={task} />
             </div>

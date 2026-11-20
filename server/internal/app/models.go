@@ -325,9 +325,6 @@ type FileOperation struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	AssetID string `json:"assetId" gorm:"uniqueIndex:file_operation"`
 	Kind string `json:"kind" gorm:"uniqueIndex:file_operation"`
-	State string `json:"state,omitempty" gorm:"not null;default:''"`
-	SourcePath string `json:"-"`
-	TargetPath string `json:"-"`
 	Attempts int `json:"attempts"`
 	NextRunAt *time.Time `json:"nextRunAt,omitempty" gorm:"index"`
 	Error string `json:"error,omitempty"`

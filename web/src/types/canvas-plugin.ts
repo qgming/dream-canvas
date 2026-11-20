@@ -34,7 +34,8 @@ export type CanvasNodeToolbarItem = {
     title: string;
     label: string;
     icon: ReactNode;
-    onClick: () => void;
+    onClick?: () => void;
+    popover?: ReactNode;
     active?: boolean;
     danger?: boolean;
 };
@@ -110,7 +111,7 @@ export type CanvasNodeDefinition = {
     showInCreateMenu?: boolean; // Defaults to true.
     hasSourceHandle?: boolean; // Right-side output handle; defaults to true.
     hidePanel?: boolean; // Prevents click/create from opening a lower panel; intended for display-only nodes.
-    transparentBackground?: boolean; // Makes the node card transparent so SVG or vector content blends into the canvas.
+    transparentBackground?: boolean;
     autoOpenPanel?: boolean; // Opens a custom Panel on click; automatic opening otherwise applies only to built-ins.
     useBuiltinPanel?: CanvasBuiltinPanelConfig; // Reuses the built-in generation panel instead of a custom Panel.
     // Lets the host provide an Interaction/Move toolbar toggle and control pointer events through metadata.interactive.

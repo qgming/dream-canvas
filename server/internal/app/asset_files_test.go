@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -98,6 +99,59 @@ func TestAssetUploadStoresDetectedExtension(test *testing.T) {
 			if asset.StorageID != "storage" || asset.SyncState != "pending" || storageKey(asset) != "assets/owner/"+asset.Path { test.Fatal("cloud sync did not retain the stored filename") }
 		})
 	}
+}
+
+func TestRecordedAudioUploadVerifiesContainerTracks(test *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg"); if err != nil { test.Skip("ffmpeg is required to create recording fixtures") }
+	if _, err := exec.LookPath("ffprobe"); err != nil { test.Skip("ffprobe is required to verify recording tracks") }
+	for _, fixture := range []struct { name, mimeType, extension, audioCodec, videoCodec, format string; video bool }{
+		{"webm_audio", "audio/webm;codecs=opus", ".webm", "libopus", "libvpx", "webm", false},
+		{"mp4_audio", "audio/mp4", ".mp4", "aac", "mpeg4", "mp4", false},
+		{"webm_video_rejected", "audio/webm;codecs=opus", ".webm", "libopus", "libvpx", "webm", true},
+		{"mp4_video_rejected", "audio/mp4", ".mp4", "aac", "mpeg4", "mp4", true},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			filename := filepath.Join(test.TempDir(), "recording"+fixture.extension)
+			arguments := []string{"-nostdin", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono"}
+			if fixture.video { arguments = append(arguments, "-f", "lavfi", "-i", "color=c=black:s=16x16:r=10", "-c:v", fixture.videoCodec) }
+			arguments = append(arguments, "-t", "0.2", "-c:a", fixture.audioCodec, "-f", fixture.format, filename)
+			if output, err := exec.Command(ffmpeg, arguments...).CombinedOutput(); err != nil { test.Skipf("recording fixture encoder unavailable: %s", output) }
+			data, err := os.ReadFile(filename); if err != nil { test.Fatal(err) }
+			application := assetFileTestApp(test)
+			if err := application.db.Create(&ObjectStorage{ID: "storage", Provider: "qiniu", Default: true}).Error; err != nil { test.Fatal(err) }
+			request := httptest.NewRequest("POST", "/api/assets", bytes.NewReader(data))
+			request.Header.Set("Content-Type", fixture.mimeType)
+			request.Header.Set("X-File-Name", "recording.wrong")
+			response := httptest.NewRecorder(); assetFileTestRouter(application).ServeHTTP(response, request)
+			if fixture.video {
+				if response.Code != 400 { test.Fatalf("video accepted as audio: %d %s", response.Code, response.Body.String()) }
+				var saved, queued int64
+				if err := application.db.Model(&Asset{}).Where("save_state = ?", "saved").Count(&saved).Error; err != nil { test.Fatal(err) }
+				if err := application.db.Model(&FileOperation{}).Count(&queued).Error; err != nil { test.Fatal(err) }
+				if saved != 0 || queued != 0 { test.Fatal("unverified recording was saved or queued for cloud sync") }
+				return
+			}
+			if response.Code != 201 { test.Fatalf("recording upload failed: %d %s", response.Code, response.Body.String()) }
+			var asset Asset; if err := json.Unmarshal(response.Body.Bytes(), &asset); err != nil { test.Fatal(err) }
+			if err := application.db.First(&asset, "id = ?", asset.ID).Error; err != nil { test.Fatal(err) }
+			if asset.Kind != "audio" || asset.MimeType != strings.Split(fixture.mimeType, ";")[0] || asset.Path != asset.ID+fixture.extension || asset.AudioCodec == "" || asset.VideoCodec != "" || asset.DurationMS <= 0 || asset.ProbeError != "" || asset.SaveState != "saved" { test.Fatal("recording metadata did not match verified audio") }
+			if asset.SyncState != "pending" || storageKey(asset) != "assets/owner/"+asset.Path { test.Fatal("recording sync lost the original filename") }
+			name, err := application.assetOriginalPath(asset); if err != nil { test.Fatal(err) }
+			original, err := os.ReadFile(name); if err != nil { test.Fatal(err) }
+			if !bytes.Equal(data, original) { test.Fatal("recording was transcoded or changed during upload") }
+		})
+	}
+}
+
+func TestRecordedAudioCannotSaveWithoutTrackVerification(test *testing.T) {
+	test.Setenv("PATH", test.TempDir())
+	application := assetFileTestApp(test)
+	request := httptest.NewRequest("POST", "/api/assets", bytes.NewReader([]byte("\x1a\x45\xdf\xa3\x42\x82\x84webm")))
+	request.Header.Set("Content-Type", "audio/webm;codecs=opus")
+	response := httptest.NewRecorder(); assetFileTestRouter(application).ServeHTTP(response, request)
+	if response.Code != 422 || !strings.Contains(response.Body.String(), "media_probe_failed") { test.Fatalf("unverified recording accepted: %d %s", response.Code, response.Body.String()) }
+	var asset Asset; if err := application.db.First(&asset).Error; err != nil { test.Fatal(err) }
+	if asset.SaveState != "failed" || asset.Error == "" || asset.SyncState != "local" { test.Fatal("track verification failure was not preserved") }
 }
 
 func TestGeneratedAssetStoresDetectedExtension(test *testing.T) {

@@ -2,5 +2,4 @@
 
 declare const __APP_VERSION__: string;
 
-declare module "https://esm.sh/marked@14";
 declare module "https://esm.sh/three@0.180.0";

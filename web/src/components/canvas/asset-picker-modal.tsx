@@ -17,16 +17,18 @@ export type InsertAssetPayload = { kind: "text"; content: string; title: string 
 
 type Props = {
     open: boolean;
+    title?: string;
     defaultTab?: string;
     kinds?: readonly AssetKind[];
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, kinds, onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, title, kinds, onInsert, onClose }: Props) {
     const { t } = useTranslation();
+    useEffect(() => { if (open) void useAssetStore.getState().loadAssets(); }, [open]);
     return (
-        <Dialog title={t("canvas.assetPicker.title")} open={open} onClose={onClose} footer={null} width={860} bodyClassName="min-h-[480px] pt-0">
+        <Dialog title={title || t("canvas.assetPicker.title")} open={open} onClose={onClose} footer={null} width={860} bodyClassName="min-h-[480px]">
             <MyAssetsTab kinds={kinds} onInsert={onInsert} />
         </Dialog>
     );
@@ -47,7 +49,7 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
             {cover ? (
                 <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" />
             ) : (
-                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-3 text-center text-xs leading-5 text-muted-foreground  ">{title}</div>
+                <div className="flex aspect-[4/3] items-center justify-center bg-card p-3 text-center text-xs leading-5 text-muted-foreground">{title}</div>
             )}
             <div className="p-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -102,7 +104,7 @@ function MyAssetsTab({ kinds, onInsert }: Pick<Props, "kinds" | "onInsert">) {
                 <Input
                     className="w-56"
                     size="small"
-                    prefix={<Search className="size-3.5 text-muted-foreground" />}
+                    prefix={<Search className="size-3.5" />}
                     placeholder={t("canvas.assetPicker.search")}
                     value={keyword}
                    

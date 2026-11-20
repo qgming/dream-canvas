@@ -5,9 +5,9 @@ import { motionTokens, toCssTiming, useShouldReduceMotion } from "@animate-ui/re
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/ui/media-preview";
-import { Dialog } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Popover, Tooltip } from "@/components/ui/popover";
-import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, ExternalLink, FilePenLine, FileText, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, FilePenLine, FileText, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
 import { Streamdown, type LinkSafetyModalProps } from "streamdown";
 import { useTranslation } from "react-i18next";
 
@@ -35,20 +35,13 @@ function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProp
     const copyText = useCopyText();
     const localPath = localFilePath(url);
     return (
-        <Dialog open={isOpen} onClose={onClose} footer={null} width={420} title={t(localPath ? "agent.notify.openLocal" : "agent.notify.openExternal")}>
-            <div className="text-sm text-muted-foreground">
-                {t(localPath ? "agent.notify.localDescription" : "agent.notify.externalDescription")}
-            </div>
-            <div className="mt-4 max-h-32 overflow-auto break-all rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5">{localPath || url}</div>
-            <div className="mt-5 flex justify-end gap-2">
-                <Button variant="ghost" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.notify.pathCopied" : "agent.notify.linkCopied"))}>
+        <AlertDialog open={isOpen} onClose={onClose} title={t(localPath ? "agent.notify.openLocal" : "agent.notify.openExternal")} description={t(localPath ? "agent.notify.localDescription" : "agent.notify.externalDescription")} confirmDisabled={Boolean(localPath)} confirmText={localPath ? appI18n.t("workspace.localPath") : t("agent.notify.continueOpen")} onConfirm={() => { onConfirm(); onClose(); }} actions={
+                <Button variant="outline" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.notify.pathCopied" : "agent.notify.linkCopied"))}>
                     {t(localPath ? "agent.notify.copyPath" : "agent.notify.copyLink")}
                 </Button>
-                <Button variant="ghost" disabled={Boolean(localPath)} icon={<ExternalLink className="size-4" />} onClick={onConfirm}>
-                    {localPath ? appI18n.t("workspace.localPath") : t("agent.notify.continueOpen")}
-                </Button>
-            </div>
-        </Dialog>
+        }>
+            <div className="mt-3 max-h-32 overflow-auto break-all rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5">{localPath || url}</div>
+        </AlertDialog>
     );
 }
 

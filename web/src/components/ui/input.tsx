@@ -4,13 +4,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { useTranslation } from "react-i18next";
 
-export const inputClass = "flex h-8 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/25";
+export const inputClass = "flex h-8 w-full min-w-0 rounded-md border border-input bg-card px-3 py-1 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/25";
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "size" | "prefix"> & { size?: "small" | "large" | "middle"; prefix?: ReactNode; status?: "error" | "warning"; showCount?: boolean; onPressEnter?: (event: React.KeyboardEvent<HTMLInputElement>) => void; ref?: Ref<HTMLInputElement> };
 
 export function Input({ className, prefix, size, status, showCount, onPressEnter, onKeyDown, ...props }: InputProps) {
     const id = useId();
     const field = <input data-slot="input" className={cn(inputClass, size === "small" && "h-7", size === "large" && "h-10", prefix && "border-0 bg-transparent pl-0 focus-visible:ring-0", !prefix && className)} aria-invalid={status === "error" || undefined} onKeyDown={(event) => { onKeyDown?.(event); if (event.key === "Enter") onPressEnter?.(event); }} {...props} id={props.id || id} aria-label={props["aria-label"] || props.placeholder} />;
-    return prefix ? <div className={cn("flex w-full items-center gap-2 rounded-md border border-input px-3 focus-within:ring-2 focus-within:ring-ring/30", className)}><span className="shrink-0 text-muted-foreground">{prefix}</span>{field}</div> : field;
+    return prefix ? <div className={cn("flex w-full items-center gap-2 rounded-md border border-input bg-card px-3 focus-within:ring-2 focus-within:ring-ring/30", className)}><span className="shrink-0 text-foreground">{prefix}</span>{field}</div> : field;
 }
 
 export function PasswordInput({ showLabel, hideLabel, ...props }: InputProps & { showLabel?: string; hideLabel?: string }) {

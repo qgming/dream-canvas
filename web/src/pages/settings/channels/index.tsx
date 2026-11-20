@@ -5,7 +5,7 @@ import { Reorder, useDragControls } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ChevronDown, GripVertical, Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, CodeXml, GripVertical, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,7 @@ function ModelRow({ model, scripts, index, count, orderDisabled, onToggle, onEdi
     const dragLabel = t("modelOrdering.dragModel", { name: model.name || model.model });
     return <Reorder.Item value={model.id} tabIndex={-1} drag={orderDisabled ? false : "y"} dragListener={false} dragControls={controls} transition={reducedMotion ? tokens.transition.instant : tokens.spring.reflow} onKeyDown={(event) => { if (event.target === event.currentTarget) event.preventDefault(); }} onDragStart={orderDisabled ? undefined : onOrderStart} onDragEnd={orderDisabled ? undefined : onOrderEnd} className="border-b border-border last:border-b-0">
         <div className="flex min-w-0 items-center gap-2 px-2 py-2">
-            <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="size-7 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing" disabled={orderDisabled} aria-label={dragLabel} onPointerDown={(event) => { if (!orderDisabled) controls.start(event); }}>
+            <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="size-7 touch-none enabled:cursor-grab enabled:active:cursor-grabbing" disabled={orderDisabled} aria-label={dragLabel} onPointerDown={(event) => { if (!orderDisabled) controls.start(event); }}>
                 <GripVertical />
             </Button>
             <OrderButtons label={dragLabel} index={index} count={count} disabled={orderDisabled} onMove={onMove} />
@@ -78,7 +78,7 @@ function ModelRow({ model, scripts, index, count, orderDisabled, onToggle, onEdi
                 {error ? <p role="alert" className="mt-1 text-xs text-destructive">{error}</p> : null}
             </div>
             <Switch size="small" checked={enabled} loading={busy} disabled={busy} aria-label={t("workspace.enableModel")} onChange={(value) => void toggle(value)} />
-            <Button size="sm" variant="ghost" onClick={onEdit}>{t("workspace.editModel")}</Button>
+            <Button size="sm" variant="outline" onClick={onEdit}>{t("workspace.editModel")}</Button>
         </div>
     </Reorder.Item>;
 }
@@ -174,21 +174,21 @@ function ChannelCard({ entry, index, count, expanded, modelOrder, scripts, order
     return <Reorder.Item value={entry.channel.id} tabIndex={-1} drag={orderDisabled ? false : "y"} dragListener={false} dragControls={controls} transition={reducedMotion ? tokens.transition.instant : tokens.spring.reflow} onKeyDown={(event) => { if (event.target === event.currentTarget) event.preventDefault(); }} onDragStart={orderDisabled ? undefined : onOrderStart} onDragEnd={orderDisabled ? undefined : onOrderEnd} className="overflow-hidden rounded-lg border border-border bg-card">
         <Collapsible.Root open={expanded} onOpenChange={(open) => { if (open !== expanded) onToggleExpanded(); }}>
             <div className="flex min-w-0 items-start gap-2 p-3">
-                <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="mt-0.5 size-7 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing" disabled={orderDisabled} aria-label={dragLabel} onPointerDown={(event) => { if (!orderDisabled) controls.start(event); }}>
+                <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="mt-0.5 size-7 touch-none enabled:cursor-grab enabled:active:cursor-grabbing" disabled={orderDisabled} aria-label={dragLabel} onPointerDown={(event) => { if (!orderDisabled) controls.start(event); }}>
                     <GripVertical />
                 </Button>
                 <OrderButtons label={dragLabel} index={index} count={count} disabled={orderDisabled} onMove={onMove} />
                 <Collapsible.Trigger asChild>
                     <button type="button" className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <span className="flex min-w-0 items-start gap-2"><span className="break-words text-sm font-medium">{entry.channel.name}</span><ChevronDown className={`mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} /></span>
+                        <span className="flex min-w-0 items-start gap-2"><span className="break-words text-sm font-medium">{entry.channel.name}</span><ChevronDown className={`mt-0.5 size-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} /></span>
                         <span className="mt-1 block break-all text-xs leading-5 text-muted-foreground">{entry.channel.baseUrl}</span>
                         <span className="mt-2 flex flex-wrap items-center gap-2"><Badge color={entry.hasCredential ? "success" : "error"}>{t(entry.hasCredential ? "workspace.credentialConfigured" : "workspace.credentialMissing")}</Badge><Badge>{t("workspace.modelCount", { count: entry.models.length })}</Badge><Badge color={enabled ? "success" : undefined}>{t(enabled ? "workspace.enabled" : "workspace.disabled")}</Badge></span>
                     </button>
                 </Collapsible.Trigger>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                     <Switch size="small" checked={enabled} loading={busy} disabled={busy} aria-label={t("workspace.enableChannel")} onChange={(value) => void toggle(value)} />
-                    <Button size="sm" variant="ghost" onClick={onEditChannel}>{t("workspace.editChannel")}</Button>
-                    <Button size="sm" variant="ghost" icon={<Plus />} onClick={onAddModel}>{t("workspace.addModel")}</Button>
+                    <Button size="sm" variant="outline" onClick={onEditChannel}>{t("workspace.editChannel")}</Button>
+                    <Button size="sm" variant="outline" icon={<Plus />} onClick={onAddModel}>{t("workspace.addModel")}</Button>
                 </div>
             </div>
             {error ? <p role="alert" className="border-t border-border px-3 py-2 text-xs text-destructive">{error}</p> : null}
@@ -257,16 +257,16 @@ export default function ChannelsPage() {
     const orderDisabled = ordering.busy || ordering.loading || Boolean(ordering.queryError);
 
     return <section className="space-y-6">
-        <PageHeader title={t("workspace.channels")} description={t("modelScripts.channelsHint")} actions={<><Button variant="ghost" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void refresh().catch((failure: unknown) => notify.error(failure instanceof Error ? failure.message : String(failure)))}>{t("workspace.refresh")}</Button><Button asChild variant="ghost"><Link to="/settings/model-scripts">{t("modelScripts.title")}</Link></Button><Button icon={<Plus className="size-4" />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></>} />
+        <PageHeader title={t("workspace.channels")} description={t("modelScripts.channelsHint")} actions={<><Button variant="outline" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void refresh().catch((failure: unknown) => notify.error(failure instanceof Error ? failure.message : String(failure)))}>{t("workspace.refresh")}</Button><Button asChild variant="outline"><Link to="/settings/model-scripts"><CodeXml />{t("modelScripts.title")}</Link></Button><Button variant="default" icon={<Plus className="size-4" />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></>} />
         {query.error ? <Notice type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         {scripts.error ? <Notice type="error" title={scripts.error.message} action={<Button onClick={() => void scripts.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         {query.data ? <ModelOrderingSettings channels={query.data} orders={ordering.orders} loading={ordering.loading} queryError={ordering.queryError} busy={ordering.busy} error={ordering.error} conflict={ordering.conflict} onPreview={ordering.preview} onCommit={ordering.commit} onReorder={ordering.reorder} onRetry={() => void ordering.retry()} onReload={() => void ordering.reload()} /> : null}
         {query.isLoading ? <div role="status" className="flex min-h-48 items-center justify-center gap-3 text-sm text-muted-foreground"><Spinner size="small" />{t("workspace.channelLoading")}</div> : null}
-        {!query.error && query.data?.length === 0 ? <EmptyState description={t("workspace.channelEmpty")}><Button onClick={() => edit()}>{t("workspace.addChannel")}</Button></EmptyState> : null}
+        {!query.error && query.data?.length === 0 ? <EmptyState description={t("workspace.channelEmpty")}><Button variant="default" icon={<Plus />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></EmptyState> : null}
         {channels.length ? <Reorder.Group axis="y" values={channels.map((entry) => entry.channel.id)} onReorder={(ids) => ordering.preview("channels", ids)} className="space-y-3">
             {channels.map((entry, index) => <ChannelCard key={entry.channel.id} entry={entry} index={index} count={channels.length} expanded={expanded.has(entry.channel.id)} modelOrder={ordering.orders[`channel:${entry.channel.id}`]} scripts={scripts.data} orderDisabled={orderDisabled} onToggleExpanded={() => toggleExpanded(entry.channel.id)} onEditChannel={() => edit(entry)} onAddModel={() => setModelEditor({ entry })} onEditModel={(model) => setModelEditor({ entry, model })} onToggleChannel={(enabled) => toggleChannel(entry, enabled)} onOrderStart={() => ordering.preview("channels", channels.map((item) => item.channel.id))} onOrderEnd={() => ordering.commit("channels")} onMove={(nextIndex) => ordering.reorder("channels", moveBy(channels.map((item) => item.channel.id), index, nextIndex))} onModelOrderPreview={(ids) => ordering.preview(`channel:${entry.channel.id}`, ids)} onModelOrderEnd={() => ordering.commit(`channel:${entry.channel.id}`)} onModelReorder={(ids) => ordering.reorder(`channel:${entry.channel.id}`, ids)} onRefresh={refresh} />)}
         </Reorder.Group> : null}
-        <Dialog title={t(editor?.entry ? "workspace.editChannel" : "workspace.addChannel")} open={Boolean(editor)} busy={busy} onClose={closeEditor} bodyClassName="@container/settings" footer={<><Button variant="ghost" className="text-destructive hover:text-destructive" disabled={!editor?.entry || busy || credentialLoading} onClick={remove}>{t("workspace.removeChannel")}</Button><Button type="submit" form="channel-editor" loading={busy} disabled={credentialLoading || Boolean(credentialError)}>{t("common.save")}</Button></>}>
+        <Dialog title={t(editor?.entry ? "workspace.editChannel" : "workspace.addChannel")} open={Boolean(editor)} busy={busy} onClose={closeEditor} bodyClassName="@container/settings" footer={<><Button variant="outline" icon={<Trash2 />} className="text-destructive hover:text-destructive" disabled={!editor?.entry || busy || credentialLoading} onClick={remove}>{t("workspace.removeChannel")}</Button><Button variant="default" icon={<Save />} type="submit" form="channel-editor" loading={busy} disabled={credentialLoading || Boolean(credentialError)}>{t("common.save")}</Button></>}>
             {credentialLoading ? <div role="status" className="flex items-center gap-2 py-3 text-sm text-muted-foreground"><Spinner size="small" />{t("workspace.channelLoading")}</div> : null}
             {credentialError ? <Notice type="error" title={credentialError} action={<Button onClick={() => setCredentialRetry((value) => value + 1)}>{t("workspace.retry")}</Button>} /> : null}
             <EditorForm id="channel-editor" form={form} disabled={credentialLoading || Boolean(credentialError)} className="space-y-0" onSubmit={async (values) => {

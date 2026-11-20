@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Controller } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -118,7 +118,7 @@ export default function RuntimePage() {
             description={t("execution.description")}
             actions={<>
                 <span role="status" className="text-xs text-muted-foreground">{busy ? t("settings.savingChanges") : !query.data ? t("settings.loading") : form.formState.isDirty || !query.data.record.policy ? t("workspace.unsaved") : t("workspace.allSaved")}</span>
-                <Button type="submit" form="runtime-settings" disabled={!query.data || (Boolean(query.data.record.policy) && !form.formState.isDirty)} loading={busy}>{t("workspace.save")}</Button>
+                <Button variant="default" icon={<Save />} type="submit" form="runtime-settings" disabled={!query.data || (Boolean(query.data.record.policy) && !form.formState.isDirty)} loading={busy}>{t("workspace.save")}</Button>
             </>}
         />
         <Notice type="info" title={t("execution.confirmPolicy")} description={t("execution.failurePolicy")} />
@@ -174,7 +174,7 @@ export default function RuntimePage() {
             </SettingsGroup>)}
 
             <Disclosure open={advancedOpen} onOpenChange={setAdvancedOpen} title={t("execution.groups.advanced")}>
-                <div className="mb-2 flex justify-end"><Button type="button" size="sm" variant="ghost" onClick={() => resetGroup(limitKeys)}>{t("execution.resetSuggested")}</Button></div>
+                <div className="mb-2 flex justify-end"><Button type="button" size="sm" variant="outline" icon={<RotateCcw />} onClick={() => resetGroup(limitKeys)}>{t("execution.resetSuggested")}</Button></div>
                 {limitKeys.map((key) => {
                     const name = String(key);
                     if (durationValues.has(name)) return <DurationField key={key} name={key as DurationKey} value={values[key] as string} unit={durationUnits[key as DurationKey]} onUnitChange={changeDurationUnit} />;
@@ -192,7 +192,7 @@ function SettingsGroup({ title, onReset, children }: { title: string; onReset: (
     return <section>
         <div className="mb-2 flex items-center justify-between gap-3">
             <h2 className="text-base font-medium">{title}</h2>
-            <Button type="button" size="sm" variant="ghost" onClick={onReset}>{t("execution.resetSuggested")}</Button>
+            <Button type="button" size="sm" variant="outline" icon={<RotateCcw />} onClick={onReset}>{t("execution.resetSuggested")}</Button>
         </div>
         <div>{children}</div>
     </section>;
@@ -229,9 +229,9 @@ function RetryField({ name, values = [], onChange }: { name: RetryKey; values?: 
             {values.map((value, index) => <div key={index} className="flex items-center gap-2">
                 <Input aria-label={`${label} ${index + 1}`} type="number" min={1} step={1} inputMode="numeric" value={value} onChange={(event) => onChange(name, values.map((entry, item) => item === index ? event.target.value : entry))} />
                 <span className="shrink-0 text-xs text-muted-foreground">{t("execution.units.seconds")}</span>
-                <Button type="button" variant="ghost" size="icon" aria-label={t("execution.removeInterval")} onClick={() => onChange(name, values.filter((_, item) => item !== index))}><Trash2 /></Button>
+                <Button type="button" variant="outline" size="icon" data-destructive title={t("execution.removeInterval")} aria-label={t("execution.removeInterval")} onClick={() => onChange(name, values.filter((_, item) => item !== index))}><Trash2 /></Button>
             </div>)}
-            <Button type="button" variant="ghost" size="sm" icon={<Plus />} onClick={() => onChange(name, [...values, ""])}>{t("execution.addInterval")}</Button>
+            <Button type="button" variant="outline" size="sm" icon={<Plus />} onClick={() => onChange(name, [...values, ""])}>{t("execution.addInterval")}</Button>
         </div>
     </SettingRow>;
 }

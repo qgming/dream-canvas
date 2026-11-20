@@ -92,7 +92,7 @@ func mergeProject(base, edited, current Project) (Project, error) {
 		metadata, original, latest := object(node["metadata"]), object(beforeNode["metadata"]), object(latestNode["metadata"])
 		if original["status"] != "loading" { continue }
 		completed := false
-		for _, key := range []string{"images", "texts"} {
+		for _, key := range []string{"images", "mediaResults", "texts"} {
 			for _, raw := range array(metadata[key]) {
 				slot := object(raw); if slot["status"] != "loading" { continue }
 				var saved, previous map[string]any
@@ -103,7 +103,9 @@ func mergeProject(base, edited, current Project) (Project, error) {
 			}
 		}
 		if completed || metadata["status"] == "loading" && latest["status"] != "loading" && (!reflect.DeepEqual(latest["content"], original["content"]) || !reflect.DeepEqual(latest["storageKey"], original["storageKey"])) {
-			for _, key := range []string{"content", "storageKey", "status", "errorDetails", "naturalWidth", "naturalHeight", "bytes", "mimeType", "durationMs", "primaryImageId", "primaryTextId"} { if value, ok := latest[key]; ok { metadata[key] = value } else { delete(metadata, key) } }
+			primaryChanged := false
+			for _, key := range []string{"primaryImageId", "primaryMediaId", "primaryTextId"} { if !reflect.DeepEqual(metadata[key], original[key]) { primaryChanged = true } }
+			for _, key := range []string{"content", "storageKey", "status", "errorDetails", "naturalWidth", "naturalHeight", "bytes", "mimeType", "durationMs", "primaryImageId", "primaryMediaId", "primaryTextId"} { if primaryChanged && key != "status" && key != "errorDetails" { continue }; if value, ok := latest[key]; ok { metadata[key] = value } else { delete(metadata, key) } }
 		}
 		node["metadata"] = metadata
 	}
@@ -173,7 +175,7 @@ func (a *App) RevertProject(userID, id string, version, target uint64) (Project,
 		var active int64
 		if err := a.db.Model(&GenerationTask{}).Where("project_id = ? AND node_id = ? AND status NOT IN ?", id, text(node["id"]), []string{"succeeded", "failed", "cancelled", "interrupted"}).Count(&active).Error; err != nil { return project, err }
 		if active == 0 { metadata["status"] = "idle" }
-		for _, key := range []string{"images", "texts"} { for _, raw := range array(metadata[key]) {
+		for _, key := range []string{"images", "mediaResults", "texts"} { for _, raw := range array(metadata[key]) {
 			slot := object(raw); if slot["status"] != "loading" { continue }
 			var pending int64
 			if err := a.db.Model(&GenerationTask{}).Where("project_id = ? AND node_id = ? AND json_extract(input, '$.resultSlotId') = ? AND status NOT IN ?", id, text(node["id"]), text(slot["id"]), []string{"succeeded", "failed", "cancelled", "interrupted"}).Count(&pending).Error; err != nil { return project, err }

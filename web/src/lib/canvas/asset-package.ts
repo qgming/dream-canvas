@@ -8,7 +8,7 @@ export function collectPackageAssets(value: unknown, keys = new Set<string>()) {
             const id = assetId(item) || (key === "assetId" ? item : "");
             if (id) keys.add(`asset:${id}`);
         } else if (Array.isArray(item)) item.forEach((child) => walk(child, key));
-        else if (item && typeof item === "object") Object.entries(item).forEach(([name, child]) => { if (!["title", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"].includes(name)) walk(child, name); });
+        else if (item && typeof item === "object") Object.entries(item).forEach(([name, child]) => { if (!["title", "name", "prompt", "composerContent", "text", "instructions", "systemPrompt", "errorDetails"].includes(name)) walk(child, name); });
     };
     walk(value);
     return keys;
@@ -26,7 +26,7 @@ export function replacePackageAssets<T>(value: T, files: Map<string, ServerAsset
         }
         if (Array.isArray(item)) return item.map(walk);
         if (!item || typeof item !== "object") return item;
-        const result = Object.fromEntries(Object.entries(item).map(([key, child]) => [key, key === "assetId" && typeof child === "string" ? files.get(`asset:${child}`)?.id || child : walk(child)]));
+        const result = Object.fromEntries(Object.entries(item).map(([key, child]) => [key, key === "name" ? child : key === "assetId" && typeof child === "string" ? files.get(`asset:${child}`)?.id || child : walk(child)]));
         if (typeof result.storageKey === "string" && result.storageKey.startsWith("asset:")) {
             const url = assetUrl(result.storageKey.slice(6));
             for (const key of ["url", "content", "dataUrl"]) if (typeof result[key] === "string") result[key] = url;

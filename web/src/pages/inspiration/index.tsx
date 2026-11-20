@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tabs } from "@animate-ui/react/primitives/radix-ui";
 import { useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Ellipsis, FilePenLine, FileText, Image, LayoutGrid, MessageSquareText, Plus, RefreshCw, Search, Sparkles, Trash2, Video, Workflow } from "lucide-react";
+import { Check, ChevronDown, Ellipsis, FilePenLine, FileText, Image, LayoutGrid, MessageSquareText, Plus, RefreshCw, Sparkles, Trash2, Video, Workflow } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState, Notice, Spinner } from "@/components/ui/display";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import { Menu, type MenuItem } from "@/components/ui/popover";
 import { PromptCard } from "@/components/prompts/prompt-card";
 import { PromptDetailDialog } from "@/components/prompts/prompt-detail-dialog";
-import { usePromptList } from "@/components/prompts/use-prompt-list";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useFeedback } from "@/hooks/use-feedback";
 import { assetId } from "@/services/api/assets";
 import { createAssistantSkillDraft, deleteAssistantSkill, fetchAssistantSkill, setAssistantSkillEnabled, type AgentSkillDetail, type AgentSkillSummary } from "@/services/api/assistant-skills";
 import { captureSession } from "@/services/api/client";
-import { ALL_PROMPTS_OPTION, deletePrompt, fetchPrompt, type Prompt, type PromptScope, type PromptType } from "@/services/api/prompts";
+import { ALL_PROMPTS_OPTION, deletePrompt, fetchPrompt, fetchPrompts, type Prompt, type PromptScope, type PromptType } from "@/services/api/prompts";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentChatItem } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -40,8 +40,11 @@ export default function InspirationPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const kind = kinds.some((entry) => entry.key === searchParams.get("kind")) ? searchParams.get("kind") as InspirationKind : "all";
     const [keyword, setKeyword] = useState("");
+    const [debouncedKeyword, setDebouncedKeyword] = useState("");
     const [scope, setScope] = useState<PromptScope>("all");
     const [category, setCategory] = useState(ALL_PROMPTS_OPTION);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
     const [promptDetail, setPromptDetail] = useState<Prompt | null>(null);
     const [promptEditor, setPromptEditor] = useState<{ prompt: Prompt | null } | null>(null);
     const [skillDetail, setSkillDetail] = useState<AgentSkillDetail | null>(null);
@@ -65,19 +68,50 @@ export default function InspirationPage() {
     const projectsError = useCanvasStore((state) => state.error);
     const showSkills = kind === "all" || kind === "skills";
     const showPrompts = kind !== "skills";
-    const prompts = usePromptList({ keyword, category, scope, type: kind === "skills" ? "all" : kind, enabled: showPrompts });
     const filteredSkills = useMemo(() => {
-        const search = keyword.trim().toLowerCase();
+        const search = debouncedKeyword.trim().toLowerCase();
         return skills.filter((skill) => (scope === "all" || skill.scope === scope) && (!search || [skill.name, skill.description, skill.interface?.displayName, skill.interface?.shortDescription, skill.shortDescription].some((value) => value?.toLowerCase().includes(search))));
-    }, [skills, keyword, scope]);
+    }, [skills, debouncedKeyword, scope]);
+    const skillCount = showSkills ? filteredSkills.length : 0;
+    const start = (page - 1) * pageSize;
+    const visibleSkills = filteredSkills.slice(start, start + pageSize);
+    const promptOffset = Math.max(0, start - skillCount);
+    const promptLimit = Math.max(0, start + pageSize - skillCount) - promptOffset;
+    const promptType = kind === "skills" ? "all" : kind;
+    const prompts = useQuery({
+        queryKey: ["prompts", "inspiration", i18n.resolvedLanguage, scope, promptType, debouncedKeyword, category, promptOffset, promptLimit, pageSize],
+        queryFn: async () => {
+            const firstPage = Math.floor(promptOffset / pageSize) + 1;
+            const offset = promptOffset % pageSize;
+            const filters = { keyword: debouncedKeyword, category, scope, type: promptType, pageSize };
+            const first = await fetchPrompts({ ...filters, page: firstPage });
+            let items = first.items;
+            if (offset + promptLimit > pageSize && firstPage * pageSize < first.total) {
+                const next = await fetchPrompts({ ...filters, page: firstPage + 1 });
+                items = [...items, ...next.items];
+            }
+            return { ...first, items: items.slice(offset, offset + promptLimit) };
+        },
+        enabled: showPrompts && (!showSkills || skillsLoaded),
+    });
+    const visiblePrompts = prompts.data?.items || [];
+    const promptTotal = prompts.data?.total || 0;
+    const total = skillCount + (showPrompts ? promptTotal : 0);
+    const paginationReady = (!showSkills || skillsLoaded && !skillsErrors.length) && (!showPrompts || prompts.isSuccess);
     const assistantBusy = sending || waiting;
     const skillBusy = Boolean(busy || generatingSource);
 
     useEffect(() => { if (!useAgentSkillStore.getState().loaded && !useAgentSkillStore.getState().loading) void loadSkills(); }, [loadSkills]);
     useEffect(() => { setCategory(ALL_PROMPTS_OPTION); setPromptDetail(null); setSkillDetail(null); }, [i18n.resolvedLanguage]);
     useEffect(() => { if (draft) setSkillEditor((current) => current || { draft }); }, [draft]);
+    useEffect(() => {
+        const timer = setTimeout(() => { setDebouncedKeyword(keyword); setPage(1); }, 300);
+        return () => clearTimeout(timer);
+    }, [keyword]);
+    useEffect(() => { setPage(1); }, [kind, scope, category, pageSize, i18n.resolvedLanguage]);
+    useEffect(() => { if (paginationReady) setPage((current) => Math.min(current, Math.max(1, Math.ceil(total / pageSize)))); }, [paginationReady, total, pageSize]);
 
-    const changeKind = (value: string) => { setSearchParams(value === "all" ? {} : { kind: value }, { replace: true }); setCategory(ALL_PROMPTS_OPTION); };
+    const changeKind = (value: string) => { setPage(1); setSearchParams(value === "all" ? {} : { kind: value }, { replace: true }); setCategory(ALL_PROMPTS_OPTION); };
     const revealPersonal = (value: InspirationKind) => { setScope("user"); setKeyword(""); changeKind(value); };
     const refresh = () => Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["prompts"] }), loadSkills()]);
     const run = async (key: string, action: () => Promise<void>) => {
@@ -157,15 +191,15 @@ export default function InspirationPage() {
 
     const skillsSection = <section aria-label={t("inspiration.skills")}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div><h2 className="text-base font-medium">{t("inspiration.skills")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("inspiration.skillsHint")}</p></div>
+            <h2 className="text-base font-medium">{t("inspiration.skills")}</h2>
             {!skillsErrors.length && skillsLoaded ? <span className="text-xs text-muted-foreground" aria-live="polite">{t("inspiration.itemCount", { count: filteredSkills.length })}</span> : null}
         </div>
         {skillsErrors.length ? <Notice type="error" className="mt-4" title={t("agent.skillManager.readFailed")} description={skillsErrors.join("\n")} action={<Button loading={skillsLoading} onClick={() => void loadSkills()}>{t("common.retry")}</Button>} /> : null}
-        {skillsLoading && !skillsLoaded ? <div className="flex h-40 items-center justify-center"><Spinner /></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{filteredSkills.map((skill) => {
+        {skillsLoading && !skillsLoaded ? <div className="flex h-40 items-center justify-center"><Spinner /></div> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">{visibleSkills.map((skill) => {
             const selected = selectedSkill?.name === skill.name && selectedSkill.path === skill.path;
             return <article key={skill.path} data-selected={selected} className="flex h-full min-h-40 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25 data-[selected=true]:border-primary">
                 <button type="button" onClick={() => void readSkill(skill)} disabled={Boolean(busy)} className="flex min-w-0 flex-1 flex-col p-3 pb-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60">
-                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Sparkles className="size-3.5" />{t("inspiration.skill")}</span><span>{t(skill.managed ? "inspiration.mine" : "inspiration.builtin")}</span></div>
+                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Sparkles className="size-3.5 text-foreground" />{t("inspiration.skill")}</span><span>{t(skill.managed ? "inspiration.mine" : "inspiration.builtin")}</span></div>
                     <h3 className="line-clamp-2 text-sm font-medium leading-5">{skill.interface?.displayName || skill.name}</h3>
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.interface?.shortDescription || skill.shortDescription || skill.description}</p>
                 </button>
@@ -189,40 +223,40 @@ export default function InspirationPage() {
 
     const promptsSection = <section aria-label={t("inspiration.prompts")}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="text-base font-medium">{t("inspiration.prompts")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("inspiration.promptsHint")}</p></div>
-            <div className="flex items-center gap-3">
-                {!prompts.query.isError && !prompts.query.isPending ? <span className="text-xs text-muted-foreground" aria-live="polite">{t("inspiration.itemCount", { count: prompts.total })}</span> : null}
-                <Choice compact className="w-40" aria-label={t("prompts.category")} value={category} onChange={setCategory} options={prompts.categories.map((value) => ({ value, label: value === ALL_PROMPTS_OPTION ? t("inspiration.allCategories") : value }))} />
-            </div>
+            <h2 className="text-base font-medium">{t("inspiration.prompts")}</h2>
+            {prompts.isSuccess ? <span className="text-xs text-muted-foreground" aria-live="polite">{t("inspiration.itemCount", { count: promptTotal })}</span> : null}
         </div>
-        {prompts.query.error ? <Notice type="error" className="mt-4" title={t("prompts.loadFailed")} description={prompts.query.error.message} action={<Button onClick={() => void prompts.query.refetch()}>{t("common.retry")}</Button>} /> : null}
-        {prompts.query.isLoading ? <div className="flex h-40 items-center justify-center"><Spinner /></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{prompts.items.map((prompt) => <PromptCard key={prompt.id} item={prompt} onOpen={() => setPromptDetail(prompt)} onCopy={() => void copyText(prompt.prompt, t("common.promptCopied"))} extraAction={!prompt.builtIn ? <Menu placement="bottomRight" disabled={Boolean(busy)} items={[
+        {prompts.error ? <Notice type="error" className="mt-4" title={t("prompts.loadFailed")} description={prompts.error.message} action={<Button onClick={() => void prompts.refetch()}>{t("common.retry")}</Button>} /> : null}
+        {prompts.isPending ? <div className="flex h-40 items-center justify-center"><Spinner /></div> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">{visiblePrompts.map((prompt) => <PromptCard key={prompt.id} item={prompt} onOpen={() => setPromptDetail(prompt)} onCopy={() => void copyText(prompt.prompt, t("common.promptCopied"))} extraAction={!prompt.builtIn ? <Menu placement="bottomRight" disabled={Boolean(busy)} items={[
             { key: "edit", icon: <FilePenLine />, label: t("common.edit"), onClick: () => void run(prompt.id, async () => setPromptEditor({ prompt: await fetchPrompt(prompt.id) })) },
             { key: "delete", icon: <Trash2 />, label: t("common.delete"), danger: true, onClick: () => removePrompt(prompt) },
         ]}><Button variant="ghost" size="icon" className="size-7" title={t("inspiration.moreActions", { name: prompt.title })} aria-label={t("inspiration.moreActions", { name: prompt.title })} disabled={Boolean(busy)} loading={busy === prompt.id}><Ellipsis className="size-4" /></Button></Menu> : null} />)}</div>}
-        {!prompts.query.isLoading && !prompts.query.isError && !prompts.items.length ? <EmptyState description={t(scope === "user" && !keyword && category === ALL_PROMPTS_OPTION ? "prompts.personalEmpty" : "prompts.empty")} /> : null}
-        {prompts.query.hasNextPage ? <div className="py-5 text-center"><Button variant="ghost" loading={prompts.query.isFetchingNextPage} onClick={() => void prompts.query.fetchNextPage()}>{t("prompts.more")}</Button></div> : null}
+        {prompts.isSuccess && !promptTotal ? <EmptyState description={t(scope === "user" && !keyword && category === ALL_PROMPTS_OPTION ? "prompts.personalEmpty" : "prompts.empty")} /> : null}
     </section>;
-    const content = <div className="space-y-9 pt-3">{showSkills ? skillsSection : null}{showPrompts ? promptsSection : null}</div>;
+    const content = <div className="space-y-6">{showSkills && (visibleSkills.length > 0 || !skillCount || !skillsLoaded || skillsErrors.length > 0) ? skillsSection : null}{showPrompts && (visiblePrompts.length > 0 || !prompts.data || !promptTotal || prompts.isError) ? promptsSection : null}</div>;
 
     return <main className="h-full overflow-y-auto bg-background px-4 py-6 text-foreground sm:px-6 lg:py-8">
         <div className="mx-auto max-w-7xl">
-            <PageHeader title={t("inspiration.title")} description={t("inspiration.description")} actions={<>
-                <Button variant="ghost" size="icon" title={t("inspiration.refresh")} loading={skillsLoading || prompts.query.isFetching} onClick={() => void refresh()}><RefreshCw className="size-4" /></Button>
+            <PageHeader className="mb-4" title={t("inspiration.title")} actions={<>
+                <SearchInput className="w-full sm:w-72" aria-label={t("inspiration.search")} placeholder={t("inspiration.search")} value={keyword} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
+                <Button variant="outline" size="icon" title={t("inspiration.refresh")} aria-label={t("inspiration.refresh")} loading={skillsLoading || prompts.isFetching} onClick={() => void refresh()}><RefreshCw className="size-4" /></Button>
                 <Menu placement="bottomRight" disabled={Boolean(busy)} items={createItems}><Button variant="default" disabled={Boolean(busy)} icon={<Plus className="size-4" />}>{t("inspiration.create")}<ChevronDown className="size-3.5" /></Button></Menu>
             </>} />
-            <div className="mb-3 mt-6 flex flex-wrap items-center gap-3">
-                <Input className="min-w-0 flex-1 basis-56" prefix={<Search className="size-4" />} aria-label={t("inspiration.search")} placeholder={t("inspiration.search")} value={keyword} onChange={(event) => setKeyword(event.target.value)} />
-                <Choice<PromptScope> className="w-36" aria-label={t("inspiration.scope")} value={scope} onChange={(value) => { setScope(value); setCategory(ALL_PROMPTS_OPTION); }} options={(["all", "builtin", "user"] as const).map((value) => ({ value, label: t(`inspiration.scopes.${value}`) }))} />
-            </div>
             <Tabs.Root value={kind} onValueChange={changeKind} className="min-w-0">
-                <div className="thin-scrollbar mb-4 overflow-x-auto overflow-y-hidden pb-2">
-                    <Tabs.List aria-label={t("inspiration.browseByType")} className="inline-flex w-max items-center gap-1 rounded-xl bg-muted p-1">
-                        {kinds.map(({ key, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-card data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4" />{t(`inspiration.kinds.${key}`)}</Tabs.Trigger>)}
-                    </Tabs.List>
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                    <div className="thin-scrollbar min-w-0 basis-full overflow-x-auto overflow-y-hidden pb-2 lg:flex-1 lg:basis-0">
+                        <Tabs.List aria-label={t("inspiration.browseByType")} className="inline-flex w-max items-center gap-1 rounded-xl border border-border bg-card p-1">
+                            {kinds.map(({ key, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-accent data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4 text-foreground" />{t(`inspiration.kinds.${key}`)}</Tabs.Trigger>)}
+                        </Tabs.List>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {showPrompts ? <Choice className="w-40" aria-label={t("prompts.category")} value={category} onChange={(value) => { setPage(1); setCategory(value); }} options={[ALL_PROMPTS_OPTION, ...(prompts.data?.categories || [])].map((value) => ({ value, label: value === ALL_PROMPTS_OPTION ? t("inspiration.allCategories") : value }))} /> : null}
+                        <Choice<PromptScope> className="w-36" aria-label={t("inspiration.scope")} value={scope} onChange={(value) => { setPage(1); setScope(value); setCategory(ALL_PROMPTS_OPTION); }} options={(["all", "builtin", "user"] as const).map((value) => ({ value, label: t(`inspiration.scopes.${value}`) }))} />
+                    </div>
                 </div>
                 {kinds.map(({ key }) => <InspirationTabPanel key={key} value={key} active={key === kind}>{key === kind ? content : null}</InspirationTabPanel>)}
             </Tabs.Root>
+            {paginationReady ? <Pagination className="mt-5" current={page} pageSize={pageSize} total={total} onChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} /> : null}
         </div>
 
         <PromptDetailDialog prompt={promptDetail} onClose={() => setPromptDetail(null)} onCopy={(prompt) => void copyText(prompt, t("common.promptCopied"))} />

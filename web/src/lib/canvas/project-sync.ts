@@ -48,7 +48,7 @@ export function rebaseProject(base: CanvasProject, local: CanvasProject, remote:
         const metadata = { ...node.metadata }, incoming = current.metadata || {}, before = original.metadata || {};
         if (before.status !== "loading") return node;
         let completed = false;
-        for (const key of ["images", "texts"] as const) {
+        for (const key of ["images", "mediaResults", "texts"] as const) {
             const slots = metadata[key];
             if (!slots) continue;
             const merged = slots.map((slot) => {
@@ -59,7 +59,10 @@ export function rebaseProject(base: CanvasProject, local: CanvasProject, remote:
             Object.assign(metadata, { [key]: merged });
         }
         if (completed || metadata.status === "loading" && incoming.status !== "loading" && (incoming.content !== before.content || incoming.storageKey !== before.storageKey)) {
-            for (const key of ["content", "storageKey", "status", "errorDetails", "naturalWidth", "naturalHeight", "bytes", "mimeType", "durationMs", "primaryImageId", "primaryTextId"] as const) Object.assign(metadata, { [key]: incoming[key] });
+            const primaryChanged = (["primaryImageId", "primaryMediaId", "primaryTextId"] as const).some((key) => metadata[key] !== before[key]);
+            for (const key of ["content", "storageKey", "status", "errorDetails", "naturalWidth", "naturalHeight", "bytes", "mimeType", "durationMs", "primaryImageId", "primaryMediaId", "primaryTextId"] as const) {
+                if (!primaryChanged || key === "status" || key === "errorDetails") Object.assign(metadata, { [key]: incoming[key] });
+            }
         }
         return { ...node, metadata };
     }) };

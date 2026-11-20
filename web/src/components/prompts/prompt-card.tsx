@@ -13,7 +13,7 @@ export function PromptCard({ item, onOpen, onCopy, extraAction, compact = false 
     return <article className={cn("flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25", !compact && "min-h-40")}>
         <button type="button" onClick={onOpen} className={cn("flex min-w-0 flex-1 flex-col p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", !compact && "pb-1")}>
             <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                <span className="inline-flex items-center gap-1.5"><Icon className="size-3.5" />{t(`prompts.types.${item.type}`)}</span>
+                <span className="inline-flex items-center gap-1.5"><Icon className="size-3.5 text-foreground" />{t(`prompts.types.${item.type}`)}</span>
                 {item.category ? <span>{item.category}</span> : null}
                 <span className="ml-auto">{t(item.builtIn ? "inspiration.builtin" : "inspiration.mine")}</span>
             </div>

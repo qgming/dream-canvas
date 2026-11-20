@@ -35,6 +35,7 @@ export type CanvasNodeImage = {
     naturalHeight: number;
     bytes: number;
     mimeType: string;
+    durationMs?: number;
 };
 
 export type CanvasNodeText = {
@@ -67,6 +68,8 @@ export type CanvasNodeMetadata = {
     freeResize?: boolean;
     images?: CanvasNodeImage[];
     primaryImageId?: string;
+    mediaResults?: CanvasNodeImage[];
+    primaryMediaId?: string;
     storageKey?: string;
     mimeType?: string;
     bytes?: number;
@@ -78,9 +81,13 @@ export type CanvasNodeMetadata = {
     [key: string]: unknown;
 };
 
+export type CanvasNodeIdentity = { type: CanvasNodeTypeId; number: number; copy: number };
+
 export type CanvasNodeData = {
     id: string;
     type: CanvasNodeTypeId;
+    identity?: CanvasNodeIdentity;
+    name?: string;
     title: string;
     position: Position;
     width: number;
@@ -101,13 +108,6 @@ export type CanvasAssistantReference = {
     dataUrl?: string;
     storageKey?: string;
     text?: string;
-};
-
-export type CanvasAssistantImage = {
-    id: string;
-    dataUrl: string;
-    storageKey?: string;
-    prompt: string;
 };
 
 export type CanvasAssistantMessage = {

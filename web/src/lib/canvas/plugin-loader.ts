@@ -5,9 +5,6 @@ import type { CanvasPlugin } from "@/types/canvas-plugin";
 import type { CanvasPluginCatalogEntry } from "@/services/api/canvas-plugins";
 
 const builtinModules: Record<string, () => Promise<{ default: unknown }>> = {
-    markdown: () => import("../../../../plugins/canvas/markdown/src/index"),
-    svg: () => import("../../../../plugins/canvas/svg/src/index"),
-    html: () => import("../../../../plugins/canvas/html/src/index"),
     panorama: () => import("../../../../plugins/canvas/panorama/src/index"),
     "sticky-note": () => import("../../../../plugins/canvas/sticky-note/src/index"),
     upscale: () => import("../../../../plugins/canvas/upscale/src/index"),

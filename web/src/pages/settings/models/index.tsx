@@ -20,7 +20,7 @@ export default function ModelsPage() {
 
     return (
         <section className="space-y-6">
-            <PageHeader title={t("settings.models")} description={t("settings.modelsDescription")} actions={<Button variant="ghost" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void query.refetch()}>{t("common.refresh")}</Button>} />
+            <PageHeader title={t("settings.models")} description={t("settings.modelsDescription")} actions={<Button variant="outline" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void query.refetch()}>{t("common.refresh")}</Button>} />
             {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("common.retry")}</Button>} /> : null}
             {query.isLoading ? <div className="flex min-h-40 items-center justify-center"><Spin /></div> : null}
             {!query.error && query.data?.channels.length === 0 ? <Empty description={t("settings.modelsEmpty")} /> : null}

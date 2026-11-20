@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { Collapsible } from "@animate-ui/react/primitives/radix-ui";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -83,7 +83,7 @@ export default function UsagePage() {
     return <section className="space-y-6">
         <PageHeader title={t("usage.title")} description={t("usage.description")} actions={<>
             <span className="text-xs text-muted-foreground">{timeZone}</span>
-            <Button variant="ghost" loading={!rangeInvalid && query.isFetching} disabled={rangeInvalid} onClick={refresh}>{t("workspace.refresh")}</Button>
+            <Button variant="outline" icon={<RefreshCw />} loading={!rangeInvalid && query.isFetching} disabled={rangeInvalid} onClick={refresh}>{t("workspace.refresh")}</Button>
         </>} />
 
         <div className="flex flex-wrap items-center gap-1" aria-label={t("usage.rangeLabel")}>
@@ -156,7 +156,7 @@ function UsageDetails({ row }: { row: UsageEntry }) {
             </button>
         </Collapsible.Trigger>
         <Collapsible.Content>
-            <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
+            <div className="mt-3 space-y-3 rounded-lg border border-border bg-card p-3">
                 <ReadableObject title={t("usage.usage")} value={row.usage} />
             </div>
         </Collapsible.Content>

@@ -31,7 +31,7 @@ export function Choice<T extends string | number>({ value, onChange, options = [
             <span className={cn("flex min-w-0 flex-1 flex-wrap gap-1", !selected.length && "text-muted-foreground")}>{selected.length ? selected.map((entry) => {
                 const label = options.find((item) => item.value === entry)?.label ?? entry;
                 return multiple ? <Badge key={String(entry)}>{label}</Badge> : <span key={String(entry)} className="truncate">{label}</span>;
-            }) : placeholder || t("ui.select")}</span><ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            }) : placeholder || t("ui.select")}</span><ChevronDown className="size-3.5 shrink-0 text-foreground" />
         </button></Popover.Trigger>
         <Popover.Portal><Popover.Content data-choice-content data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore sideOffset={6} align="start" className="z-[1500] min-w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg outline-none" onWheel={(event) => event.stopPropagation()}>
             <Command label={props["aria-label"] || placeholder || t("ui.select")} loop>

@@ -38,7 +38,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect, initialType =
             <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto pr-1" onScroll={handleScroll}>
                 {query.isLoading ? <div className="flex h-40 items-center justify-center"><Spinner /></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{items.map((item) => <PromptCard key={item.id} item={item} onOpen={() => select(item.prompt)} onCopy={() => select(item.prompt)} compact />)}</div>}
                 {!query.isLoading && !query.error && !items.length ? <EmptyState description={t("prompts.empty")} /> : null}
-                {query.hasNextPage ? <div className="py-4 text-center"><Button variant="ghost" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t("prompts.more")}</Button></div> : null}
+                {query.hasNextPage ? <div className="py-4 text-center"><Button variant="outline" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t("prompts.more")}</Button></div> : null}
             </div>
         </div>
     </Dialog>;

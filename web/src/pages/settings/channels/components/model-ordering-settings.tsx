@@ -27,7 +27,7 @@ function OrderRow({ item, index, count, disabled, onOrderStart, onOrderEnd, onMo
     const reducedMotion = useShouldReduceMotion();
     const dragLabel = t("modelOrdering.dragItem", { name: item.name });
     return <Reorder.Item value={item.id} tabIndex={-1} drag={disabled ? false : "y"} dragListener={false} dragControls={controls} transition={reducedMotion ? tokens.transition.instant : tokens.spring.reflow} onKeyDown={(event) => { if (event.target === event.currentTarget) event.preventDefault(); }} onDragStart={disabled ? undefined : onOrderStart} onDragEnd={disabled ? undefined : onOrderEnd} className="flex items-center gap-2 border-b border-border px-2 py-2 last:border-b-0">
-        <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="size-7 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing" disabled={disabled} aria-label={dragLabel} onPointerDown={(event) => { if (!disabled) controls.start(event); }}>
+        <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="size-7 touch-none enabled:cursor-grab enabled:active:cursor-grabbing" disabled={disabled} aria-label={dragLabel} onPointerDown={(event) => { if (!disabled) controls.start(event); }}>
             <GripVertical />
         </Button>
         <OrderButtons label={dragLabel} index={index} count={count} disabled={disabled} onMove={onMove} />
@@ -44,7 +44,7 @@ function OrderRow({ item, index, count, disabled, onOrderStart, onOrderEnd, onMo
 function OrderGroup({ value, items, disabled, onPreview, onCommit, onReorder }: { value: string; items: Item[]; disabled: boolean; onPreview: (value: string, ids: string[]) => void; onCommit: (value: string) => void; onReorder: (value: string, ids: string[]) => void }) {
     const { t } = useTranslation();
     const ids = items.map((item) => item.id);
-    return items.length ? <Reorder.Group axis="y" values={ids} onReorder={(next) => onPreview(value, next)} className="overflow-hidden rounded-lg border border-border">
+    return items.length ? <Reorder.Group axis="y" values={ids} onReorder={(next) => onPreview(value, next)} className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground">
         {items.map((item, index) => <OrderRow key={item.id} item={item} index={index} count={items.length} disabled={disabled} onOrderStart={() => onPreview(value, ids)} onOrderEnd={() => onCommit(value)} onMove={(nextIndex) => onReorder(value, moveBy(ids, index, nextIndex))} />)}
     </Reorder.Group> : <p className="py-8 text-center text-sm text-muted-foreground">{t("modelOrdering.empty")}</p>;
 }

@@ -209,8 +209,6 @@ func (a *App) Router(web string) *gin.Engine {
 		c.Next()
 	})
 	admin.GET("/users", a.listUsers)
-	admin.GET("/assets/filename-repair", a.assetFilenameRepairStatus)
-	admin.POST("/assets/filename-repair", a.queueAssetFilenameRepair)
 	a.canvasPluginRoutes(authed, admin)
 	admin.POST("/tasks/:id/recover-query", a.recoverTaskQuery)
 	admin.POST("/users", a.createUser)

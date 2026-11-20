@@ -9,6 +9,7 @@ import * as api from "@/services/api/projects";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { canvasProjectSchema } from "@/lib/canvas/project-schema";
 import { projectChanges, rebaseProject } from "@/lib/canvas/project-sync";
+import { assignCanvasNodeIdentities } from "@/lib/canvas/canvas-node-identity";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -129,7 +130,7 @@ function flushProject(id: string): Promise<void> {
 function stage(id: string, patch: Partial<CanvasProject>) {
     const state = useCanvasStore.getState(), current = state.openProject(id), owner = useAuthStore.getState().user?.id;
     if (!current || !owner || Object.entries(patch).every(([key, value]) => dequal(current[key as keyof CanvasProject], value))) return;
-    const project = { ...current, ...patch };
+    const project = { ...current, ...patch, ...(patch.nodes ? { nodes: assignCanvasNodeIdentities(patch.nodes, current.nodes) } : {}) };
     operationIds.set(project, activeOperations.get(id) || nanoid());
     useCanvasStore.setState({ projects: state.projects.map((item) => item.id === id ? project : item) });
     persistDraft(owner, project);

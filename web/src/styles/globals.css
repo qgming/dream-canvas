@@ -10,6 +10,7 @@
     --default-transition-timing-function: var(--motion-color-easing);
     --color-background: var(--background);
     --color-foreground: var(--foreground);
+    --color-overlay: var(--overlay);
     --color-border: var(--border);
     --color-ring: var(--ring);
     --radius-sm: 6px;
@@ -99,7 +100,7 @@
     }
 
     .thin-scrollbar {
-        scrollbar-color: rgba(120, 113, 108, 0.45) transparent;
+        scrollbar-color: color-mix(in srgb, var(--foreground) 30%, transparent) transparent;
         scrollbar-width: thin;
     }
 
@@ -109,7 +110,7 @@
     }
 
     .thin-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(120, 113, 108, 0.45);
+        background: color-mix(in srgb, var(--foreground) 30%, transparent);
         border-radius: 999px;
     }
 
@@ -119,7 +120,7 @@
     }
 
     .hover-scrollbar:hover {
-        scrollbar-color: rgba(120, 113, 108, 0.5) transparent;
+        scrollbar-color: color-mix(in srgb, var(--foreground) 40%, transparent) transparent;
     }
 
     .hover-scrollbar::-webkit-scrollbar {
@@ -133,12 +134,12 @@
     }
 
     .hover-scrollbar:hover::-webkit-scrollbar-track {
-        background: rgba(120, 113, 108, 0.12);
+        background: color-mix(in srgb, var(--foreground) 6%, transparent);
         border-radius: 999px;
     }
 
     .hover-scrollbar:hover::-webkit-scrollbar-thumb {
-        background: rgba(120, 113, 108, 0.5);
+        background: color-mix(in srgb, var(--foreground) 40%, transparent);
     }
 
     .hover-scrollbar-hint {
@@ -146,7 +147,7 @@
     }
 
     .hover-scrollbar-hint::after {
-        background: rgba(120, 113, 108, 0.42);
+        background: color-mix(in srgb, var(--foreground) 30%, transparent);
         border-radius: 999px;
         bottom: 4px;
         content: "";
@@ -228,6 +229,27 @@
         }
     }
 
+}
+
+.cm-theme-light .cm-editor,
+.cm-theme-dark .cm-editor,
+.cm-editor .cm-gutters {
+    background-color: var(--card);
+    color: var(--foreground);
+}
+
+.cm-editor .cm-gutters {
+    border-color: var(--border);
+    color: var(--muted-foreground);
+}
+
+.cm-editor .cm-activeLine,
+.cm-editor .cm-activeLineGutter {
+    background-color: var(--accent);
+}
+
+.cm-editor .cm-cursor {
+    border-left-color: var(--foreground);
 }
 
 .agent-streamdown {
@@ -327,7 +349,7 @@
 
 [data-streamdown="link-safety-modal"] {
     padding: 1rem;
-    background: rgb(28 25 23 / 24%);
+    background: var(--overlay);
     backdrop-filter: blur(8px);
 }
 
@@ -337,7 +359,9 @@
     padding: 1.25rem;
     border-color: color-mix(in srgb, currentColor 12%, transparent);
     border-radius: 1rem;
-    box-shadow: 0 20px 60px rgb(28 25 23 / 18%);
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 18%);
 }
 
 [data-streamdown="link-safety-modal"] > div > button {

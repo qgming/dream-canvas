@@ -59,7 +59,7 @@ export function CanvasSelectionToolbar({
             </svg>
             {showActions ? (
                 <div
-                    className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-xl border border-border bg-popover text-sm text-popover-foreground shadow-lg"
+                    className="absolute z-[70] flex -translate-x-1/2 -translate-y-full items-center gap-1 overflow-visible rounded-xl border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
                     style={{ left: left + width / 2, top: top - 8 }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -74,8 +74,8 @@ export function CanvasSelectionToolbar({
 
 function SelectionAction({ title, label, icon, onClick }: { title: string; label: string; icon: ReactNode; onClick: () => void }) {
     return (
-        <div className="flex h-12 items-center px-1.5"><Tooltip title={title} placement="top">
-            <Button variant="ghost" className="h-9 gap-2 rounded-lg px-2.5" icon={icon} onClick={onClick} aria-label={title}>{label}</Button>
-        </Tooltip></div>
+        <Tooltip title={title} placement="top">
+            <Button variant="ghost" className="h-8 gap-1.5 rounded-lg px-2" icon={icon} onClick={onClick} aria-label={title}>{label}</Button>
+        </Tooltip>
     );
 }

@@ -9,6 +9,7 @@ import { EditorForm, Field } from "@/components/ui/form";
 import { Choice } from "@/components/ui/choice";
 import { Switch } from "@/components/ui/controls";
 import { useTranslation } from "react-i18next";
+import { RefreshCw, Save } from "lucide-react";
 
 import { useConfigStore } from "@/stores/use-config-store";
 import { captureSession } from "@/services/api/client";
@@ -35,8 +36,8 @@ export default function PreferencesPage() {
         <section className="space-y-6">
             <PageHeader stickyActions title={t("settings.preferences")} description={t("settings.preferencesDescription")} actions={<>
                 <span role="status" className="text-xs text-muted-foreground">{saving ? appI18n.t("workspace.savePreferences") : dirty ? appI18n.t("workspace.unsaved") : hydrated ? appI18n.t("workspace.allSaved") : t("settings.loading")}</span>
-                <Button variant="ghost" disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
-                <Button type="submit" form="preferences-form" disabled={!hydrated || !dirty || conflict} loading={saving}>{t("common.save")}</Button>
+                <Button variant="outline" icon={<RefreshCw />} disabled={saving} onClick={reload}>{appI18n.t("workspace.reload")}</Button>
+                <Button variant="default" icon={<Save />} type="submit" form="preferences-form" disabled={!hydrated || !dirty || conflict} loading={saving}>{t("common.save")}</Button>
             </>} />
             {error ? <Alert type="error" title={error} action={<Button onClick={reload}>{appI18n.t("workspace.reload")}</Button>} /> : null}
             <EditorForm id="preferences-form" disabled={!hydrated || saving} className="space-y-8" onSubmit={() => useConfigStore.getState().save()}>

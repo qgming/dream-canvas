@@ -8,6 +8,7 @@ import { EditorForm, Field, useEditorForm } from "@/components/ui/form";
 import { z } from "zod";
 import { PasswordInput } from "@/components/ui/input";
 import { useState } from "react";
+import { KeyRound } from "lucide-react";
 
 import { changePassword } from "@/services/api/auth";
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -28,7 +29,7 @@ export default function AccountSettingsPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader stickyActions title={appI18n.t("workspace.account")} description={appI18n.t("settings.accountDescription")} actions={<Button type="submit" form="account-password" disabled={!form.formState.isDirty} loading={saving}>{appI18n.t("workspace.changePassword")}</Button>} />
+            <PageHeader stickyActions title={appI18n.t("workspace.account")} description={appI18n.t("settings.accountDescription")} actions={<Button variant="default" icon={<KeyRound />} type="submit" form="account-password" disabled={!form.formState.isDirty} loading={saving}>{appI18n.t("workspace.changePassword")}</Button>} />
             <dl>
                 <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
                     <dt className="font-medium">{appI18n.t("workspace.username")}</dt>

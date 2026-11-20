@@ -1,12 +1,12 @@
 import appI18n from "@/i18n";
-import { AudioLines, Clapperboard, Copy, Download, FileText, Image as ImageIcon, LayoutGrid, PencilLine, Trash2, Upload, Ellipsis } from "lucide-react";
+import { AudioLines, CircleAlert, Clapperboard, Clock3, CloudAlert, CloudCheck, CloudOff, CloudUpload, Copy, Database, Download, FileText, HardDrive, Image as ImageIcon, LayoutGrid, LoaderCircle, PencilLine, Plus, Trash2, Upload, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Tabs } from "@animate-ui/react/primitives/radix-ui";
 import { useQuery } from "@tanstack/react-query";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
-import { Menu } from "@/components/ui/popover";
+import { Menu, Tooltip } from "@/components/ui/popover";
 import { PageHeader } from "@/components/layout/page-header";
 import { Sheet } from "@/components/ui/dialog";
 import { EmptyState as Empty } from "@/components/ui/display";
@@ -15,6 +15,7 @@ import { z } from "zod";
 import { MediaPreview } from "@/components/ui/media-preview";
 import { Input, Textarea, SearchInput } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Pagination } from "@/components/ui/pagination";
 import { Choice } from "@/components/ui/choice";
 import { Badge as Tag } from "@/components/ui/display";
@@ -27,17 +28,13 @@ import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
-import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { retryAssetCleanup, retryAssetSync, listAssetVoices, saveAssetVoice } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 import { useConfigStore } from "@/stores/use-config-store";
-import { AssetFilenameRepair } from "./asset-filename-repair";
 
 type AssetFormValues = {
     kind: AssetKind;
     title: string;
-    coverUrl: string;
-    source?: string;
     note?: string;
     content?: string;
 };
@@ -57,9 +54,7 @@ export default function AssetsPage() {
     const { t } = useTranslation();
     const copyText = useCopyText();
     const form = useEditorForm<AssetFormValues>();
-    const coverInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
-    const assetInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
     const hydrated = useAssetStore((state) => state.hydrated);
     const assetError = useAssetStore((state) => state.error);
@@ -70,7 +65,7 @@ export default function AssetsPage() {
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+    const [pageSize, setPageSize] = useState(20);
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
@@ -82,19 +77,18 @@ export default function AssetsPage() {
     const savingRef = useRef(false);
     const deleteRef = useRef(false);
     const editorRevision = useRef(0);
-    const coverUrl = useWatch({ name: "coverUrl", control: form.control }) || "";
     const title = useWatch({ name: "title", control: form.control }) || "";
     const content = useWatch({ name: "content", control: form.control }) || "";
-    const validAssets = assets;
+    const mediaPreview = mediaDraft || (editingAsset?.kind === "video" || editingAsset?.kind === "audio" ? editingAsset.data : null);
 
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
-        return validAssets.filter((asset) => {
+        return assets.filter((asset) => {
             if (kindFilter !== "all" && asset.kind !== kindFilter) return false;
             if (!query) return true;
             return assetSearchText(asset).includes(query);
         });
-    }, [validAssets, keyword, kindFilter]);
+    }, [assets, keyword, kindFilter]);
 
     const visibleAssets = useMemo(() => {
         const start = (page - 1) * pageSize;
@@ -112,7 +106,7 @@ export default function AssetsPage() {
         setImageDraft(null);
         setMediaDraft(null);
         setFormKind("text");
-        form.reset({ kind: "text", title: "", coverUrl: "", source: t("assets.manual"), note: "", content: "" });
+        form.reset({ kind: "text", title: "", note: "", content: "" });
         setIsAssetOpen(true);
     };
 
@@ -125,8 +119,6 @@ export default function AssetsPage() {
         form.reset({
             kind: asset.kind,
             title: asset.title,
-            coverUrl: asset.coverUrl,
-            source: asset.source,
             note: asset.note,
             content: asset.kind === "text" ? asset.data.content : "",
         });
@@ -140,8 +132,8 @@ export default function AssetsPage() {
         if (revision !== editorRevision.current) return;
         const base = {
             title: values.title.trim(),
-            coverUrl: values.coverUrl?.trim() || (values.kind === "image" && imageDraft ? imageDraft.dataUrl : ""),
-            source: values.source?.trim(),
+            coverUrl: editingAsset?.coverUrl || "",
+            source: editingAsset ? editingAsset.source : t("assets.manual"),
             note: values.note?.trim(),
             metadata: editingAsset?.metadata || { source: "manual" },
         };
@@ -171,16 +163,6 @@ export default function AssetsPage() {
         } finally { savingRef.current = false; setSaving(false); }
     };
 
-    const readCoverFile = async (file?: File) => {
-        if (!file) return;
-        const assertSession = captureSession();
-        const revision = editorRevision.current;
-        const image = await uploadImage(file);
-        assertSession();
-        if (revision !== editorRevision.current) return;
-        form.setValue("coverUrl", image.url, { shouldDirty: true });
-    };
-
     const readImageFile = async (file?: File) => {
         if (!file) return;
         const assertSession = captureSession();
@@ -200,7 +182,6 @@ export default function AssetsPage() {
         if (revision !== editorRevision.current || form.getValues("kind") !== kind) return;
         const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
         setImageDraft(draft);
-        if (!form.getValues("coverUrl")) form.setValue("coverUrl", draft.dataUrl, { shouldDirty: true });
         if (!form.getValues("title")) form.setValue("title", file.name, { shouldDirty: true });
     };
 
@@ -224,36 +205,6 @@ export default function AssetsPage() {
         }
     };
 
-    const exportAllAssets = async () => {
-        if (!validAssets.length) {
-            notify.warning(t("assets.noneToExport"));
-            return;
-        }
-        try { await exportAssets(validAssets, t("assets.packageName")); }
-        catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.exportAssetsFailed")); }
-    };
-
-    const importAssetZip = async (file?: File) => {
-        if (!file) return;
-        const assertSession = captureSession();
-        try {
-            const importedAssets = await readAssetPackage(file);
-            for (const asset of importedAssets) {
-                assertSession();
-                const payload = { ...asset } as Record<string, unknown>;
-                delete payload.id;
-                delete payload.createdAt;
-                delete payload.updatedAt;
-                await addAsset(payload as Parameters<typeof addAsset>[0]);
-            }
-            notify.success(t("assets.imported", { count: importedAssets.length }));
-        } catch {
-            notify.error(t("assets.importFailed"));
-        } finally {
-            if (assetInputRef.current) assetInputRef.current.value = "";
-        }
-    };
-
     const confirmDelete = async () => {
         if (!deletingAsset || deleteRef.current) return;
         deleteRef.current = true;
@@ -262,7 +213,7 @@ export default function AssetsPage() {
     };
 
     const assetContent = <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />)}
         </div>
         {!hydrated ? <div className="flex justify-center py-20"><Spinner /></div> : !visibleAssets.length && !assetError ? <Empty description={t("assets.empty")} className="py-20" /> : null}
@@ -274,19 +225,14 @@ export default function AssetsPage() {
                 <div className="mx-auto max-w-7xl">
                     {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
                     {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button>} />)}
-                    <PageHeader title={t("assets.title")} description={t("assets.description")} actions={<>
-                        <Button variant="ghost" disabled={!hydrated} onClick={() => void exportAllAssets()}>{t("assets.export")}</Button>
-                        <Button variant="ghost" onClick={() => assetInputRef.current?.click()}>{t("assets.import")}</Button>
-                        <Button variant="default" disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
+                    <PageHeader className="mb-4" title={t("assets.title")} actions={<>
+                        <SearchInput className="w-full sm:w-72" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
+                        <Button variant="default" icon={<Plus />} disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
                     </>} />
-                    <AssetFilenameRepair />
-                    <div className="mb-3 mt-6">
-                        <SearchInput className="w-full sm:max-w-sm" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
-                    </div>
                     <Tabs.Root value={kindFilter} onValueChange={(value) => { setPage(1); setKindFilter(value as AssetKind | "all"); }} className="min-w-0">
                         <div className="thin-scrollbar mb-4 overflow-x-auto overflow-y-hidden pb-2">
-                            <Tabs.List aria-label={t("assets.browseByType")} className="inline-flex w-max items-center gap-1 rounded-xl bg-muted p-1">
-                                {kindOptions.map(({ key, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-card data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4" />{t(key === "all" ? "common.all" : `assets.kinds.${key}`)}</Tabs.Trigger>)}
+                            <Tabs.List aria-label={t("assets.browseByType")} className="inline-flex w-max items-center gap-1 rounded-xl border border-border bg-card p-1">
+                                {kindOptions.map(({ key, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-accent data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4 text-foreground" />{t(key === "all" ? "common.all" : `assets.kinds.${key}`)}</Tabs.Trigger>)}
                             </Tabs.List>
                         </div>
                         {kindOptions.map(({ key }) => <AssetTabPanel key={key} value={key} active={key === kindFilter}>{key === kindFilter ? assetContent : null}</AssetTabPanel>)}
@@ -296,7 +242,7 @@ export default function AssetsPage() {
             </main>
 
             <Dialog title={editingAsset ? t("assets.edit") : t("assets.add")} open={isAssetOpen} width={980} onClose={closeEditor} onConfirm={saveAsset} busy={saving} confirmText={t("common.save")} cancelText={t("common.cancel")}>
-                <div className="grid gap-6 pt-1 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
                     <EditorForm form={form}>
                         <Field name="kind" label={t("assets.type")}>
                             <Choice
@@ -313,18 +259,9 @@ export default function AssetsPage() {
                         <Field name="title" label={t("assets.fields.title")} schema={z.string().trim().min(1, t("assets.fields.titleRequired"))}>
                             <Input size="large" placeholder={t("assets.fields.titlePlaceholder")} />
                         </Field>
-                        <div className="flex items-end gap-2">
-                            <Field name="coverUrl" label={t("assets.fields.coverUrl")} className="min-w-0 flex-1"><Input placeholder={t("assets.fields.coverPlaceholder")} /></Field>
-                            <Button icon={<Upload className="size-4" />} onClick={() => coverInputRef.current?.click()}>{t("common.upload")}</Button>
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <Field name="source" label={t("assets.fields.source")}>
-                                <Input placeholder={t("assets.fields.sourcePlaceholder")} />
-                            </Field>
-                            <Field name="note" label={t("assets.fields.note")}>
-                                <Input placeholder={t("assets.fields.optional")} />
-                            </Field>
-                        </div>
+                        <Field name="note" label={t("assets.fields.note")}>
+                            <Input placeholder={t("assets.fields.optional")} />
+                        </Field>
                         {formKind === "text" ? (
                             <Field name="content" label={t("assets.fields.textContent")} schema={z.string().trim().min(1, t("assets.fields.textRequired"))}>
                                 <Textarea rows={8} placeholder={t("assets.fields.textPlaceholder")} />
@@ -349,13 +286,17 @@ export default function AssetsPage() {
                             </Field>
                         )}
                     </EditorForm>
-                    <div className="rounded-xl border border-border bg-muted p-4  ">
-                        <span className="font-medium">{t("assets.preview")}</span>
-                        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background ">
-                            {coverUrl || imageDraft?.dataUrl ? (
-                                <img src={coverUrl || imageDraft?.dataUrl} alt="" className="aspect-[4/3] w-full object-cover" />
+                    <div className="min-w-0 space-y-3 self-start">
+                        <h3 className="text-sm font-medium">{t("assets.preview")}</h3>
+                        <div className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground">
+                            {formKind === "image" && imageDraft ? (
+                                <img src={imageDraft.dataUrl} alt={title} className="max-h-[50dvh] w-full object-contain" />
+                            ) : formKind === "video" && mediaPreview ? (
+                                <video key={mediaPreview.url} src={mediaPreview.url} controls playsInline preload="metadata" aria-label={title || t("assets.kinds.video")} className="max-h-[50dvh] w-full bg-muted object-contain" />
+                            ) : formKind === "audio" && mediaPreview ? (
+                                <audio key={mediaPreview.url} src={mediaPreview.url} controls preload="metadata" aria-label={title || t("assets.kinds.audio")} className="w-full p-3" />
                             ) : (
-                                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground ">{content || t("assets.noCover")}</div>
+                                <div className="thin-scrollbar max-h-[50dvh] min-h-32 overflow-y-auto whitespace-pre-wrap break-words p-4 text-sm leading-6 text-muted-foreground">{formKind === "text" ? content || t("assets.fields.textPlaceholder") : t("ui.noFileSelected")}</div>
                             )}
                             <div className="flex items-center justify-between gap-2 p-3">
                                 <span className="truncate text-sm font-medium">
@@ -366,16 +307,6 @@ export default function AssetsPage() {
                         </div>
                     </div>
                 </div>
-                <input
-                    ref={coverInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                        void readCoverFile(event.target.files?.[0]).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.uploadFailed")));
-                        event.target.value = "";
-                    }}
-                />
                 <input
                     ref={imageInputRef}
                     type="file"
@@ -390,11 +321,7 @@ export default function AssetsPage() {
 
             <AssetDrawer asset={previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || null : null} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
-            <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
-
-            <Dialog title={t("assets.deleteTitle")} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive cancelText={t("common.cancel")}>
-                <p>{t("workspace.deleteAssetDescription", { title: deletingAsset?.title })}</p>
-            </Dialog>
+            <AlertDialog title={t("assets.deleteTitle")} description={t("workspace.deleteAssetDescription", { title: deletingAsset?.title })} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive />
         </div>
     );
 }
@@ -410,98 +337,114 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = assetCoverUrl(asset);
-    const summary = assetSummary(asset);
     return (
         <article className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25">
             <button type="button" className="block w-full shrink-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={t("assets.previewNamed", { name: asset.title })} onClick={onOpen}>
                 {cover ? (
                     <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
                 ) : (
-                    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted p-4 text-center text-sm leading-6 text-muted-foreground"><span className="line-clamp-5 break-words">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</span></div>
+                    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-card p-4 text-center text-sm leading-6 text-muted-foreground"><span className="line-clamp-5 break-words">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</span></div>
                 )}
             </button>
-            <div className="space-y-1 p-3">
-                <div className="flex items-center justify-between gap-2">
-                    <button type="button" className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onOpen}><h2 className="truncate text-sm font-medium">{asset.title}</h2></button>
-                    <Tag className="shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
-                </div>
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="truncate text-xs leading-5 text-muted-foreground">{summary}</span>
-                    <Menu placement="topRight" items={[
-                        { key: "use", label: t(asset.kind === "text" ? "common.copy" : "common.download"), icon: asset.kind === "text" ? <Copy /> : <Download />, onClick: () => asset.kind === "text" ? onCopy(asset) : onDownload(asset) },
-                        { key: "edit", label: t("common.edit"), icon: <PencilLine />, onClick: onEdit },
-                        { key: "delete", label: t("common.delete"), icon: <Trash2 />, danger: true, onClick: onDelete },
-                    ]}><Button variant="ghost" size="icon" className="size-7" title={t("ui.moreActions")} aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>
-                </div>
-            </div>
+            <AssetInfo asset={asset} onOpen={onOpen} action={<Menu placement="topRight" items={[
+                { key: "use", label: t(asset.kind === "text" ? "common.copy" : "common.download"), icon: asset.kind === "text" ? <Copy /> : <Download />, onClick: () => asset.kind === "text" ? onCopy(asset) : onDownload(asset) },
+                { key: "edit", label: t("common.edit"), icon: <PencilLine />, onClick: onEdit },
+                { key: "delete", label: t("common.delete"), icon: <Trash2 />, danger: true, onClick: onDelete },
+            ]}><Button variant="ghost" size="icon" className="size-7" title={t("ui.moreActions")} aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>} />
         </article>
     );
 }
 
+function AssetInfo({ asset, onOpen, action }: { asset: Asset; onOpen: () => void; action: ReactNode }) {
+    const { t } = useTranslation();
+    return <div className="p-3">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+            <button type="button" className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onOpen}><h2 className="truncate text-sm font-medium">{asset.title}</h2></button>
+            <Tag className="shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
+        </div>
+        <div className="flex min-w-0 items-center justify-between gap-2">
+            <span className="truncate text-xs leading-5 text-muted-foreground">{assetSummary(asset)}</span>
+            {action}
+        </div>
+    </div>;
+}
+
 function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void }) {
     const { t } = useTranslation();
-    const { notify } = useFeedback();
-    const [syncing, setSyncing] = useState(false);
-    useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
-    const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     return (
         <Sheet title={t("assets.details")} open={Boolean(asset)} width={640} onClose={onClose}>
             {asset ? (
-                <div className="space-y-5">
-                    {cover ? (
-                        <MediaPreview src={assetCoverUrl(asset)} previewSrc={cover} alt={asset.title} className="rounded-lg" />
-                    ) : (
-                        <div className="rounded-lg border border-border bg-muted p-5 text-sm leading-6 text-muted-foreground   ">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</div>
-                    )}
-                    <div>
-                        <h3 className="!mb-2">
-                            {asset.title}
-                        </h3>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Tag>{t(`assets.kinds.${asset.kind}`)}</Tag>
+                <div className="space-y-3">
+                    {asset.kind === "image" ? (
+                        <MediaPreview src={asset.data.dataUrl} alt={asset.title} className="max-h-[60dvh] w-full rounded-xl object-contain" />
+                    ) : asset.kind === "video" ? (
+                        <video key={asset.id} src={asset.data.url} controls playsInline preload="metadata" aria-label={asset.title} className="block max-h-[60dvh] w-full rounded-xl bg-muted object-contain" />
+                    ) : asset.kind === "audio" ? (
+                        <audio key={asset.id} src={asset.data.url} controls preload="metadata" aria-label={asset.title} className="w-full" />
+                    ) : <div className="thin-scrollbar max-h-[60dvh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted p-4 text-sm leading-6">{asset.data.content}</div>}
+                    <div className="space-y-1">
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                            <h3 className="min-w-0 flex-1 break-words text-lg font-medium leading-6">{asset.title}</h3>
+                            <Tag className="mt-0.5 shrink-0 text-xs">{t(`assets.kinds.${asset.kind}`)}</Tag>
+                        </div>
+                        <p className="text-xs leading-5 text-muted-foreground">{assetSummary(asset)}</p>
+                        <div className="flex items-center justify-between gap-3">
+                            <AssetStorageStatus key={asset.id} asset={asset} />
+                            <Button variant="ghost" size="icon" title={t(asset.kind === "text" ? "common.copy" : "assets.storageStatus.download")} aria-label={t(asset.kind === "text" ? "common.copy" : "assets.storageStatus.download")} onClick={() => asset.kind === "text" ? onCopy(asset) : onDownload(asset)}>{asset.kind === "text" ? <Copy /> : <Download />}</Button>
                         </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">{t("workspace.fileSave")}：{asset.saveState === "saved" ? appI18n.t("workspace.saved") : asset.saveState === "saving" ? appI18n.t("workspace.savingFile") : appI18n.t("workspace.saveFileFailed")} · {t("workspace.cloudSync")}：{asset.syncState === "synced" ? appI18n.t("workspace.synced") : asset.syncState === "syncing" ? appI18n.t("workspace.syncing") : asset.syncState === "failed" ? appI18n.t("workspace.syncFailed") : appI18n.t("workspace.local")}{asset.error ? ` · ${asset.error}` : ""}</p>
-                    {asset.kind !== "text" && asset.saveState === "saved" && asset.syncState !== "synced" ? <Button variant="ghost" loading={syncing} onClick={async () => { setSyncing(true); try { await retryAssetSync(asset.id); await useAssetStore.getState().loadAssets(); notify.success(t("storage.syncQueued")); } catch (error) { notify.error(error instanceof Error ? error.message : t("workspace.operationFailed")); } finally { setSyncing(false); } }}>{t("storage.retrySync")}</Button> : null}
+                    {asset.error ? <p role="alert" className="break-words text-xs leading-5 text-destructive">{asset.error}</p> : null}
+                    {asset.note ? <p className="whitespace-pre-wrap break-words text-xs leading-5"><span className="text-muted-foreground">{t("assets.fields.note")}：</span>{asset.note}</p> : null}
                     {asset.kind === "audio" ? <AssetVoiceForm key={asset.id} assetId={asset.id} /> : null}
-                    <div className="rounded-lg border border-border p-4 ">
-                        <span data-secondary className="block text-xs">
-                            {asset.kind === "text" ? t("assets.fields.textContent") : t(`assets.kinds.${asset.kind}`)}
-                        </span>
-                        {asset.kind === "text" ? (
-                            <p className="mt-2 whitespace-pre-wrap">{asset.data.content}</p>
-                        ) : asset.kind === "audio" ? (
-                            <audio src={asset.data.url} controls preload="none" className="mt-2 w-full" />
-                        ) : asset.kind === "video" ? (
-                            <video src={asset.data.url} controls preload="none" className="mt-2 aspect-video w-full rounded-lg bg-black" />
-                        ) : (
-                            <span className="mt-2 block">
-                                {asset.data.width}x{asset.data.height} · {formatBytes(asset.data.bytes)} · {asset.data.mimeType}
-                            </span>
-                        )}
-                    </div>
-                    {asset.note ? (
-                        <div>
-                            <span data-secondary>{t("assets.fields.note")}</span>
-                            <p className="mt-1">{asset.note}</p>
-                        </div>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-2">
-                        {asset.kind === "text" ? (
-                            <Button variant="default" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
-                                {t("assets.copyText")}
-                            </Button>
-                        ) : null}
-                        {asset.kind !== "text" ? (
-                            <Button variant="default" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
-                                {asset.kind === "audio" ? appI18n.t("workspace.downloadAudio") : asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
-                            </Button>
-                        ) : null}
-                    </div>
                 </div>
             ) : null}
         </Sheet>
     );
+}
+
+function AssetStorageStatus({ asset }: { asset: Asset }) {
+    const { t } = useTranslation();
+    const { notify } = useFeedback();
+    const [submitting, setSubmitting] = useState(false);
+    const submittingRef = useRef(false);
+    const saved = asset.saveState === "saved";
+    const saving = asset.saveState === "saving";
+    const SaveIcon = saved ? asset.kind === "text" ? Database : HardDrive : saving ? LoaderCircle : CircleAlert;
+    const saveLabel = t(`assets.storageStatus.${saved ? asset.kind === "text" ? "textSaved" : "serverSaved" : saving ? "serverSaving" : asset.saveState === "failed" ? "serverSaveFailed" : "serverSaveUnknown"}`);
+    const cloudState = asset.kind === "text" ? "notApplicable" : !saved ? "needsSave" : submitting ? "submitting" : asset.syncState || "local";
+    const cloudStatuses = {
+        notApplicable: { Icon: CloudOff, label: "cloudNotApplicable", className: "text-muted-foreground" },
+        needsSave: { Icon: CloudOff, label: "cloudNeedsSave", className: "text-muted-foreground" },
+        local: { Icon: CloudUpload, label: "cloudLocal", className: "text-muted-foreground" },
+        submitting: { Icon: LoaderCircle, label: "cloudSubmitting", className: "text-info hover:text-info [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" },
+        pending: { Icon: Clock3, label: "cloudPending", className: "text-info hover:text-info" },
+        syncing: { Icon: LoaderCircle, label: "cloudSyncing", className: "text-info hover:text-info [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" },
+        synced: { Icon: CloudCheck, label: "cloudSynced", className: "text-success hover:text-success" },
+        failed: { Icon: CloudAlert, label: "cloudFailed", className: "text-destructive hover:text-destructive" },
+    };
+    const cloudStatus = cloudStatuses[cloudState as keyof typeof cloudStatuses] || { Icon: CloudOff, label: "cloudUnknown", className: "text-muted-foreground" };
+    const cloudLabel = t(`assets.storageStatus.${cloudStatus.label}`);
+    const canSync = cloudState === "local" || cloudState === "failed";
+    const sync = async () => {
+        if (!canSync || submittingRef.current) return;
+        const assertSession = captureSession();
+        submittingRef.current = true; setSubmitting(true);
+        try {
+            await retryAssetSync(asset.id); assertSession();
+            await useAssetStore.getState().loadAssets(); assertSession();
+            const state = useAssetStore.getState();
+            if (state.error) throw new Error(state.error);
+            const current = state.assets.find((item) => item.id === asset.id);
+            if (current?.syncState === "local") notify.warning(t("assets.storageStatus.cloudUnavailable"));
+            else if (current?.syncState === "synced") notify.success(t("assets.storageStatus.cloudSynced"));
+            else if (current?.syncState === "failed") notify.error(t("assets.storageStatus.cloudFailed"));
+        } catch (error) { notify.error(error instanceof Error ? error.message : t("workspace.operationFailed")); }
+        finally { submittingRef.current = false; setSubmitting(false); }
+    };
+    return <div className="flex items-center gap-1">
+        <Tooltip title={saveLabel} clickable><Button variant="ghost" size="icon" aria-label={saveLabel} aria-busy={saving || undefined} className={saved ? "text-success hover:text-success" : saving ? "text-info hover:text-info [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" : "text-destructive hover:text-destructive"}><SaveIcon /></Button></Tooltip>
+        <Button variant="ghost" size="icon" title={cloudLabel} aria-label={cloudLabel} aria-disabled={!canSync || undefined} aria-busy={submitting || cloudState === "syncing" || undefined} className={cloudStatus.className} onClick={() => void sync()}><cloudStatus.Icon /></Button>
+    </div>;
 }
 
 function AssetVoiceForm({ assetId }: { assetId: string }) {

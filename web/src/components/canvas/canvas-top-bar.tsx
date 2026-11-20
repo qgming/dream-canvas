@@ -1,27 +1,23 @@
 import { useState } from "react";
-import { Check, Download, Images, Keyboard, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, X } from "lucide-react";
+import { CircleDot, Download, Grid2x2, Images, Info, Keyboard, Menu as MenuIcon, Palette, Plus, Redo2, Square, Trash2, Undo2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Menu } from "@/components/ui/popover";
+import { Segmented, Switch } from "@/components/ui/controls";
+import { Menu, Popover, Tooltip } from "@/components/ui/popover";
 import { Dialog } from "@/components/ui/dialog";
-import { Tooltip } from "@/components/ui/popover";
 import { useTranslation } from "react-i18next";
 
-import { canvasThemes } from "@/lib/canvas-theme";
-import { useCanvasPanelDisplay } from "@/hooks/use-canvas-panel-display";
+import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 export function CanvasTopBar({
     title,
-    titleDraft,
-    isTitleEditing,
-    titleSaving,
-    titleError,
-    onTitleDraftChange,
     onStartTitleEditing,
-    onFinishTitleEditing,
-    onCancelTitleEditing,
     canUndo,
     canRedo,
+    backgroundMode,
+    showParameterInfo,
+    onBackgroundModeChange,
+    onShowParameterInfoChange,
     onProjects,
     onCreateProject,
     onDeleteProject,
@@ -31,16 +27,13 @@ export function CanvasTopBar({
     onRedo,
 }: {
     title: string;
-    titleDraft: string;
-    isTitleEditing: boolean;
-    titleSaving: boolean;
-    titleError: string;
-    onTitleDraftChange: (value: string) => void;
     onStartTitleEditing: () => void;
-    onFinishTitleEditing: () => void | Promise<void>;
-    onCancelTitleEditing: () => void;
     canUndo: boolean;
     canRedo: boolean;
+    backgroundMode: CanvasBackgroundMode;
+    showParameterInfo: boolean;
+    onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
+    onShowParameterInfoChange: (show: boolean) => void;
     onProjects: () => void;
     onCreateProject: () => void;
     onDeleteProject: () => void;
@@ -52,24 +45,13 @@ export function CanvasTopBar({
     const colorTheme = useThemeStore((state) => state.theme);
     const { t } = useTranslation();
     const theme = canvasThemes[colorTheme];
+    const [appearanceOpen, setAppearanceOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
-    const { open: sidePanelOpen, toggle: toggleSidePanel } = useCanvasPanelDisplay();
 
     return (
         <>
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between gap-2 pl-1 pr-4">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-2">
-                    <Tooltip title={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}>
-                        <Button
-                            variant="ghost" size="icon"
-                            onClick={toggleSidePanel}
-                            aria-label={sidePanelOpen ? t("canvas.collapsePanel") : t("canvas.expandPanel")}
-                            className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-accent"
-                            style={{ color: theme.node.text }}
-                        >
-                            {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
-                        </Button>
-                    </Tooltip>
                     <Menu
                         items={ [
                                 { key: "projects", icon: <Images className="size-4" />, label: t("canvas.projects"), onClick: onProjects },
@@ -90,45 +72,59 @@ export function CanvasTopBar({
                     </Menu>
 
                     <div className="relative flex min-w-0 items-center gap-2" data-canvas-shortcuts-ignore>
-                        {isTitleEditing ? (
-                            <><input
-                                autoFocus
-                                disabled={titleSaving}
-                                aria-label={t("canvas.project.rename")}
-                                aria-invalid={Boolean(titleError)}
-                                aria-describedby={titleError ? "canvas-title-error" : undefined}
-                                value={titleDraft}
-                                onChange={(event) => onTitleDraftChange(event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter") { event.preventDefault(); void onFinishTitleEditing(); }
-                                    if (event.key === "Escape") { event.stopPropagation(); onCancelTitleEditing(); }
-                                }}
-                                className="h-8 w-44 min-w-0 max-w-[280px] flex-1 rounded-md border border-input bg-transparent px-2 text-left text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                style={{ color: theme.node.text }}
-                            /><Button variant="ghost" size="sm" loading={titleSaving} icon={<Check className="size-4" />} onClick={() => void onFinishTitleEditing()} aria-label={t("canvas.project.saveName")} /><Button variant="ghost" size="sm" disabled={titleSaving} icon={<X className="size-4" />} onClick={onCancelTitleEditing} aria-label={t("canvas.project.cancelRename")} />{titleError ? <p id="canvas-title-error" role="alert" className="absolute left-0 top-full mt-1 max-w-sm rounded-md border border-border bg-popover px-2 py-1 text-xs text-destructive">{titleError}</p> : null}</>
-                        ) : (
-                            <Tooltip title={t("canvas.renameHint")}><button
-                                type="button"
-                                className="min-w-0 max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
-                                onDoubleClick={onStartTitleEditing}
-                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onStartTitleEditing(); } }}
-                            >
-                                {title}
-                            </button></Tooltip>
-                        )}
+                        <Tooltip title={t("canvas.renameHint")}><button
+                            type="button"
+                            className="min-w-0 max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
+                            onDoubleClick={onStartTitleEditing}
+                            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onStartTitleEditing(); } }}
+                        >
+                            {title}
+                        </button></Tooltip>
                     </div>
                     
                 </div>
 
-                <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-                    <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={() => setShortcutsOpen(true)} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></Button>
+                <div className="pointer-events-auto flex shrink-0 items-center gap-1.5" data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+                    <Popover
+                        trigger="click"
+                        placement="bottomRight"
+                        open={appearanceOpen}
+                        onOpenChange={setAppearanceOpen}
+                        className="thin-scrollbar w-[248px] p-2.5"
+                        content={
+                            <>
+                                <div className="px-1 pb-2 text-sm font-medium">{t("canvas.toolbar.appearance")}</div>
+                                <div className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">{t("canvas.toolbar.gridStyle")}</div>
+                                <Segmented
+                                    className="w-full !p-1"
+                                    aria-label={t("canvas.toolbar.gridStyle")}
+                                    value={backgroundMode}
+                                    onChange={(value) => onBackgroundModeChange(value as CanvasBackgroundMode)}
+                                    options={[
+                                        { value: "dots", label: <span className="inline-flex items-center gap-1.5"><CircleDot className="size-4" />{t("canvas.toolbar.dots")}</span> },
+                                        { value: "lines", label: <span className="inline-flex items-center gap-1.5"><Grid2x2 className="size-4" />{t("canvas.toolbar.lines")}</span> },
+                                        { value: "blank", label: <span className="inline-flex items-center gap-1.5"><Square className="size-4" />{t("canvas.toolbar.blank")}</span> },
+                                    ]}
+                                />
+                                <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
+                                    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                        <Info className="size-3.5" />{t("canvas.toolbar.parameterInfo")}
+                                    </span>
+                                    <Switch size="small" aria-label={t("canvas.toolbar.parameterInfo")} checked={showParameterInfo} onChange={onShowParameterInfoChange} />
+                                </div>
+                            </>
+                        }
+                    >
+                        <Button variant="ghost" size="icon" className="size-7 data-[state=open]:bg-accent" style={{ color: theme.node.text }} icon={<Palette className="size-4" />} aria-label={t("canvas.toolbar.appearance")} title={t("canvas.toolbar.appearance")} />
+                    </Popover>
+                    <Button variant="ghost" size="icon" className="size-7" style={{ color: theme.node.text }} onClick={() => { setAppearanceOpen(false); setShortcutsOpen(true); }} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}><Keyboard className="size-4" /></Button>
                 </div>
             </div>
             <Dialog title={t("canvas.shortcuts")} open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} footer={null}>
-                <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
+                <div className="space-y-2 text-sm">
                     <Shortcut keys={["Ctrl / Space", t("canvas.shortcut.drag")]} value={t("canvas.shortcut.toggleTool")} />
                     <Shortcut keys={[t("canvas.shortcut.wheel")]} value={t("canvas.shortcut.zoom")} />
-                    <Shortcut keys={[t("canvas.shortcut.zoomSlider")]} value={t("canvas.shortcut.preciseZoom")} />
+                    <Shortcut keys={[t("canvas.shortcut.zoomControl")]} value={t("canvas.shortcut.preciseZoom")} />
                     <Shortcut keys={[t("canvas.shortcut.drag")]} value={t("canvas.shortcut.boxSelect")} />
                     <Shortcut keys={[t("canvas.shortcut.rightClick")]} value={t("canvas.shortcut.addNode")} />
                     <Shortcut keys={["Shift / Cmd", t("canvas.shortcut.click")]} value={t("canvas.shortcut.addSelection")} />

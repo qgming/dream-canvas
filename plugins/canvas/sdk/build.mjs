@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
  */
 export async function buildPlugin(metaUrl, overrides = {}) {
     const root = dirname(fileURLToPath(metaUrl));
-    const name = overrides.name ?? basename(root); // 目录名即产物名,如 markdown → markdown.js
+    const name = overrides.name ?? basename(root);
     const distDir = join(root, "dist");
     const watch = process.argv.includes("--watch");
     const entry = overrides.entry ?? join(root, "src", "index.tsx");

@@ -8,7 +8,7 @@ const finite = z.number().finite();
 const status = z.enum(["idle", "success", "loading", "error"]);
 const timestamp = z.string().datetime({ offset: true });
 const text = z.object({ id, status, content: z.string(), errorDetails: z.string().optional() }).passthrough();
-const image = text.extend({ storageKey: z.string().optional(), naturalWidth: finite.nonnegative(), naturalHeight: finite.nonnegative(), bytes: finite.int().nonnegative(), mimeType: z.string() });
+const image = text.extend({ storageKey: z.string().optional(), naturalWidth: finite.nonnegative(), naturalHeight: finite.nonnegative(), bytes: finite.int().nonnegative(), mimeType: z.string(), durationMs: finite.nonnegative().optional() });
 const metadata = z.object({
     content: z.string().optional(), composerContent: z.string().optional(), prompt: z.string().optional(),
     status: status.optional(), errorDetails: z.string().optional(), fontSize: finite.optional(),
@@ -18,10 +18,11 @@ const metadata = z.object({
     count: finite.optional(), textCount: finite.optional(), texts: z.array(text).optional(), primaryTextId: z.string().optional(),
     references: z.array(z.string()).optional(), referenceOrder: z.array(id).optional(), naturalWidth: finite.optional(), naturalHeight: finite.optional(), freeResize: z.boolean().optional(),
     images: z.array(image).optional(), primaryImageId: z.string().optional(), storageKey: z.string().optional(), mimeType: z.string().optional(),
+    mediaResults: z.array(image).optional(), primaryMediaId: z.string().optional(),
     bytes: finite.optional(), durationMs: finite.optional(), videoTaskId: z.string().optional(), videoTaskProvider: z.literal("server").optional(),
     groupId: z.string().optional(), interactive: z.boolean().optional(),
 }).passthrough();
-const node = z.object({ id, type: id, title: z.string(), position: z.object({ x: finite, y: finite }).passthrough(), width: finite.positive(), height: finite.positive(), metadata: metadata.optional() }).passthrough();
+const node = z.object({ id, type: id, identity: z.object({ type: id, number: finite.int().safe().positive(), copy: finite.int().safe().positive() }).optional(), name: z.string().min(1).optional(), title: z.string(), position: z.object({ x: finite, y: finite }).passthrough(), width: finite.positive(), height: finite.positive(), metadata: metadata.optional() }).passthrough();
 const connection = z.object({ id, fromNodeId: id, toNodeId: id }).passthrough();
 const reference = z.object({ id, type: id, title: z.string(), dataUrl: z.string().optional(), storageKey: z.string().optional(), text: z.string().optional() }).passthrough();
 const message = z.object({ id, role: z.enum(["user", "assistant", "system", "tool", "error"]), text: z.string(), title: z.string().optional(), meta: z.string().optional(), detail: z.unknown().optional(), references: z.array(reference).optional() }).passthrough();

@@ -62,7 +62,7 @@ export function AgentHistoryView({
                     </div>
                     <div className="flex items-center gap-2">
                         {selectedThreads.length ? (
-                            <Button size="sm" variant="ghost" data-destructive icon={<Trash2 className="size-3.5" />} disabled={loading || busy} onClick={() => onDeleteThreads(selectedThreads.map((thread) => thread.id))}>
+                            <Button size="sm" variant="outline" data-destructive icon={<Trash2 className="size-3.5" />} disabled={loading || busy} onClick={() => onDeleteThreads(selectedThreads.map((thread) => thread.id))}>
                                 {t("agent.history.deleteCount", { count: selectedThreads.length })}
                             </Button>
                         ) : null}
@@ -83,8 +83,8 @@ export function AgentHistoryView({
                                 role="button"
                                 tabIndex={canResume ? 0 : -1}
                                 aria-disabled={!canResume}
-                                className={`${canResume ? "cursor-pointer hover:bg-black/5 dark:hover:bg-white/10" : "cursor-default opacity-60"} rounded-lg border px-2.5 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/20`}
-                                style={{ borderColor: active ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
+                                className={`${canResume ? "cursor-pointer hover:bg-accent" : "cursor-default opacity-60"} rounded-lg border px-2.5 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/20`}
+                                style={{ borderColor: active ? theme.node.text : theme.node.stroke, color: theme.node.text }}
                                 onClick={() => {
                                     if (canResume) onResumeThread(thread.id);
                                 }}

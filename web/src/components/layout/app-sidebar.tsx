@@ -36,7 +36,7 @@ export function AppSidebar() {
     const mobile = useMediaQuery("(max-width: 767px)");
     const compact = useMediaQuery("(max-width: 1199px)");
     const collapsed = mobile ? !mobileOpen : compact ? !compactExpanded : sidebarCollapsed;
-    const navigationItemClass = cn(itemClass, "text-muted-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground", collapsed && collapsedItemClass);
+    const navigationItemClass = cn(itemClass, "text-sidebar-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground", collapsed && collapsedItemClass);
     const toggleLabel = t(collapsed ? "sidebar.expand" : "sidebar.collapse");
     const closeMobile = () => { setMobileOpen(false); setCompactExpanded(false); };
 
@@ -49,7 +49,7 @@ export function AppSidebar() {
                         <motion.span layout="position" transition={transition} className={cn("shrink-0 bg-current", collapsed ? "size-[18px]" : "size-6")} style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }} />
                         <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="truncate text-sm font-semibold tracking-tight">{t("meta.title")}</motion.span> : null}</AnimatePresence>
                     </Link>
-                    <Button variant="ghost" size="icon" layout="position" transition={transition} onClick={() => mobile ? setMobileOpen(!mobileOpen) : compact ? setCompactExpanded(!compactExpanded) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground [&_svg]:size-[18px]", collapsed ? collapsedItemClass : "size-7 [&_svg]:size-4")}>
+                    <Button variant="ghost" size="icon" layout="position" transition={transition} onClick={() => mobile ? setMobileOpen(!mobileOpen) : compact ? setCompactExpanded(!compactExpanded) : toggleSidebar()} aria-label={toggleLabel} title={toggleLabel} aria-expanded={!collapsed} className={cn("rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground [&_svg]:size-[18px]", collapsed ? collapsedItemClass : "size-7 [&_svg]:size-4")}>
                         {collapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-4" />}
                     </Button>
                 </motion.div>
@@ -74,7 +74,7 @@ export function AppSidebar() {
                     <Menu placement="topLeft" items={ [
                         { key: "logout", icon: <LogOut className="size-4" />, label: t("sidebar.signOut"), onClick: signOut },
                     ] }>
-                        <Button variant="ghost" size={collapsed ? "icon" : "default"} aria-label={t("sidebar.accountMenu")} className={cn(itemClass, "justify-start text-left font-normal text-muted-foreground [&_svg]:size-[18px]", collapsed && collapsedItemClass)}>
+                        <Button variant="ghost" size={collapsed ? "icon" : "default"} aria-label={t("sidebar.accountMenu")} className={cn(itemClass, "justify-start text-left font-normal text-sidebar-foreground [&_svg]:size-[18px]", collapsed && collapsedItemClass)}>
                             <UserRound className="size-[18px] shrink-0" />
                             <AnimatePresence initial={false}>{!collapsed ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, width: 0 }} transition={transition} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden"><span className="truncate font-medium">{user?.username}</span>{user?.role === "admin" ? <Badge className="shrink-0">{t("sidebar.admin")}</Badge> : null}</motion.span> : null}</AnimatePresence>
                         </Button>

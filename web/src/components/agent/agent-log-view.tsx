@@ -258,7 +258,7 @@ function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof ca
     if (!expandable) return <div className="border-b px-1 py-2.5 last:border-b-0" style={{ borderColor: theme.node.stroke }}>{summary}</div>;
     return <Collapsible.Root className="group border-b last:border-b-0" style={{ borderColor: theme.node.stroke }} onOpenChange={(open) => onToggle?.(open)}>
         <Collapsible.Trigger asChild>
-            <button type="button" className="w-full px-1 py-2.5 text-left transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current/20 dark:hover:bg-white/10">
+            <button type="button" className="w-full px-1 py-2.5 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current/20">
                 {summary}
             </button>
         </Collapsible.Trigger>

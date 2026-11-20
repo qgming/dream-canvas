@@ -50,7 +50,8 @@ func (a *App) uploadAsset(c *gin.Context) {
 		respondError(c, problem(500, "save_failed", "文件类型读取失败，尚未完成资产保存，请重新上传")); return
 	}
 	actual, _, err := mime.ParseMediaType(detected.String())
-	if err != nil || !strings.HasPrefix(actual, kind+"/") || detected.Extension() == "" { respondError(c, problem(400, "invalid_media", "文件内容与媒体类型不匹配或格式无法识别，请重新选择原件")); return }
+	audioContainer := mimeType == "audio/webm" && actual == "video/webm" || mimeType == "audio/mp4" && actual == "video/mp4"
+	if err != nil || (!strings.HasPrefix(actual, kind+"/") && !audioContainer) || detected.Extension() == "" { respondError(c, problem(400, "invalid_media", "文件内容与媒体类型不匹配或格式无法识别，请重新选择原件")); return }
 	id := identifier()
 	title, _ := url.QueryUnescape(c.GetHeader("X-File-Name"))
 	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: kind, Title: title, MimeType: actual, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id+detected.Extension(), SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
@@ -86,7 +87,13 @@ func (a *App) uploadAsset(c *gin.Context) {
 			if decodeErr == nil { asset.Width, asset.Height = config.Width, config.Height }
 		}
 	}
-	if policy, err := a.executionPolicy(); err == nil { a.probeMedia(c.Request.Context(), &asset, policy) }
+	audioOnly := false
+	if policy, err := a.executionPolicy(); err == nil { audioOnly = a.probeMedia(c.Request.Context(), &asset, policy) } else if audioContainer { fail(503, "media_probe_failed", "录音已写入，但运行参数尚未就绪，无法核实音轨，请保留录音后重试"); return }
+	if audioContainer {
+		if asset.ProbeError != "" { fail(422, "media_probe_failed", "录音尚未完成资产保存，无法核实音轨："+asset.ProbeError); return }
+		if !audioOnly { fail(400, "invalid_media", "文件不包含纯音频，不能作为录音保存"); return }
+		asset.MimeType = mimeType
+	}
 	result := a.db.Model(&Asset{}).Where("id = ? AND delete_state = ? AND save_state = ?", asset.ID, "", "saving").Updates(map[string]any{"save_state": "saved", "mime_type": asset.MimeType, "bytes": asset.Bytes, "width": asset.Width, "height": asset.Height, "duration_ms": asset.DurationMS, "fps": asset.FPS, "video_codec": asset.VideoCodec, "audio_codec": asset.AudioCodec, "probe_error": asset.ProbeError, "error": ""})
 	if result.Error != nil { respondError(c, problem(500, "metadata_failed", "原件已写入，但资产记录保存失败，请检查服务器")); return }
 	if result.RowsAffected == 0 { respondError(c, problem(410, "asset_deleted", "上传期间资产已被删除，文件将按删除流程清理")); return }

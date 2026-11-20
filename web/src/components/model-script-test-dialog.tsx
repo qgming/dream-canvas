@@ -23,7 +23,7 @@ export function ModelScriptTestDialog({ script, controls, revision = 0, versionI
     const assets = useAssetStore((state) => state.assets);
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<ScriptCheck | null>(null);
-    return <Dialog open title={t(preview ? "modelScripts.previewRequest" : "modelScripts.test")} description={t(preview ? "modelScripts.previewAssetsHint" : "modelScripts.testHint")} onClose={onClose} busy={busy} width={720} footer={<Button type="submit" form="model-script-test" loading={busy}>{t(preview ? "modelScripts.previewRequest" : "modelScripts.submitTest")}</Button>}>
+    return <Dialog open title={t(preview ? "modelScripts.previewRequest" : "modelScripts.test")} description={t(preview ? "modelScripts.previewAssetsHint" : "modelScripts.testHint")} onClose={onClose} busy={busy} width={720} footer={<Button variant="default" type="submit" form="model-script-test" loading={busy}>{t(preview ? "modelScripts.previewRequest" : "modelScripts.submitTest")}</Button>}>
         {channels.error ? <Notice type="error" title={channels.error.message} action={<Button onClick={() => void channels.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         <EditorForm id="model-script-test" form={form} initialValues={{ channelId: initial?.channelId || "", model: initial?.model.model || "", name: initial?.model.name || "", prompt: "", parameters: {}, references: [], confirmCharges: false }} onSubmit={async (values) => {
             const assertSession = captureSession(); setBusy(true);

@@ -7,6 +7,7 @@ import RequireAuth, { RequireAdmin } from "@/layouts/require-auth";
 import LoginPage from "@/pages/login";
 import { Spinner } from "@/components/ui/display";
 const GeneralSettingsPage = lazy(() => import("@/pages/settings/general"));
+const BackupPage = lazy(() => import("@/pages/settings/backup"));
 const AccountSettingsPage = lazy(() => import("@/pages/settings/account"));
 const PreferencesPage = lazy(() => import("@/pages/settings/preferences"));
 const InspirationPage = lazy(() => import("@/pages/inspiration"));
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
                     { path: "/canvas/:id", element: <CanvasProjectPage /> },
                     { path: "/settings", element: <SettingsLayout />, children: [
                         { index: true, element: <GeneralSettingsPage /> },
+                        { path: "backup", element: <BackupPage /> },
                         { path: "account", element: <AccountSettingsPage /> },
                         { path: "preferences", element: <PreferencesPage /> },
                         { path: "models", element: <ModelsPage /> },

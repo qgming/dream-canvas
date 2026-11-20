@@ -59,7 +59,7 @@ export async function createGeneration(config: AiConfig, capability: ModelCapabi
     }
     // Complete the acceptance request even if the page leaves, so a returned task ID is retained.
     const task = await apiRequest<GenerationTask>("/tasks", jsonRequest("POST", { channelId: decoded.channelId, modelId: model.id, capability, prompt: input.prompt, messages, references, parameters, projectId: options?.projectId, workbenchRecordId: options?.workbenchRecordId, nodeId: options?.nodeId, projectVersion: options?.projectVersion, resultSlotId: options?.resultSlotId, batchId: options?.batchId }));
-    useGenerationProgressStore.getState().receive(task);
+    useGenerationProgressStore.getState().receive(task, options?.signal);
     if (options?.signal) { const ids = submittedTasks.get(options.signal) || new Set<string>(); ids.add(task.id); submittedTasks.set(options.signal, ids); if (cancelledSignals.has(options.signal)) await cancelGeneration(task.id); }
     return task;
 }

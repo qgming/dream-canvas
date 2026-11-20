@@ -96,7 +96,7 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
     };
 
     return (
-        <div data-canvas-no-zoom data-canvas-shortcuts-ignore className="absolute bottom-40 left-4 z-50 overflow-hidden rounded-xl border shadow-lg" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        <div data-canvas-no-zoom data-canvas-shortcuts-ignore className="absolute bottom-40 left-[88px] z-50 overflow-hidden rounded-xl border shadow-lg" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             <div
                 ref={containerRef}
                 className="relative h-full w-full cursor-crosshair"

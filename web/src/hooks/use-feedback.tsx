@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Dialog } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useTranslation } from "react-i18next";
 
 type Confirmation = { title: ReactNode; content?: ReactNode; confirmText?: ReactNode; cancelText?: ReactNode; destructive?: boolean; onConfirm?: () => void | Promise<unknown>; onCancel?: () => void };
@@ -9,13 +9,14 @@ const FeedbackContext = createContext<((options: Confirmation) => ConfirmationHa
 const notify = { ...toast, warning: toast.warning, loading: (content: ReactNode) => { const id = toast.loading(content); return () => toast.dismiss(id); } };
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
-    const [requests, setRequests] = useState<(Confirmation & { id: number })[]>([]);
+    const [requests, setRequests] = useState<(Confirmation & { id: number; open: boolean })[]>([]);
     const sequence = useRef(0);
+    const activeId = useRef<number | null>(null);
     const { t } = useTranslation();
-    const confirm = useCallback((options: Confirmation) => { const id = ++sequence.current; setRequests((current) => [...current, { ...options, id }]); return { destroy: () => setRequests((current) => current.filter((entry) => entry.id !== id)), update: (patch: Partial<Confirmation>) => setRequests((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry)) }; }, []);
+    const dismiss = useCallback((id: number) => setRequests((current) => current[0]?.id === id && activeId.current === id ? current.map((entry) => entry.id === id ? { ...entry, open: false } : entry) : current.filter((entry) => entry.id !== id)), []);
+    const confirm = useCallback((options: Confirmation) => { const id = ++sequence.current; setRequests((current) => [...current, { ...options, id, open: true }]); return { destroy: () => dismiss(id), update: (patch: Partial<Confirmation>) => setRequests((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry)) }; }, [dismiss]);
     const request = requests[0];
-    const dismiss = () => setRequests((current) => current.filter((entry) => entry.id !== request?.id));
-    return <FeedbackContext.Provider value={confirm}>{children}{request ? <Dialog key={request.id} open title={request.title} confirmText={request.confirmText || t("ui.confirm")} cancelText={request.cancelText || t("common.cancel")} destructive={request.destructive} onClose={() => { request.onCancel?.(); dismiss(); }} onConfirm={async () => { await request.onConfirm?.(); dismiss(); }}><div className="text-sm leading-6 text-muted-foreground">{request.content}</div></Dialog> : null}</FeedbackContext.Provider>;
+    return <FeedbackContext.Provider value={confirm}>{children}{request ? <AlertDialog key={request.id} open={request.open} title={request.title} description={request.content} confirmText={request.confirmText || t("ui.confirm")} cancelText={request.cancelText || t("common.cancel")} destructive={request.destructive} onOpenAutoFocus={() => { activeId.current = request.id; }} onCloseAutoFocus={() => { activeId.current = null; setRequests((current) => current.filter((entry) => entry.id !== request.id)); }} onClose={() => { request.onCancel?.(); dismiss(request.id); }} onConfirm={async () => { await request.onConfirm?.(); dismiss(request.id); }} /> : null}</FeedbackContext.Provider>;
 }
 
 export function useFeedback() {

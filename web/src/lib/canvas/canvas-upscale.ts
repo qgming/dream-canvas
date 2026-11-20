@@ -22,12 +22,16 @@ export function upscaleModelProfile(model: ChannelModel, parameters: Record<stri
     const mode = model.parameters.find((control) => control.key === "mode" && control.type === "select");
     if (mode && !mode.options?.some((option) => option.value === "upscale")) return null;
     const values = { ...Object.fromEntries(model.parameters.filter((control) => control.type !== "reference" && control.default !== undefined).map((control) => [control.key, control.default])), ...parameters, ...(mode ? { [mode.key]: "upscale" } : {}) };
+    if (model.capability === "image") {
+        for (const control of model.parameters) if (["size", "ratio"].includes(control.key) && control.default !== undefined) values[control.key] = control.default;
+    }
     const materials = model.parameters.filter((control) => (control.type === "asset" || control.type === "reference") && inputVisible(control, values));
     const sources = materials.filter((control) => control.role === model.capability);
     if (sources.length !== 1 || materials.some((control) => control.role !== model.capability && (control.required || (control.minCount || 0) > 0))) return null;
     const source = sources[0];
     if ((source.minCount || 0) > 1 || source.maxCount === 0) return null;
-    const targets = model.parameters.filter((control) => ["resolution", "scale", "size", "width", "height"].includes(control.key) && !control.hidden && inputVisible(control, values));
+    const targetKeys = model.capability === "image" ? ["resolution", "quality"] : ["resolution", "scale", "size", "width", "height"];
+    const targets = model.parameters.filter((control) => targetKeys.includes(control.key) && !control.hidden && inputVisible(control, values));
     return { kind: model.capability as UpscaleKind, source, targets, values };
 }
 

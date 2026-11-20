@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
+import { Archive, ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -12,6 +12,7 @@ export default function SettingsLayout() {
     const groups = [
         { label: "settings.personal", items: [
             { path: "", label: "general", icon: Globe2 },
+            { path: "/backup", label: "dataBackup", icon: Archive },
             { path: "/account", label: "account", icon: UserRound },
             { path: "/preferences", label: "preferences", icon: SlidersHorizontal },
             ...(!admin ? [{ path: "/models", label: "models", icon: Cpu }] : []),
@@ -32,13 +33,13 @@ export default function SettingsLayout() {
 
     return (
         <div className="flex h-full min-h-0 flex-col lg:flex-row">
-            <aside className="shrink-0 border-b border-border px-4 pt-6 pb-3 lg:w-[var(--secondary-sidebar-width)] lg:overflow-y-auto lg:border-r lg:border-b-0 lg:px-3 lg:py-8">
+            <aside className="shrink-0 border-b border-border bg-sidebar px-4 pt-6 pb-3 text-sidebar-foreground lg:w-[var(--secondary-sidebar-width)] lg:overflow-y-auto lg:border-r lg:border-b-0 lg:px-3 lg:py-8">
                 <h1 className="mb-5 px-3 text-lg font-medium tracking-tight">{t("navigation.settings")}</h1>
                 <nav aria-label={t("settings.navigation")} className="flex gap-6 overflow-x-auto lg:block lg:space-y-7 lg:overflow-x-visible">
                     {groups.map((group) => <div key={group.label} className="shrink-0">
                         <p className="mb-2 hidden px-3 text-xs text-muted-foreground lg:block">{t(group.label)}</p>
                         <div className="flex gap-1 lg:block lg:space-y-1">
-                            {group.items.map(({ path, label, icon: Icon }) => <NavLink key={path} to={`/settings${path}`} end={!path} className={({ isActive }) => cn("flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring", isActive ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground")}>
+                            {group.items.map(({ path, label, icon: Icon }) => <NavLink key={path} to={`/settings${path}`} end={!path} className={({ isActive }) => cn("flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring", isActive ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground" : "text-sidebar-foreground")}>
                                 <Icon className="size-4 shrink-0" /><span className="min-w-0 lg:whitespace-normal">{t(`settings.${label}`)}</span>
                             </NavLink>)}
                         </div>

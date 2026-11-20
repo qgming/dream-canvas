@@ -28,11 +28,15 @@ test("the dedicated node binds its connected video to the declared named source 
 });
 
 test("image-editing models accept one source without inventing a named parameter or prompt", () => {
-    const selected = model("image", [{ key: "reference_images", label: "Images", type: "reference", role: "image" }, resolution]);
+    const selected = model("image", [{ key: "reference_images", label: "Images", type: "reference", role: "image" }, { key: "size", label: "Size", type: "text", default: "1:1", suggestions: [{ label: "1:1", value: "1:1" }, { label: "16:9", value: "16:9" }] }, resolution, { key: "quality", label: "Quality", type: "select", default: "auto", options: [{ label: "Auto", value: "auto" }, { label: "High", value: "high" }] }]);
     const config = { ...defaultConfig, channels: [{ id: "channel", name: "Channel", models: [selected] }] };
-    const input = upscaleGenerationInput(config, "channel::upscaler", node("image", "image"));
-    expect(input).toEqual({ kind: "image", url: "/api/assets/image/file", parameters: { resolution: "1080p" } });
+    const input = upscaleGenerationInput(config, "channel::upscaler", node("image", "image"), { size: "16:9", resolution: "4k", quality: "high" });
+    expect(input).toEqual({ kind: "image", url: "/api/assets/image/file", parameters: { resolution: "4k", quality: "high", size: "1:1" } });
     expect(input).not.toHaveProperty("prompt");
+    expect(upscaleModelProfile(selected)?.targets.map((control) => control.key)).toEqual(["resolution", "quality"]);
+    const edited = { size: "auto", resolution: "4k", quality: "high" };
+    expect(upscaleGenerationInput(config, "channel::upscaler", node("image", "image"), edited).parameters).toEqual(input.parameters);
+    expect(edited.size).toBe("auto");
 });
 
 test("generation-only, frame and ambiguous source models are not offered for upscaling", () => {

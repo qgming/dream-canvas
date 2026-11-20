@@ -4,6 +4,7 @@ import { FormProvider } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { dequal } from "dequal";
 import { z } from "zod";
+import { Eye, FlaskConical, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Badge, Notice } from "@/components/ui/display";
@@ -184,9 +185,9 @@ export function ModelDialog({ entry, model, onClose, onSaved }: { entry: Channel
     };
 
     return <><Dialog open={!suspended} title={t(model ? "workspace.editModel" : "workspace.addModel")} description={<>{entry.channel.name}<span role="status" className="ml-2 text-xs">{busy ? t("workspace.saving") : t(dirty ? "workspace.unsaved" : "workspace.allSaved")}</span></>} onClose={onClose} busy={busy} dirty={dirty} width={1040} footer={<>
-            <Button type="submit" form="channel-model" loading={busy} disabled={!batchReady || scriptBusy}>{t("common.save")}{!model && rows.length ? ` (${rows.length})` : ""}</Button>
-            <Button variant="ghost" disabled={!selectedReady || busy || scriptBusy} onClick={() => setPreview(true)}>{t("modelScripts.previewRequest")}</Button>
-            <Button variant="ghost" disabled={!selectedReady || busy || scriptBusy} onClick={() => setTest(true)}>{t("modelScripts.testModel")}</Button>
+            <Button variant="outline" icon={<Eye />} disabled={!selectedReady || busy || scriptBusy} onClick={() => setPreview(true)}>{t("modelScripts.previewRequest")}</Button>
+            <Button variant="outline" icon={<FlaskConical />} disabled={!selectedReady || busy || scriptBusy} onClick={() => setTest(true)}>{t("modelScripts.testModel")}</Button>
+            <Button variant="default" icon={<Save />} type="submit" form="channel-model" loading={busy} disabled={!batchReady || scriptBusy}>{t("common.save")}{!model && rows.length ? ` (${rows.length})` : ""}</Button>
         </>}>
         {testTask ? <Notice type="info" title={t("modelScripts.testQueued")} action={<Button onClick={() => void viewScript(testTask.adapterId, testTask)}>{t("modelScripts.evidence")}</Button>} /> : null}
         <EditorForm id="channel-model" form={form} onSubmit={save}>
@@ -213,7 +214,7 @@ export function ModelDialog({ entry, model, onClose, onSaved }: { entry: Channel
                                         <Choice multiple searchable options={visibleRemote.map((id) => ({ value: id, label: <span className="flex items-center justify-between gap-2"><span className="break-all">{id}</span><Badge>{t(allModelIDs.has(id) ? "modelScripts.alreadyAdded" : "modelScripts.newModel")}</Badge></span>, disabled: allModelIDs.has(id) }))} />
                                     </Field>
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <Button size="sm" variant="ghost" disabled={!selectableRemote.length} onClick={selectVisibleRemote}>{t("ui.selectFiltered")} ({selectableRemote.length})</Button>
+                                        <Button size="sm" variant="outline" disabled={!selectableRemote.length} onClick={selectVisibleRemote}>{t("ui.selectFiltered")} ({selectableRemote.length})</Button>
                                         <span className="text-xs text-muted-foreground">{t("ui.selectedCount", { count: selectedRemote.length })}</span>
                                         <Button size="sm" className="ml-auto" disabled={!selectedRemote.length} onClick={addRemote}>{t("modelScripts.addSelected")}</Button>
                                     </div>
