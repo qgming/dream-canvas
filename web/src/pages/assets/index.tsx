@@ -1,8 +1,8 @@
 import appI18n from "@/i18n";
-import { AudioLines, CircleAlert, Clapperboard, Clock3, CloudAlert, CloudCheck, CloudOff, CloudUpload, Copy, Database, Download, FileText, HardDrive, Image as ImageIcon, LayoutGrid, LoaderCircle, PencilLine, Plus, Trash2, Upload, Ellipsis } from "lucide-react";
+import { CircleAlert, Clapperboard, Clock3, CloudAlert, CloudCheck, CloudOff, CloudUpload, Copy, Database, Download, FileText, HardDrive, Image as ImageIcon, LayoutGrid, LoaderCircle, Music2, PencilLine, Plus, Trash2, Upload, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Tabs } from "@animate-ui/react/primitives/radix-ui";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
@@ -23,14 +23,12 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
-import { useDiscardChanges } from "@/hooks/use-discard-changes";
 import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
-import { retryAssetCleanup, retryAssetSync, listAssetVoices, saveAssetVoice } from "@/services/api/assets";
+import { retryAssetCleanup, retryAssetSync } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
-import { useConfigStore } from "@/stores/use-config-store";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -46,7 +44,7 @@ const kindOptions = [
     { key: "text", icon: FileText },
     { key: "image", icon: ImageIcon },
     { key: "video", icon: Clapperboard },
-    { key: "audio", icon: AudioLines },
+    { key: "audio", icon: Music2 },
 ] as const;
 
 export default function AssetsPage() {
@@ -208,7 +206,7 @@ export default function AssetsPage() {
     const confirmDelete = async () => {
         if (!deletingAsset || deleteRef.current) return;
         deleteRef.current = true;
-        try { await removeAsset(deletingAsset.id); notify.success(t("assets.deleted")); setDeletingAsset(null); }
+        try { const state = await removeAsset(deletingAsset.id); if (state === "deleted") notify.success(t("assets.deleted")); else notify.info(t("assets.deletionQueued")); setDeletingAsset(null); }
         finally { deleteRef.current = false; }
     };
 
@@ -224,7 +222,7 @@ export default function AssetsPage() {
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:py-8">
                 <div className="mx-auto max-w-7xl">
                     {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
-                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<Button onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button>} />)}
+                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<div className="flex shrink-0 flex-col gap-2 sm:flex-row">{asset.cleanupTaskId ? <Button asChild variant="outline"><Link to={`/settings/tasks?taskId=${encodeURIComponent(asset.cleanupTaskId)}`}>{t("workspace.viewBlockingTask")}</Link></Button> : null}<Button variant="outline" onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button></div>} />)}
                     <PageHeader className="mb-4" title={t("assets.title")} actions={<>
                         <SearchInput className="w-full sm:w-72" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
                         <Button variant="default" icon={<Plus />} disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
@@ -336,14 +334,14 @@ function AssetTabPanel({ value, active, children }: { value: AssetKind | "all"; 
 function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
-    const cover = assetCoverUrl(asset);
+    const cover = asset.kind === "audio" ? "" : assetCoverUrl(asset);
     return (
         <article className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-foreground/25">
             <button type="button" className="block w-full shrink-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={t("assets.previewNamed", { name: asset.title })} onClick={onOpen}>
                 {cover ? (
-                    <img src={cover} alt={asset.title} loading="lazy" className="aspect-[4/3] w-full object-cover" />
+                    <img src={cover} alt={asset.title} loading="lazy" className={`aspect-[4/3] w-full ${asset.kind === "image" && asset.data.mimeType === "image/svg+xml" ? "object-contain" : "object-cover"}`} />
                 ) : (
-                    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-card p-4 text-center text-sm leading-6 text-muted-foreground"><span className="line-clamp-5 break-words">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</span></div>
+                    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-card p-4 text-center text-sm leading-6 text-muted-foreground">{asset.kind === "audio" ? <Music2 aria-hidden="true" className="size-10 text-foreground" /> : <span className="line-clamp-5 break-words">{asset.kind === "text" ? asset.data.content : t("assets.noCover")}</span>}</div>
                 )}
             </button>
             <AssetInfo asset={asset} onOpen={onOpen} action={<Menu placement="topRight" items={[
@@ -374,13 +372,13 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
     return (
         <Sheet title={t("assets.details")} open={Boolean(asset)} width={640} onClose={onClose}>
             {asset ? (
-                <div className="space-y-3">
+                <div className="w-full min-w-0 space-y-3">
                     {asset.kind === "image" ? (
                         <MediaPreview src={asset.data.dataUrl} alt={asset.title} className="max-h-[60dvh] w-full rounded-xl object-contain" />
                     ) : asset.kind === "video" ? (
                         <video key={asset.id} src={asset.data.url} controls playsInline preload="metadata" aria-label={asset.title} className="block max-h-[60dvh] w-full rounded-xl bg-muted object-contain" />
                     ) : asset.kind === "audio" ? (
-                        <audio key={asset.id} src={asset.data.url} controls preload="metadata" aria-label={asset.title} className="w-full" />
+                        <audio key={asset.id} src={asset.data.url} controls preload="metadata" aria-label={asset.title} className="block w-full min-w-0 max-w-full [&::-webkit-media-controls-enclosure]:w-full [&::-webkit-media-controls-enclosure]:max-w-none" />
                     ) : <div className="thin-scrollbar max-h-[60dvh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted p-4 text-sm leading-6">{asset.data.content}</div>}
                     <div className="space-y-1">
                         <div className="flex min-w-0 items-start justify-between gap-3">
@@ -395,7 +393,6 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                     </div>
                     {asset.error ? <p role="alert" className="break-words text-xs leading-5 text-destructive">{asset.error}</p> : null}
                     {asset.note ? <p className="whitespace-pre-wrap break-words text-xs leading-5"><span className="text-muted-foreground">{t("assets.fields.note")}：</span>{asset.note}</p> : null}
-                    {asset.kind === "audio" ? <AssetVoiceForm key={asset.id} assetId={asset.id} /> : null}
                 </div>
             ) : null}
         </Sheet>
@@ -445,26 +442,6 @@ function AssetStorageStatus({ asset }: { asset: Asset }) {
         <Tooltip title={saveLabel} clickable><Button variant="ghost" size="icon" aria-label={saveLabel} aria-busy={saving || undefined} className={saved ? "text-success hover:text-success" : saving ? "text-info hover:text-info [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" : "text-destructive hover:text-destructive"}><SaveIcon /></Button></Tooltip>
         <Button variant="ghost" size="icon" title={cloudLabel} aria-label={cloudLabel} aria-disabled={!canSync || undefined} aria-busy={submitting || cloudState === "syncing" || undefined} className={cloudStatus.className} onClick={() => void sync()}><cloudStatus.Icon /></Button>
     </div>;
-}
-
-function AssetVoiceForm({ assetId }: { assetId: string }) {
-    const { t } = useTranslation();
-    const channels = useConfigStore((state) => state.config.channels);
-    const query = useQuery({ queryKey: ["asset-voices", assetId], queryFn: () => listAssetVoices(assetId) });
-    const [channelId, setChannelId] = useState("");
-    const form = useEditorForm();
-    const changeChannel = useDiscardChanges(form.formState.isDirty, (id: string) => { setChannelId(id); const row = query.data?.find((voice) => voice.channelId === id); form.reset({ voiceId: row?.voiceId || "" }); });
-    const row = query.data?.find((voice) => voice.channelId === channelId);
-    return <section className="space-y-3">
-        <h3 className="text-sm font-medium">{t("execution.voiceAssociation")}</h3>
-        <p className="text-xs text-muted-foreground">{t("execution.voiceAssociationHint")}</p>
-        {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
-        <Choice aria-label={t("workspace.channelModel")} disabled={form.formState.isSubmitting} value={channelId || undefined} options={channels.filter((channel) => channel.models.some((model) => model.capability === "audio")).map((channel) => ({ value: channel.id, label: channel.name }))} onChange={changeChannel} />
-        {channelId && query.data ? <EditorForm form={form} onSubmit={async (values) => { const assertSession = captureSession(); await saveAssetVoice(assetId, channelId, values.voiceId, row?.version || 0); assertSession(); form.reset(values); await query.refetch(); }}>
-            <Field name="voiceId" label={t("execution.voiceId")} schema={z.string().trim().min(1)}><Input /></Field>
-            <Button type="submit">{t("workspace.save")}</Button>
-        </EditorForm> : null}
-    </section>;
 }
 
 async function readAssetMediaBlob(asset: Exclude<Asset, { kind: "text" }>) {

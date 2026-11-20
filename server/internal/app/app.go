@@ -56,7 +56,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Approval{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -75,7 +75,7 @@ func Open(root string) (*App, error) {
 	if err := db.Model(&Asset{}).Where("save_state = ?", "saving").Updates(map[string]any{"save_state": "failed", "error": "服务在文件保存完成前停止，原件尚未可靠保留，请重新上传"}).Error; err != nil { conn.Close(); return nil, err }
 	var pending []Asset
 	if err := db.Where("delete_state = ?", "pending").Find(&pending).Error; err != nil { conn.Close(); return nil, err }
-	for _, asset := range pending { if err := db.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { stop(); conn.Close(); return nil, err } }
+	for _, asset := range pending { if err := queueAssetCleanup(db, asset.ID); err != nil { stop(); conn.Close(); return nil, err } }
 	if err := service.recoverExecution(); err != nil { stop(); conn.Close(); return nil, err }
 	service.workers.Add(1)
 	go service.schedule()
@@ -83,7 +83,7 @@ func Open(root string) (*App, error) {
 	return service, nil
 }
 
-func (a *App) Close() { a.stop(); a.workers.Wait(); a.logEvent(a.ctx, slog.LevelInfo, "service.stopped"); if db, err := a.db.DB(); err == nil { db.Close() } }
+func (a *App) Close() { a.stop(); a.workers.Wait(); a.logEvent(a.ctx, slog.LevelInfo, "service.stopped"); if a.logs != nil { _ = a.logs.store.Close() }; if db, err := a.db.DB(); err == nil { db.Close() } }
 
 func identifier() string {
 	value := make([]byte, 32)
@@ -130,7 +130,8 @@ func (a *App) Router(web string) *gin.Engine {
 	api.GET("/auth/status", func(c *gin.Context) {
 		var count int64
 		if err := a.db.Model(&User{}).Count(&count).Error; err != nil { respondError(c, err); return }
-		c.JSON(200, gin.H{"initialized": count > 0})
+		open, err := a.siteOpen(); if err != nil { respondError(c, err); return }
+		c.JSON(200, gin.H{"initialized": count > 0, "open": open})
 	})
 	api.POST("/auth/login", a.login)
 	remote := a.mcpHandler()
@@ -169,6 +170,8 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.GET("/tasks/:id/events", a.taskEvents)
 	authed.POST("/tasks/:id/cancel", a.cancelTask)
 	authed.POST("/tasks/:id/resume", a.resumeTask)
+	authed.POST("/tasks/:id/resolve", a.resolveTask)
+	authed.DELETE("/tasks/:id", a.deleteTask)
 	authed.POST("/tasks/:id/project-version", a.taskProjectVersion)
 	authed.GET("/usage", a.listUsage)
 	authed.GET("/assistant/threads", a.listAssistantThreads)
@@ -188,6 +191,7 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.POST("/projects", a.createProject)
 	authed.GET("/projects/:id", a.getProject)
 	authed.PUT("/projects/:id", a.saveProject)
+	authed.DELETE("/projects/:id", a.deleteProject)
 	authed.GET("/projects/:id/history", a.projectHistory)
 	authed.POST("/projects/:id/revert", a.revertProject)
 	authed.GET("/assets", a.listAssets)
@@ -199,11 +203,9 @@ func (a *App) Router(web string) *gin.Engine {
 	authed.GET("/assets/:id/file", a.assetFile)
 	authed.GET("/assets/:id/preview", a.assetPreview)
 	authed.PATCH("/assets/:id", a.updateAsset)
+	authed.DELETE("/assets/:id", a.deleteAsset)
 	authed.GET("/assets/:id/voices", a.listAssetVoices)
 	authed.PUT("/assets/:id/voices/:channelId", a.saveAssetVoice)
-	authed.GET("/approvals", a.listApprovals)
-	authed.POST("/approvals", a.createApproval)
-	authed.POST("/approvals/:id/decision", a.decideApproval)
 	admin := authed.Group("/admin", func(c *gin.Context) {
 		if currentUser(c).Role != "admin" { respondError(c, problem(403, "forbidden", "需要管理员权限")); return }
 		c.Next()
@@ -219,10 +221,12 @@ func (a *App) Router(web string) *gin.Engine {
 	admin.PUT("/model-ordering", a.saveModelOrdering)
 	admin.GET("/channel-templates", a.listChannelTemplates)
 	admin.POST("/channel-templates/:template", a.installChannelTemplate)
-	admin.GET("/runtime", a.getRuntimeSettings)
-	admin.PUT("/runtime", a.saveRuntimeSettings)
+	admin.GET("/site", a.getSiteSettings)
+	admin.PUT("/site", a.saveSiteSettings)
 	admin.GET("/logging", a.getLogSettings)
 	admin.PUT("/logging", a.saveLogSettings)
+	admin.GET("/logging/entries", a.readLogs)
+	admin.DELETE("/logging/entries", a.clearLogs)
 	admin.GET("/storages", a.listStorages)
 	admin.POST("/storages", a.saveStorage)
 	admin.PUT("/storages/:id", a.saveStorage)

@@ -27,7 +27,6 @@ import { uploadImage } from "@/services/image-storage";
 import { assetId, assetUrl } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 import { nanoid } from "nanoid";
-import { decideApproval } from "@/services/api/projects";
 import { inputVisible } from "@/lib/model-inputs";
 
 export function AssistantPanelContent() {
@@ -57,7 +56,6 @@ export function AssistantPanelContent() {
     const [submitting, setSubmitting] = useState(false);
     const submittingRef = useRef(false);
     const [stopping, setStopping] = useState(false);
-    const [deciding, setDeciding] = useState("");
     const stoppingRef = useRef(false);
     const sequence = useRef(0);
     const activeId = useAgentStore((state) => state.activeThreadId);
@@ -72,7 +70,7 @@ export function AssistantPanelContent() {
     const modelEntry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text" && entry.features.tools);
     const attachments = useAgentStore((state) => state.attachments);
     const selectedSkill = useAgentSkillStore((state) => state.selectedSkill);
-    const running = snapshot?.turns.find((turn) => ["queued", "running", "waiting_approval", "waiting_tasks"].includes(turn.status));
+    const running = snapshot?.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
     const reportedTurn = running || snapshot?.turns.at(-1);
     const busy = Boolean(running || submitting || creating);
     useEffect(() => { useAgentStore.setState({ sending: submitting, waiting: Boolean(running) }); }, [submitting, running?.id]);
@@ -100,11 +98,11 @@ export function AssistantPanelContent() {
             const latest = record.turns.at(-1), previous = followedTurn.current;
             if (latest?.projectId && !routeProjectRef.current && !targetRef.current && (switching || previous?.threadId === id && previous.turnId === latest.id && !previous.projectId)) chooseTarget(latest.projectId);
             followedTurn.current = latest ? { threadId: id, turnId: latest.id, projectId: latest.projectId || "" } : null;
-            const running = record.turns.find((turn) => ["queued", "running", "waiting_approval", "waiting_tasks"].includes(turn.status));
+            const running = record.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
             useAgentStore.setState({ activeThreadId: id, connectError: "", messages: record.items.map((item) => {
                 const detail = item.detail as { attachments?: string[]; skill?: string } | undefined;
                 return { ...item, itemId: item.id, streamId: item.role === "assistant" && item.turnId === running?.id && running.status === "running" ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
-            }), pendingApprovals: record.approvals.map((approval) => ({ requestId: approval.id, method: approval.action, reason: approval.targetId, threadId: id, turnId: running?.id })), activeTurnId: running?.id || "" });
+            }), activeTurnId: running?.id || "" });
             if (activate) setTab("chat");
         } catch (error) { if (request === sequence.current) showError(error); }
         finally { if (request === sequence.current) setLoading(false); }
@@ -202,8 +200,7 @@ export function AssistantPanelContent() {
                 {running?.status === "waiting_tasks" ? <p role="status" className="px-4 pt-3 text-xs text-muted-foreground">{appI18n.t("workspace.assistantWaitingTasks")}</p> : null}
                 {reportedTurn?.error ? <Alert className="mx-4 mt-3" type={reportedTurn.status === "failed" || reportedTurn.status === "interrupted" ? "error" : "warning"} title={reportedTurn.error} /> : null}
                 {!snapshot && !loading ? <p className="px-5 pt-8 text-sm leading-6" style={{ color: theme.node.muted }}>{appI18n.t("workspace.assistantBoundary")}</p> : null}
-                {snapshot?.approvals.map((approval) => <Alert key={approval.id} type="warning" className="mx-4 mt-3" title={appI18n.t(approval.action === "delete_asset" ? "workspace.globalDeleteAsset" : "workspace.deleteProject")} description={approval.targetId} action={<div className="flex gap-2"><Button size="sm" disabled={Boolean(deciding)} onClick={async () => { setDeciding(approval.id); try { await decideApproval(approval.id, false); await openThread(activeId, false); } catch (error) { showError(error); } finally { setDeciding(""); } }}>{appI18n.t("workspace.reject")}</Button><Button size="sm" variant="destructive" disabled={Boolean(deciding)} loading={deciding === approval.id} onClick={async () => { setDeciding(approval.id); try { await decideApproval(approval.id, true); await openThread(activeId, false); } catch (error) { showError(error); } finally { setDeciding(""); } }}>{appI18n.t("workspace.confirm")}</Button></div>} />)}
-                <AgentChatTimeline visible={tab === "chat"} theme={theme} pendingTool={null} pendingApprovals={[]} sending={submitting} waiting={Boolean(running)} onRejectTool={() => {}} onApproveTool={() => {}} onApprovalDecision={() => {}} />
+                <AgentChatTimeline visible={tab === "chat"} theme={theme} sending={submitting} waiting={Boolean(running)} />
                 <AgentChatComposer model={<ModelPicker config={config} value={selectedModel} capability="text" toolsOnly disabled={busy || loading} className="min-w-0 max-w-48" onChange={(model) => useAgentStore.setState({ model })} />} theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={loading} placeholder={appI18n.t("workspace.assistantPrompt")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined} onAddFiles={async (files) => {
                     const assertSession = captureSession();
                     try { for (const file of Array.from(files || [])) { assertSession(); const image = await uploadImage(file); assertSession(); useAgentStore.setState((state) => ({ attachments: [...state.attachments, { id: nanoid(), name: file.name, type: image.mimeType, size: image.bytes, width: image.width, height: image.height, url: image.url, dataUrl: image.url }] })); } }

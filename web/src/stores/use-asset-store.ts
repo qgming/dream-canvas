@@ -2,7 +2,6 @@ import i18n from "@/i18n";
 import { create } from "zustand";
 
 import * as api from "@/services/api/assets";
-import { decideApproval, requestApproval } from "@/services/api/projects";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { previewUrlFor } from "@/services/image-storage";
 import { captureSession } from "@/services/api/client";
@@ -21,7 +20,7 @@ type AssetStore = {
     reset: () => void;
     addAsset: (asset: AssetInput) => Promise<string>;
     updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => Promise<void>;
-    removeAsset: (id: string) => Promise<void>;
+    removeAsset: (id: string) => Promise<string>;
     cleanupImages: (extra?: unknown) => void;
 };
 
@@ -38,8 +37,10 @@ function fromServer(record: api.ServerAsset): Asset {
 
 export function assetCoverUrl(asset: Asset) {
     if (asset.kind === "video" && !asset.coverUrl && asset.saveState === "saved") return `/api/assets/${encodeURIComponent(asset.id)}/preview`;
-    const own = asset.kind === "image" ? asset.data.dataUrl : "";
-    return asset.kind === "image" && (!asset.coverUrl || asset.coverUrl === own) ? previewUrlFor(asset.data.storageKey) || own : asset.coverUrl;
+    if (asset.kind === "image" && (!asset.coverUrl || asset.coverUrl === asset.data.dataUrl)) {
+        return asset.data.mimeType === "image/svg+xml" ? asset.data.dataUrl : previewUrlFor(asset.data.storageKey) || asset.data.dataUrl;
+    }
+    return asset.coverUrl;
 }
 
 let loadSequence = 0;
@@ -87,14 +88,12 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
     },
     removeAsset: async (id) => {
         const assertSession = captureSession();
-        const approval = await requestApproval("delete_asset", id);
-        assertSession();
-        const result = await decideApproval(approval.id, true);
+        const result = await api.deleteAsset(id);
         assertSession();
         await get().loadAssets();
         assertSession();
         window.dispatchEvent(new CustomEvent("asset-deleted", { detail: id }));
-        if ("deleteState" in result) throw new Error(i18n.t("errors.assetCleanupPending"));
+        return result.deleteState;
     },
     cleanupImages: () => {},
 }));

@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "golang.org/x/image/webp"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (a *App) listAssets(c *gin.Context) {
@@ -24,12 +25,14 @@ func (a *App) listAssets(c *gin.Context) {
 	query := a.db.Where("user_id = ?", currentUser(c).ID)
 	if c.Query("deleting") == "true" { query = query.Where("delete_state = ?", "pending") } else { query = query.Where("delete_state = ? AND workbench_record_id = ?", "", "") }
 	if err := query.Order("created_at DESC").Find(&assets).Error; err != nil { respondError(c, err); return }
+	for index := range assets { if err := assetCleanupBlocker(a.db, &assets[index]); err != nil { respondError(c, err); return } }
 	c.JSON(200, assets)
 }
 
 func (a *App) getAsset(c *gin.Context) {
 	var asset Asset
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { respondError(c, err); return }
+	if err := assetCleanupBlocker(a.db, &asset); err != nil { respondError(c, err); return }
 	c.JSON(200, asset)
 }
 
@@ -189,10 +192,63 @@ func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) (JSON, error) 
 	return encode(metadata), nil
 }
 
-func (a *App) retryAssetCleanup(c *gin.Context) {
+type assetDeleteResult struct { AssetID string `json:"assetId"`; DeleteState string `json:"deleteState"` }
+
+func (a *App) DeleteAsset(userID, id string) (assetDeleteResult, error) {
 	var asset Asset
-	if err := a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", c.Param("id"), currentUser(c).ID, "pending").Error; err != nil { respondError(c, err); return }
-	if err := a.db.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { respondError(c, err); return }
-	if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error; err != nil { respondError(c, err); return }
-	a.signalWork(); c.JSON(202, gin.H{"deleteState": "pending"})
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&asset, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
+		if asset.DeleteState == "deleted" { return nil }
+		if asset.DeleteState == "" {
+			if err := tx.Model(&asset).Updates(map[string]any{"delete_state": "pending", "error": ""}).Error; err != nil { return err }
+			asset.DeleteState = "pending"
+		}
+		return queueAssetCleanup(tx, asset.ID)
+	})
+	if err == nil { a.notify(userID); a.signalWork() }
+	return assetDeleteResult{AssetID: asset.ID, DeleteState: asset.DeleteState}, err
+}
+
+func (a *App) deleteAsset(c *gin.Context) {
+	result, err := a.DeleteAsset(currentUser(c).ID, c.Param("id"))
+	if err != nil { respondError(c, err); return }
+	status := 202; if result.DeleteState == "deleted" { status = 200 }
+	c.JSON(status, result)
+}
+
+func (a *App) retryAssetCleanup(c *gin.Context) {
+	if err := a.RetryAssetCleanup(currentUser(c).ID, c.Param("id")); err != nil { respondError(c, err); return }
+	c.JSON(202, gin.H{"deleteState": "pending"})
+}
+
+func queueAssetCleanup(db *gorm.DB, id string) error {
+	return db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "asset_id"}, {Name: "kind"}}, DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: id, Kind: "delete"}).Error
+}
+
+func (a *App) RetryAssetCleanup(userID, id string) error {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var asset Asset
+		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "pending").Error; err != nil { return err }
+		if err := queueAssetCleanup(tx, asset.ID); err != nil { return err }
+		return tx.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error
+	})
+	if err == nil { a.notify(userID); a.signalWork() }
+	return err
+}
+
+func assetCleanupBlocker(db *gorm.DB, asset *Asset) error {
+	if asset.DeleteState != "pending" { return nil }
+	var task GenerationTask
+	err := db.Select("id", "status").Where("user_id = ? AND EXISTS (SELECT 1 FROM task_assets WHERE task_assets.task_id = generation_tasks.id AND task_assets.asset_id = ? AND released = ?)", asset.UserID, asset.ID, false).Order("created_at").Take(&task).Error
+	if err == nil {
+		asset.CleanupTaskID = task.ID
+		asset.Error = "生成任务 "+task.ID+" 尚未结束，仍占用此素材；任务结束后自动清理"
+		if task.Status == "confirmation_required" { asset.Error = "生成任务 "+task.ID+" 待人工核对，仍占用此素材；请在生成任务中核对结果后继续清理" }
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+	var active int64
+	if err := db.Model(&TaskAsset{}).Where("asset_id = ? AND released = ?", asset.ID, false).Count(&active).Error; err != nil { return err }
+	if active > 0 { asset.Error = "等待使用该素材的任务结束并释放占用后清理" }
+	return nil
 }

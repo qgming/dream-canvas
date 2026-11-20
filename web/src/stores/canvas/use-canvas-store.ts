@@ -246,7 +246,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const assertSession = captureSession(), owner = useAuthStore.getState().user?.id; if (!owner) return;
         for (const id of ids) {
             const project = await get().ensureSaved(id); assertSession();
-            const approval = await api.requestApproval("delete_project", id, project.version); assertSession(); await api.decideApproval(approval.id, true); assertSession();
+            await api.deleteProject(id, project.version); assertSession();
             const key = draftKey(owner, id), cleanup = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => { await drafts.removeItem(key); }); writes.set(key, cleanup); await cleanup; assertSession();
             set((state) => ({ projects: state.projects.filter((project) => project.id !== id) }));
         }

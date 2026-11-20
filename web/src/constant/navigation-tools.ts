@@ -1,4 +1,4 @@
-import { ImagePlus, Images, Lightbulb, ListTodo, Maximize2, Video } from "lucide-react";
+import { ImagePlus, Images, Lightbulb, Maximize2, Video } from "lucide-react";
 
 export const navigationTools = [
     {
@@ -20,10 +20,6 @@ export const navigationTools = [
     {
         slug: "assets",
         icon: Images,
-    },
-    {
-        slug: "tasks",
-        icon: ListTodo,
     },
 ] as const;
 

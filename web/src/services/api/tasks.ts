@@ -9,7 +9,10 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { inputLabel, inputVisible } from "@/lib/model-inputs";
 import { useGenerationProgressStore } from "@/stores/use-generation-progress-store";
 
-export type GenerationTask = { id: string; projectId?: string; workbenchRecordId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; providerStatus?: string; progress?: number; error?: string; text: string; assetIds: string[]; upstreamId?: string; queryRecoveredBy?: string; queryRecoveredAt?: string; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
+export type GenerationTask = { id: string; projectId?: string; workbenchRecordId?: string; nodeId?: string; projectVersion: number; channelId: string; modelId: string; capability: ModelCapability; input: Record<string, unknown>; status: string; providerStatus?: string; progress?: number; error?: string; text: string; assetIds: string[]; upstreamId?: string; queryRecoveredBy?: string; queryRecoveredAt?: string; resolvedBy?: string; resolvedAt?: string; resolutionNote?: string; removed?: boolean; saveState: string; syncState: string; responseCleanupPending: boolean; responseCleanupError?: string; cancelRequested: boolean; cancelError?: string; applied: boolean; appliedVersion: number; applyError?: string; usageState: string; debugRevision?: number; createdAt: string; updatedAt: string };
+export const generationEnded = (task: GenerationTask) => ["succeeded", "failed", "cancelled", "interrupted"].includes(task.status);
+export const generationNeedsResolution = (task: GenerationTask) => !task.removed && !task.resolvedAt && ["confirmation_required", "interrupted"].includes(task.status);
+export type TaskResolution = "succeeded" | "failed" | "cancelled";
 export class GenerationStateError extends Error {
     constructor(readonly status: string, message: string, readonly taskId?: string) { super(message); this.name = "GenerationStateError"; }
 }
@@ -64,9 +67,11 @@ export async function createGeneration(config: AiConfig, capability: ModelCapabi
     return task;
 }
 export const getGeneration = (id: string, signal?: AbortSignal) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal });
-export const listGenerations = () => apiRequest<GenerationTask[]>("/tasks");
+export const listGenerations = (includeRemoved = false) => apiRequest<GenerationTask[]>(includeRemoved ? "/tasks?includeRemoved=true" : "/tasks");
 export const cancelGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 export const resumeGeneration = (id: string) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
+export const resolveGeneration = (task: GenerationTask, status: TaskResolution) => apiRequest<GenerationTask>(`/tasks/${encodeURIComponent(task.id)}/resolve`, jsonRequest("POST", { expectedUpdatedAt: task.updatedAt, confirmed: true, status }));
+export const deleteGeneration = (task: GenerationTask) => apiRequest<{ removed: boolean }>(`/tasks/${encodeURIComponent(task.id)}`, jsonRequest("DELETE", { expectedUpdatedAt: task.updatedAt, confirmed: true }));
 export const recoverGenerationQuery = (task: GenerationTask, upstreamId: string) => apiRequest<GenerationTask>(`/admin/tasks/${encodeURIComponent(task.id)}/recover-query`, jsonRequest("POST", { upstreamId, expectedUpdatedAt: task.updatedAt, confirmed: true }));
 export async function waitForGeneration(task: GenerationTask, options?: GenerationOptions & { onText?: (text: string) => void }): Promise<GenerationTask> {
     const assertSession = captureSession();

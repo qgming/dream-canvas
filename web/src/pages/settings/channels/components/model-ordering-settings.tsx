@@ -1,24 +1,24 @@
 import { useState } from "react";
+import { Tabs } from "@animate-ui/react/primitives/radix-ui";
 import { Reorder, useDragControls } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
-import { GripVertical } from "lucide-react";
+import { Bot, FileText, GripVertical, Image, Music2, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge, Notice, Spinner } from "@/components/ui/display";
 import { Button } from "@/components/ui/button";
-import { Tabs } from "@/components/ui/tabs";
 import type { Capability, ChannelEntry } from "@/services/api/channels";
 import { moveBy, sortByOrder } from "../use-model-ordering";
 import { OrderButtons } from "./order-buttons";
 
 type Item = { id: string; name: string; model: string; channel: string; enabled: boolean };
 
-const groups: { key: Capability | "assistant"; label: string }[] = [
-    { key: "image", label: "workspace.image" },
-    { key: "video", label: "workspace.video" },
-    { key: "text", label: "workspace.text" },
-    { key: "audio", label: "modelScripts.tts" },
-    { key: "assistant", label: "modelOrdering.assistant" },
-];
+const groups = [
+    { key: "image", label: "workspace.image", icon: Image },
+    { key: "video", label: "workspace.video", icon: Video },
+    { key: "text", label: "workspace.text", icon: FileText },
+    { key: "audio", label: "workspace.audio", icon: Music2 },
+    { key: "assistant", label: "modelOrdering.assistant", icon: Bot },
+] as const;
 
 function OrderRow({ item, index, count, disabled, onOrderStart, onOrderEnd, onMove }: { item: Item; index: number; count: number; disabled: boolean; onOrderStart: () => void; onOrderEnd: () => void; onMove: (index: number) => void }) {
     const { t } = useTranslation();
@@ -81,19 +81,17 @@ export function ModelOrderingSettings({ channels, orders, loading, queryError, b
         return sortByOrder(candidates, (model) => model.id, orders[key]);
     };
     return <section className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h2 className="text-base font-medium">{t("modelOrdering.title")}</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{t("modelOrdering.description")}</p></div>
-            <span role="status" className="text-xs text-muted-foreground">{loading ? t("settings.loading") : busy ? t("modelOrdering.saving") : error || queryError ? t("workspace.saveFailed") : t("workspace.allSaved")}</span>
-        </div>
         {queryError || error ? <Notice type={conflict ? "warning" : "error"} title={queryError || error} action={<div className="flex gap-2">{conflict ? <Button disabled={busy} onClick={onReload}>{t("workspace.reload")}</Button> : null}<Button disabled={busy} onClick={onRetry}>{t("workspace.retry")}</Button></div>} /> : null}
         {conflict && error ? <p className="text-xs text-muted-foreground">{t("modelOrdering.conflictHint")}</p> : null}
-        {loading ? <Spinner label={t("settings.loading")} /> : <Tabs value={tab} onValueChange={setTab} items={groups.map((group) => {
-            const groupItems = items(group.key);
-            return {
-                key: group.key,
-                label: <>{t(group.label)} <span className="ml-1 text-xs text-muted-foreground">{groupItems.length}</span></>,
-                children: <OrderGroup value={group.key} items={groupItems.map(({ id, name, model, channel, enabled }) => ({ id, name, model, channel, enabled }))} disabled={orderingDisabled} onPreview={onPreview} onCommit={onCommit} onReorder={onReorder} />,
-            };
-        })} />}
+        {loading ? <Spinner label={t("settings.loading")} /> : <Tabs.Root value={tab} onValueChange={setTab} className="min-w-0">
+            <div className="thin-scrollbar mb-4 min-w-0 overflow-x-auto overflow-y-hidden pb-2">
+                <Tabs.List aria-label={t("workspace.type")} className="inline-flex w-max items-center gap-1 rounded-xl border border-border bg-card p-1">
+                    {groups.map(({ key, label, icon: Icon }) => <Tabs.Trigger key={key} value={key} className="inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-accent data-[state=active]:text-card-foreground data-[state=active]:shadow-sm"><Icon className="size-4 text-foreground" />{t(label)}<span className="text-xs text-muted-foreground">{items(key).length}</span></Tabs.Trigger>)}
+                </Tabs.List>
+            </div>
+            {groups.map(({ key }) => <Tabs.Content key={key} value={key} className="outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <OrderGroup value={key} items={items(key)} disabled={orderingDisabled} onPreview={onPreview} onCommit={onCommit} onReorder={onReorder} />
+            </Tabs.Content>)}
+        </Tabs.Root>}
     </section>;
 }

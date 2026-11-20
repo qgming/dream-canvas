@@ -5,7 +5,7 @@ import { Reorder, useDragControls } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ChevronDown, CodeXml, GripVertical, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ChevronDown, GripVertical, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -257,7 +257,7 @@ export default function ChannelsPage() {
     const orderDisabled = ordering.busy || ordering.loading || Boolean(ordering.queryError);
 
     return <section className="space-y-6">
-        <PageHeader title={t("workspace.channels")} description={t("modelScripts.channelsHint")} actions={<><Button variant="outline" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void refresh().catch((failure: unknown) => notify.error(failure instanceof Error ? failure.message : String(failure)))}>{t("workspace.refresh")}</Button><Button asChild variant="outline"><Link to="/settings/model-scripts"><CodeXml />{t("modelScripts.title")}</Link></Button><Button variant="default" icon={<Plus className="size-4" />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></>} />
+        <PageHeader title={t("workspace.channels")} actions={<><Button variant="outline" icon={<RefreshCw className="size-4" />} loading={query.isFetching} onClick={() => void refresh().catch((failure: unknown) => notify.error(failure instanceof Error ? failure.message : String(failure)))}>{t("workspace.refresh")}</Button><Button variant="default" icon={<Plus className="size-4" />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></>} />
         {query.error ? <Notice type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         {scripts.error ? <Notice type="error" title={scripts.error.message} action={<Button onClick={() => void scripts.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         {query.data ? <ModelOrderingSettings channels={query.data} orders={ordering.orders} loading={ordering.loading} queryError={ordering.queryError} busy={ordering.busy} error={ordering.error} conflict={ordering.conflict} onPreview={ordering.preview} onCommit={ordering.commit} onReorder={ordering.reorder} onRetry={() => void ordering.retry()} onReload={() => void ordering.reload()} /> : null}

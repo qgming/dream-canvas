@@ -1,11 +1,10 @@
 import i18n from "@/i18n";
 import { apiRequest, jsonRequest } from "./client";
 import type { AgentChatItem } from "@/stores/use-agent-store";
-import type { Approval } from "./projects";
 
 export type AssistantThread = { id: string; title: string; version: number; createdAt: string; updatedAt: string };
 export type AssistantTurn = { id: string; projectId: string; status: string; error?: string };
-export type AssistantSnapshot = { thread: AssistantThread; items: AgentChatItem[]; turns: AssistantTurn[]; approvals: Approval[] };
+export type AssistantSnapshot = { thread: AssistantThread; items: AgentChatItem[]; turns: AssistantTurn[] };
 export const listThreads = () => apiRequest<AssistantThread[]>("/assistant/threads");
 export const createThread = (title = i18n.t("errors.newThread")) => apiRequest<AssistantThread>("/assistant/threads", jsonRequest("POST", { title }));
 export const getThread = (id: string) => apiRequest<AssistantSnapshot>(`/assistant/threads/${encodeURIComponent(id)}`);

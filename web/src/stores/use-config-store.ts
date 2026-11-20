@@ -72,7 +72,9 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
             const draft = discardDraft ? null : await drafts.getItem<{ value: GenerationPreference; version: number }>(draftKey(owner));
             if (scope !== scopeRevision || useAuthStore.getState().user?.id !== owner) return;
             if (edit !== editRevision) throw new Error(i18n.t("errors.preferenceEditsPreserved"));
-            set((state) => ({ config: { ...state.config, ...preference(draft?.value || record.value) }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict: Boolean(draft && draft.version !== record.version), error: draft ? i18n.t("errors.preferenceDraftRestored") : "" }));
+            const conflict = Boolean(draft && draft.version !== record.version);
+            set((state) => ({ config: { ...state.config, ...preference(draft?.value || record.value) }, version: draft?.version ?? record.version, hydrated: true, saving: false, dirty: Boolean(draft), conflict, error: conflict ? i18n.t("errors.preferenceVersionConflict") : "" }));
+            if (draft && !conflict) await get().save();
         } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceReadFailed") }); }
     },
     setCatalog: (catalog) => set((state) => {
@@ -81,7 +83,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         return { config: { ...next, imageModel: firstModel(next, "image"), videoModel: firstModel(next, "video"), textModel: firstModel(next, "text"), audioModel: firstModel(next, "audio"), assistantModel: firstModel(next, "text", true) } };
     }),
     updateConfig: (key, value) => {
-        if (!get().hydrated) return;
+        if (!get().hydrated || get().conflict || get().config[key] === value) return;
         editRevision++;
         set((state) => ({ config: { ...state.config, [key]: value }, dirty: true }));
         const owner = useAuthStore.getState().user?.id;
@@ -89,6 +91,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         const draft = { value: preference(get().config), version: get().version };
         pendingWrite = pendingWrite.catch(() => undefined).then(async () => { await drafts.setItem(draftKey(owner), draft); });
         void pendingWrite.catch((error: unknown) => { if (useAuthStore.getState().user?.id === owner) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceDraftFailed") }); });
+        void get().save();
     },
     save: () => {
         if (running) return running;
@@ -97,7 +100,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         if (!owner || !get().hydrated || get().conflict) return Promise.resolve();
         const assertSession = captureSession();
         const operation = (async () => {
-            set({ saving: true });
+            set({ saving: true, error: "" });
             try {
                 while (get().dirty && scope === scopeRevision) {
                     await pendingWrite;
@@ -112,7 +115,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
                     pendingWrite = pendingWrite.catch(() => undefined).then(async () => { if (changed) await drafts.setItem(draftKey(owner), draft); else await drafts.removeItem(draftKey(owner)); });
                     await pendingWrite;
                 }
-            } catch (error) { if (scope === scopeRevision) set({ error: error instanceof Error ? error.message : i18n.t("errors.preferenceSaveFailed"), conflict: error instanceof ApiError && error.code === "version_conflict" }); }
+            } catch (error) { if (scope === scopeRevision) { const conflict = error instanceof ApiError && error.code === "version_conflict"; set({ error: conflict ? i18n.t("errors.preferenceVersionConflict") : error instanceof Error ? error.message : i18n.t("errors.preferenceSaveFailed"), conflict }); } }
             finally { if (scope === scopeRevision) set({ saving: false }); }
         })();
         running = operation;

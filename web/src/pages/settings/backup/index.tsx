@@ -61,14 +61,14 @@ export default function BackupPage() {
     };
 
     return <section className="space-y-6">
-        <PageHeader title={t("settings.dataBackup")} description={t("backup.description")} />
+        <PageHeader title={t("settings.dataBackup")} />
         {assetError ? <Notice type="error" title={assetError} action={<Button disabled={Boolean(busy)} onClick={() => void useAssetStore.getState().loadAssets()}>{t("common.retry")}</Button>} /> : null}
         <section aria-labelledby="asset-backup-title">
             <h2 id="asset-backup-title" className="mb-2 text-base font-semibold">{t("assets.title")}</h2>
-            <Field layout="horizontal" label={t("assets.export")} description={t("backup.exportDescription")}>
+            <Field layout="horizontal" label={t("assets.export")} help={`${t("backup.exportDescription")}\n${t("backup.description")}`}>
                 <Button variant="outline" icon={<Download />} loading={busy === "export"} disabled={!hydrated || Boolean(assetError) || Boolean(busy)} onClick={() => void transfer("export")}>{t("assets.export")}</Button>
             </Field>
-            <Field layout="horizontal" label={t("assets.import")} description={t("backup.importDescription")}>
+            <Field layout="horizontal" label={t("assets.import")} help={t("backup.importDescription")}>
                 <Button variant="outline" icon={<Upload />} loading={busy === "import"} disabled={Boolean(busy)} onClick={() => input.current?.click()}>{t("assets.import")}</Button>
             </Field>
             {busy ? <p role="status" className="mt-2 text-xs text-muted-foreground">{t(busy === "export" ? "backup.exporting" : "backup.importing")}</p> : null}

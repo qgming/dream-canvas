@@ -47,7 +47,7 @@ export default function AccessTokensPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader title={appI18n.t("workspace.accessTokens")} description={appI18n.t("workspace.tokenDescription")} actions={<Button variant="default" icon={<Plus />} onClick={() => setCreating(true)}>{appI18n.t("workspace.createToken")}</Button>} />
+            <PageHeader title={appI18n.t("workspace.accessTokens")} actions={<Button variant="default" icon={<Plus />} onClick={() => setCreating(true)}>{appI18n.t("workspace.createToken")}</Button>} />
             {query.error ? <Alert type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{appI18n.t("workspace.retry")}</Button>} /> : null}
             <DataTable<AccessToken> rowId="id" rows={query.data} loading={query.isLoading} failed={query.isError} columns={[
                 { title: appI18n.t("workspace.name"), dataIndex: "name", render: (name) => <span className="font-medium break-words">{name}</span> },

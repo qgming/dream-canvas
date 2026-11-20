@@ -32,6 +32,7 @@ func (a *App) tokenPrincipal(raw string) (Principal, error) {
 	if raw == "" { return principal, problem(401, "token_required", "需要有效的 Bearer Token") }
 	if err := a.db.First(&principal.Token, "hash = ? AND revoked = ?", digest(raw), false).Error; err != nil { return principal, problem(401, "invalid_token", "访问令牌无效或已撤销") }
 	if err := a.db.First(&principal.User, "id = ? AND disabled = ?", principal.Token.UserID, false).Error; err != nil { return principal, problem(401, "invalid_token", "账号不存在或已停用") }
+	if err := a.siteAccess(principal.User); err != nil { return principal, err }
 	if json.Unmarshal(principal.Token.Scopes, &principal.Scopes) != nil || json.Unmarshal(principal.Token.Projects, &principal.Projects) != nil { return principal, problem(403, "invalid_scope", "令牌授权范围无效") }
 	return principal, nil
 }

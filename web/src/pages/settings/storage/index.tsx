@@ -34,7 +34,7 @@ export default function StoragePage() {
     const [busy, setBusy] = useState(false);
     const open = (record?: StorageConfig) => { form.reset(record ? { ...record, accessKeyId: "", accessKeySecret: "" } : { ...templates[0], default: !query.data?.some((row) => row.storage.default), bucket: "", accessKeyId: "", accessKeySecret: "" }); setEditor({ record }); };
     return <section className="space-y-6">
-        <PageHeader title={t("storage.title")} description={t("storage.description")} actions={<Button variant="default" icon={<Plus />} onClick={() => open()}>{t("storage.add")}</Button>} />
+        <PageHeader title={t("storage.title")} actions={<Button variant="default" icon={<Plus />} onClick={() => open()}>{t("storage.add")}</Button>} />
         <Notice type="info" title={t("storage.singleActive")} description={t("storage.privateHint")} />
         {query.error ? <Notice type="error" title={query.error.message} action={<Button onClick={() => void query.refetch()}>{t("workspace.retry")}</Button>} /> : null}
         <DataTable<StorageConfig> rowId="id" rows={query.data?.map((row) => row.storage)} loading={query.isLoading} failed={query.isError} columns={[
@@ -47,7 +47,7 @@ export default function StoragePage() {
                 confirm({ title: t("storage.remove"), content: t("storage.removeHint"), destructive: true, onConfirm: async () => { assertSession(); await deleteStorage(row.id); assertSession(); await query.refetch(); } });
             }}>{t("storage.remove")}</Button></div> },
         ]} />
-        <Dialog title={t(editor?.record ? "storage.edit" : "storage.add")} open={Boolean(editor)} busy={busy} onClose={() => setEditor(null)} bodyClassName="@container/settings" footer={<Button variant="default" icon={<Save />} type="submit" form="storage-editor" loading={busy}>{t("workspace.save")}</Button>}>
+        <Dialog title={t(editor?.record ? "storage.edit" : "storage.add")} open={Boolean(editor)} busy={busy} onClose={() => setEditor(null)} bodyClassName="@container/settings" footer={<Button variant="default" icon={<Save />} type="submit" form="storage-editor" loading={busy}>{t("common.save")}</Button>}>
             <EditorForm id="storage-editor" form={form} className="space-y-0" onSubmit={async (values) => {
                 const assertSession = captureSession(); setBusy(true);
                 try { await saveStorage(editor?.record?.id, { ...values, version: editor?.record?.version || 0, accessKeyId: values.accessKeyId?.trim() || undefined, accessKeySecret: values.accessKeySecret?.trim() || undefined }); assertSession(); form.reset(values); setEditor(null); await query.refetch(); notify.success(t("storage.saved")); }

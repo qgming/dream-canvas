@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func validPreference(name string) bool { return name == "generation" }
@@ -181,7 +180,7 @@ func queueWorkbenchMediaCleanup(tx *gorm.DB, userID string, ids []string) (bool,
 		if err := tx.Model(&AssetReference{}).Where("asset_id = ?", asset.ID).Count(&count).Error; err != nil { return false, err }
 		if count > 0 { continue }
 		if err := tx.Model(&asset).Updates(map[string]any{"delete_state": "pending", "error": ""}).Error; err != nil { return false, err }
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { return false, err }
+		if err := queueAssetCleanup(tx, asset.ID); err != nil { return false, err }
 		pending = true
 	}
 	return pending, nil

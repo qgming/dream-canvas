@@ -13,6 +13,17 @@ import (
 
 const sessionCookie = "dream_canvas_session"
 
+func clearSessionCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(sessionCookie, "", -1, "/", "", secureCookie(c), true)
+}
+
+func (a *App) missingSession(c *gin.Context) {
+	clearSessionCookie(c)
+	if err := a.siteAccess(User{}); err != nil { respondError(c, err); return }
+	respondError(c, problem(401, "unauthorized", "登录已失效，请重新登录"))
+}
+
 func secureCookie(c *gin.Context) bool {
 	if c.Request.TLS != nil { return true }
 	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
@@ -53,12 +64,13 @@ func (a *App) authenticate(c *gin.Context) {
 		c.Set("user", principal.User); c.Next(); return
 	}
 	token, err := c.Cookie(sessionCookie)
-	if err != nil { respondError(c, problem(401, "unauthorized", "请先登录")); return }
+	if err != nil { a.missingSession(c); return }
 	var session Session
 	var user User
 	if a.db.First(&session, "hash = ?", digest(token)).Error != nil || a.db.First(&user, "id = ? AND disabled = ?", session.UserID, false).Error != nil {
-		respondError(c, problem(401, "unauthorized", "登录已失效，请重新登录")); return
+		a.missingSession(c); return
 	}
+	if err := a.siteAccess(user); err != nil { clearSessionCookie(c); respondError(c, err); return }
 	if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
 		if subtle.ConstantTimeCompare([]byte(c.GetHeader("X-CSRF-Token")), []byte(session.CSRF)) != 1 {
 			respondError(c, problem(403, "invalid_csrf", "请刷新页面后重试")); return
@@ -82,7 +94,15 @@ func (a *App) login(c *gin.Context) {
 	}
 	token := identifier()
 	session := Session{Hash: digest(token), UserID: user.ID, CSRF: identifier()}
-	if err := a.db.Create(&session).Error; err != nil { respondError(c, err); return }
+	err = a.db.Transaction(func(tx *gorm.DB) error {
+		if user.Role != "admin" {
+			var record RuntimeSettings
+			if err := tx.Select("site_closed").First(&record, 1).Error; err != nil && err != gorm.ErrRecordNotFound { return err }
+			if record.SiteClosed { return problem(503, "site_closed", "梦想画布已关闭") }
+		}
+		return tx.Create(&session).Error
+	})
+	if err != nil { clearSessionCookie(c); respondError(c, err); return }
 	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie(sessionCookie, token, 0, "/", "", secureCookie(c), true)
 	c.JSON(200, gin.H{"user": user, "csrf": session.CSRF})
@@ -91,8 +111,7 @@ func (a *App) login(c *gin.Context) {
 func (a *App) logout(c *gin.Context) {
 	if err := a.db.Delete(&Session{}, "hash = ?", c.GetString("session")).Error; err != nil { respondError(c, err); return }
 	a.notify(currentUser(c).ID)
-	c.SetSameSite(http.SameSiteStrictMode)
-	c.SetCookie(sessionCookie, "", -1, "/", "", secureCookie(c), true)
+	clearSessionCookie(c)
 	c.Status(204)
 }
 

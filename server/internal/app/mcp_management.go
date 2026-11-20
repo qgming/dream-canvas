@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 func managementTools() []toolDefinition {
@@ -49,10 +47,12 @@ func managementTools() []toolDefinition {
 		tool("admin_models_save", "原子添加同一渠道的多个模型；任一配置失败时全部保留为未写入", "admin", map[string]any{"channelId": stringField("渠道 ID"), "models": map[string]any{"type": "array", "items": objectField("完整模型配置，结构同 admin_model_save.config")}}, "channelId", "models"),
 		tool("admin_channel_templates", "读取内置渠道模板；模型初始关闭", "admin", map[string]any{}),
 		tool("admin_channel_install", "从模板创建渠道和初始关闭的模型，不调用供应商", "admin", map[string]any{"template": stringField("openai/seedance/minimax"), "name": stringField("可选名称"), "credential": stringField("仅写入的渠道凭据")}, "template", "credential"),
-		tool("admin_runtime_get", "读取运行参数及尚未启用的建议值", "admin", map[string]any{}),
+		tool("admin_site_get", "读取站点开关及助手、生成任务并发设置；站点默认开放", "admin", map[string]any{}),
 		tool("admin_logging_get", "读取全站后台日志开关；需要管理员及不限项目的 admin 授权", "admin", map[string]any{}),
+		tool("admin_logs_read", "读取应用日志占用、总条数及技术日志；支持数字页码或 nextCursor，默认最新 100 条，不返回服务器路径", "admin", map[string]any{"cursor": stringField("上次返回的 nextCursor，与 page / pageSize 分开使用"), "page": map[string]any{"type": "integer", "minimum": 1}, "pageSize": map[string]any{"type": "integer", "enum": []int{20, 50, 100}}}),
+		tool("admin_logs_clear", "明确确认后清空应用管理的当前及历史日志文件；不改业务数据或日志开关，服务继续记录新日志", "admin", map[string]any{"confirmed": map[string]any{"type": "boolean"}}, "confirmed"),
 		tool("admin_logging_save", "按版本保存后台运行日志与开发诊断开关，立即应用；不返回日志正文或凭据", "admin", map[string]any{"version": numberField("读取到的日志设置版本"), "enabled": map[string]any{"type": "boolean"}, "development": map[string]any{"type": "boolean"}}, "version", "enabled", "development"),
-		tool("admin_runtime_save", "仅在管理员明确确认参数与失败行为后按版本保存，enabled 控制新执行", "admin", map[string]any{"version": numberField("读取版本"), "policy": objectField("完整运行参数"), "confirmed": map[string]any{"type": "boolean"}}, "version", "policy", "confirmed"),
+		tool("admin_site_save", "管理员按版本保存站点及并发设置；关闭须 confirmed=true，普通用户退出且不能登录，管理员保留入口，已提交生成继续处理", "admin", map[string]any{"version": numberField("读取版本"), "open": map[string]any{"type": "boolean"}, "assistantSlots": map[string]any{"type": "integer", "minimum": 1}, "generationSlots": map[string]any{"type": "integer", "minimum": 1}, "userSlots": map[string]any{"type": "integer", "minimum": 1}, "confirmed": map[string]any{"type": "boolean"}}, "version", "open", "assistantSlots", "generationSlots", "userSlots"),
 		tool("admin_storages_list", "读取五类存储配置，不返回 AccessKey 或 Secret", "admin", map[string]any{}),
 		tool("admin_storage_save", "创建或按版本修改存储；最多启用一个，历史资产保持原归属", "admin", map[string]any{"storageId": stringField("修改时填写，新建留空"), "config": objectField("name/provider/endpoint/bucket/region/pathStyle/default/version/accessKeyId/accessKeySecret")}, "config"),
 		tool("admin_storage_delete", "移除无文件引用的存储配置，不删除资产", "admin", map[string]any{"storageId": stringField("存储 ID")}, "storageId"),
@@ -79,8 +79,7 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	if name == "preference_save" { var request struct { Version uint64 `json:"version"`; Value JSON `json:"value"` }; if err = decode(input, &request); err == nil { value, err = a.SavePreference(p.User.ID, read("name"), request.Version, request.Value) }; return value, true, err }
 	if name == "asset_cleanup" {
 		if len(p.Projects) > 0 { return nil, true, problem(403, "asset_scope", "全局删除清理需要不限项目的授权") }
-		var asset Asset; if err = a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", read("assetId"), p.User.ID, "pending").Error; err != nil { return nil, true, err }
-		err = a.db.Transaction(func(tx *gorm.DB) error { if err := tx.Where("asset_id = ? AND kind = ?", asset.ID, "delete").FirstOrCreate(&FileOperation{ID: identifier(), AssetID: asset.ID, Kind: "delete"}).Error; err != nil { return err }; return tx.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error }); if err == nil { a.signalWork() }; return map[string]any{"deleteState": "pending"}, true, err
+		err = a.RetryAssetCleanup(p.User.ID, read("assetId")); return map[string]any{"deleteState": "pending"}, true, err
 	}
 	switch name {
 	case "canvas_nodes_list": value, err = a.ListCanvasNodes()
@@ -118,10 +117,16 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "admin_models_save": var request []ChannelModel; if err = decode(input["models"], &request); err == nil { value, err = a.SaveChannelModels(read("channelId"), request) }
 	case "admin_channel_templates": value = channelTemplates()
 	case "admin_channel_install": value, err = a.InstallChannelTemplate(read("template"), read("name"), read("credential"))
-	case "admin_runtime_get": value, err = a.GetRuntimeSettings()
+	case "admin_site_get": value, err = a.GetSiteSettings()
 	case "admin_logging_get": value, err = a.GetLogSettings()
+	case "admin_logs_read":
+		if input["page"] != nil || input["pageSize"] != nil {
+			var request = struct { Page int `json:"page"`; PageSize int `json:"pageSize"` }{1, logReadCount}
+			if err = decode(input, &request); err == nil { value, err = a.ReadLogPage(request.Page, request.PageSize) }
+		} else { value, err = a.ReadLogs(read("cursor")) }
+	case "admin_logs_clear": value, err = a.ClearLogs(input["confirmed"] == true)
 	case "admin_logging_save": var request logSettingsInput; if err = decode(input, &request); err == nil { if request.Enabled == nil || request.Development == nil { return nil, true, problem(400, "invalid_logging", "请明确日志和开发诊断开关") }; value, err = a.SaveLogSettings(p.User.ID, request.Version, *request.Enabled, *request.Development) }
-	case "admin_runtime_save": if input["confirmed"] != true { return nil, true, problem(400, "confirmation_required", "运行参数与失败行为须由管理员明确确认") }; var request struct { Version uint64 `json:"version"`; Policy executionPolicy `json:"policy"` }; if err = decode(input, &request); err == nil { value, err = a.SaveRuntimeSettings(p.User.ID, request.Version, request.Policy) }
+	case "admin_site_save": var request siteSettingsInput; if err = decode(input, &request); err == nil { value, err = a.SaveSiteSettings(p.User.ID, request) }
 	case "admin_storages_list": value, err = a.ListStorages()
 	case "admin_storage_save": var request storageInput; if err = decode(input["config"], &request); err == nil { value, err = a.SaveStorage(read("storageId"), request) }
 	case "admin_storage_delete": err = a.DeleteStorage(read("storageId"))

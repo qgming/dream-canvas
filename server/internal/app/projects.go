@@ -46,6 +46,28 @@ func (a *App) getProject(c *gin.Context) {
 	c.JSON(200, project)
 }
 
+func (a *App) DeleteProject(userID, id string, version uint64) error {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var project Project
+		if err := tx.First(&project, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
+		if project.Version != version { return problem(409, "version_conflict", "项目已更新，请重新读取后删除") }
+		result := tx.Delete(&Project{}, "id = ? AND user_id = ? AND version = ?", id, userID, version)
+		if result.Error != nil { return result.Error }
+		if result.RowsAffected != 1 { return problem(409, "version_conflict", "项目已更新，请重新读取后删除") }
+		if err := tx.Delete(&AssetReference{}, "project_id = ?", id).Error; err != nil { return err }
+		return tx.Delete(&ProjectRevision{}, "project_id = ?", id).Error
+	})
+	if err == nil { a.notify(userID) }
+	return err
+}
+
+func (a *App) deleteProject(c *gin.Context) {
+	var input struct { Version uint64 `json:"version"` }
+	if !bind(c, &input) { return }
+	if err := a.DeleteProject(currentUser(c).ID, c.Param("id"), input.Version); err != nil { respondError(c, err); return }
+	c.Status(204)
+}
+
 // Project mutations are also the service boundary for future assistant and MCP adapters.
 func (a *App) CreateProject(userID string, input projectInput) (Project, error) {
 	project := Project{ID: identifier(), UserID: userID, Title: strings.TrimSpace(input.Title), Version: 1, Document: input.Document}

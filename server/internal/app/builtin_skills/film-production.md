@@ -30,6 +30,6 @@ In the same project submit, wait and refresh the version sequentially: these too
 
 ## 真实交付 / Honest delivery
 
-保留原始媒体比例和原件。三视图拼图不是已经拆开的三张图片，多宫格分镜不是独立首帧；没有相应工具不承诺裁切、提取视频末帧、拼接、字幕烧录、调色或混音。TTS 是朗读，不是音乐生成。只输出工具真实返回的节点、任务、资产及未完成项。修改上游设定后列出受影响的下游镜头，不静默重做全部；删除项目或全局资产沿用已有持久审批，不代用户确认。
+保留原始媒体比例和原件。三视图拼图不是已经拆开的三张图片，多宫格分镜不是独立首帧；没有相应工具不承诺裁切、提取视频末帧、拼接、字幕烧录、调色或混音。TTS 是朗读，不是音乐生成。只输出工具真实返回的节点、任务、资产及未完成项。修改上游设定后列出受影响的下游镜头，不静默重做全部；按用户要求可用 `project_delete` 携带最新版本直接删除目标项目，或用 `asset_delete` 全局删除明确资产，不另行申请审批，清理待处理不能描述为已物理删除。
 
-Preserve original media and aspect ratios. A contact sheet is not separate images. Do not claim cropping, final-frame extraction, stitching, burned-in subtitles, grading or mixing without an available tool. TTS reads text; it does not create music. Report real nodes, tasks, assets and missing work. Track downstream effects of design changes without silently regenerating everything. Existing deletion approvals still apply.
+Preserve original media and aspect ratios. A contact sheet is not separate images. Do not claim cropping, final-frame extraction, stitching, burned-in subtitles, grading or mixing without an available tool. TTS reads text; it does not create music. Report real nodes, tasks, assets and missing work. Track downstream effects of design changes without silently regenerating everything. Directly delete requested projects with `project_delete` and their current version, or explicit assets with `asset_delete`; report pending cleanup as pending.

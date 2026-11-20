@@ -58,6 +58,7 @@ type Asset struct {
 	SaveState string `json:"saveState"`
 	SyncState string `json:"syncState"`
 	DeleteState string `json:"deleteState"`
+	CleanupTaskID string `json:"cleanupTaskId,omitempty" gorm:"-"`
 	Error string `json:"error,omitempty"`
 	StorageID string `json:"storageId,omitempty"`
 	Metadata JSON `json:"metadata" gorm:"type:blob"`
@@ -74,17 +75,6 @@ func (asset Asset) MarshalJSON() ([]byte, error) {
 	type plain Asset
 	metadata, err := assetMetadata(asset.Metadata); if err != nil { return nil, err }
 	return json.Marshal(struct { plain; Metadata map[string]json.RawMessage `json:"metadata"` }{plain(asset), metadata})
-}
-
-type Approval struct {
-	ID string `json:"id" gorm:"primaryKey"`
-	UserID string `json:"-" gorm:"index;not null"`
-	Action string `json:"action"`
-	TargetID string `json:"targetId"`
-	Version uint64 `json:"version"`
-	Status string `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type Channel struct {
@@ -207,6 +197,10 @@ type GenerationTask struct {
 	QueryStartedAt *time.Time `json:"-"`
 	QueryRecoveredBy string `json:"queryRecoveredBy,omitempty"`
 	QueryRecoveredAt *time.Time `json:"queryRecoveredAt,omitempty"`
+	ResolvedBy string `json:"resolvedBy,omitempty"`
+	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+	ResolutionNote string `json:"resolutionNote,omitempty"`
+	Removed bool `json:"removed" gorm:"not null;default:false;index"`
 	Text string `json:"text"`
 	AssetIDs JSON `json:"assetIds" gorm:"type:blob"`
 	SaveState string `json:"saveState"`
@@ -300,6 +294,7 @@ type AssistantSkill struct {
 type RuntimeSettings struct {
 	ID uint `json:"-" gorm:"primaryKey"`
 	Version uint64 `json:"version"`
+	SiteClosed bool `json:"-"`
 	Policy JSON `json:"policy" gorm:"type:blob"`
 	UpdatedBy string `json:"updatedBy"`
 	UpdatedAt time.Time `json:"updatedAt"`

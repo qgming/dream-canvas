@@ -16,7 +16,7 @@ export function useCanvasTasks(owner?: string) {
             if (refreshing) { pending = true; return; }
             refreshing = true;
             try {
-                const tasks = await listGenerations(); assertSession(); if (disposed) return;
+                const tasks = await listGenerations(true); assertSession(); if (disposed) return;
                 const ids = new Set(tasks.map((task) => task.id));
                 for (const id of Object.keys(useGenerationProgressStore.getState().tasks)) if (!ids.has(id)) useGenerationProgressStore.getState().remove(id);
                 const projects = new Set<string>();

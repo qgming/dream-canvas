@@ -4,16 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"math"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-// No execution limits become product defaults until an administrator saves them.
+// Internal execution bounds remain server defaults; only concurrency is exposed.
 type executionPolicy struct {
-	Enabled bool `json:"enabled"`
 	AssistantSlots int `json:"assistantSlots"`
 	GenerationSlots int `json:"generationSlots"`
 	UserSlots int `json:"userSlots"`
@@ -52,62 +49,13 @@ func seconds(value int) time.Duration { return time.Duration(value) * time.Secon
 func (a *App) executionPolicy() (executionPolicy, error) {
 	var record RuntimeSettings
 	var policy executionPolicy
-	if err := a.db.First(&record, 1).Error; err != nil { return policy, problem(503, "execution_not_configured", "请管理员在设置中确认并保存运行参数后启用执行；本次未提交供应商") }
+	if err := a.db.First(&record, 1).Error; errors.Is(err, gorm.ErrRecordNotFound) { return suggestedPolicy(), nil } else if err != nil { return policy, err }
 	if json.Unmarshal(record.Policy, &policy) != nil { return policy, problem(503, "invalid_execution_policy", "运行参数无法读取，已停止接收新任务") }
 	return policy, nil
 }
 
 func (a *App) requireExecution() (executionPolicy, error) {
-	policy, err := a.executionPolicy()
-	if err == nil && !policy.Enabled { err = problem(503, "execution_disabled", "管理员尚未启用执行；本次未提交供应商") }
-	return policy, err
-}
-
-func (a *App) getRuntimeSettings(c *gin.Context) {
-	value, err := a.GetRuntimeSettings(); if err != nil { respondError(c, err); return }; c.JSON(200, value)
-}
-
-func (a *App) GetRuntimeSettings() (gin.H, error) {
-	var record RuntimeSettings
-	err := a.db.First(&record, 1).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return nil, err }
-	if len(record.Policy) > 0 {
-		var policy executionPolicy
-		if err := json.Unmarshal(record.Policy, &policy); err != nil { return nil, err }
-		policy.PointsPerYuan = ""
-		record.Policy = encode(policy)
-	}
-	return gin.H{"record": record, "suggested": suggestedPolicy()}, nil
-}
-
-func (a *App) saveRuntimeSettings(c *gin.Context) {
-	var input struct { Version uint64 `json:"version"`; Policy executionPolicy `json:"policy"` }
-	if !bind(c, &input) { return }
-	record, err := a.SaveRuntimeSettings(currentUser(c).ID, input.Version, input.Policy); if err != nil { respondError(c, err); return }; c.JSON(200, record)
-}
-
-func (a *App) SaveRuntimeSettings(userID string, version uint64, p executionPolicy) (RuntimeSettings, error) {
-	for _, value := range []int{p.AssistantSlots, p.GenerationSlots, p.UserSlots, p.TransferSlots, p.PreviewSlots, p.ConnectSeconds, p.QuerySeconds, p.FirstResponseSeconds, p.IdleSeconds, p.TextSeconds, p.ImageSeconds, p.AudioSeconds, p.PollSeconds, p.QueryFailures, p.MaxWaitSeconds, p.TransferSeconds, p.SignedURLSeconds, p.ScriptSeconds, p.ScriptMemoryMiB} {
-		if value <= 0 { return RuntimeSettings{}, problem(400, "invalid_policy", "并发、时限、间隔与资源限制必须为正整数") }
-	}
-	if p.ImageBytes <= 0 || p.AudioBytes <= 0 || p.VideoBytes <= 0 || p.JSONBytes <= 0 || len(p.StorageRetrySeconds) == 0 { return RuntimeSettings{}, problem(400, "invalid_policy", "文件大小限制和后台重试间隔不能为空") }
-	for _, value := range append(append([]int{}, p.DownloadRetrySeconds...), p.StorageRetrySeconds...) { if value <= 0 { return RuntimeSettings{}, problem(400, "invalid_policy", "重试间隔必须为正整数") } }
-	for _, value := range append([]int{p.ConnectSeconds, p.QuerySeconds, p.FirstResponseSeconds, p.IdleSeconds, p.TextSeconds, p.ImageSeconds, p.AudioSeconds, p.PollSeconds, p.MaxWaitSeconds, p.TransferSeconds, p.SignedURLSeconds, p.ScriptSeconds}, append(append([]int{}, p.DownloadRetrySeconds...), p.StorageRetrySeconds...)...) { if uint64(value) > uint64(math.MaxInt64/int64(time.Second)) { return RuntimeSettings{}, problem(400, "invalid_policy", "时限超过系统可表示范围") } }
-	if p.ImageBytes == math.MaxInt64 || p.AudioBytes == math.MaxInt64 || p.VideoBytes == math.MaxInt64 || uint64(p.ScriptMemoryMiB) > uint64(math.MaxInt>>20) { return RuntimeSettings{}, problem(400, "invalid_policy", "资源限制超过系统可表示范围") }
-	if p.ScriptMemoryMiB > 4096 || p.JSONBytes == math.MaxInt64 { return RuntimeSettings{}, problem(400, "invalid_policy", "WASM 线性内存最多 4096 MiB，JSON 边界不能溢出") }
-	p.PointsPerYuan = ""
-	record := RuntimeSettings{ID: 1, Version: version + 1, Policy: encode(p), UpdatedBy: userID}
-	err := a.db.Transaction(func(tx *gorm.DB) error {
-		var previous RuntimeSettings
-		err := tx.First(&previous, 1).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) { if version != 0 { return problem(409, "version_conflict", "运行参数已变更，请重新读取") }; return tx.Create(&record).Error }
-		if err != nil { return err }
-		if previous.Version != version { return problem(409, "version_conflict", "运行参数已更新，当前编辑未覆盖") }
-		return tx.Model(&previous).Updates(map[string]any{"policy": record.Policy, "version": record.Version, "updated_by": record.UpdatedBy}).Error
-	})
-	if err != nil { return record, err }
-	a.wakeFiles(); a.signalWork(); a.notifyCatalog()
-	return record, nil
+	return a.executionPolicy()
 }
 
 func (a *App) decryptSecret(value string) (string, error) {

@@ -51,11 +51,7 @@ func (a *App) GetAssistantThread(userID, id string) (gin.H, error) {
 		if json.Unmarshal(items[index].Detail, &detail) != nil { return nil, problem(409, "invalid_history", "历史消息无法读取，未覆盖或丢弃历史") }
 		if usage, exists := detail["usage"]; exists { detail["usage"] = publicUsageValues(object(usage), prices[items[index].TurnID]); items[index].Detail = encode(detail) }
 	}
-	approvals := []Approval{}
-	ids := []string{}
-	for _, turn := range turns { if turn.Status != "waiting_approval" { continue }; var snapshot assistantSnapshot; if json.Unmarshal(turn.Snapshot, &snapshot) == nil { ids = append(ids, snapshot.ApprovalIDs...) } }
-	if len(ids) > 0 { if err := a.db.Where("user_id = ? AND status = ? AND id IN ?", thread.UserID, "pending", ids).Find(&approvals).Error; err != nil { return nil, err } }
-	return gin.H{"thread": thread, "items": items, "turns": turns, "approvals": approvals}, nil
+	return gin.H{"thread": thread, "items": items, "turns": turns}, nil
 }
 
 func (a *App) deleteAssistantThread(c *gin.Context) {
@@ -67,7 +63,7 @@ func (a *App) DeleteAssistantThread(userID, id string) error {
 		var thread AssistantThread
 		if err := tx.First(&thread, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
 		var active int64
-		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_approval", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
+		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
 		if active > 0 { return problem(409, "thread_busy", "对话仍有执行中的轮次，请先停止并确认状态") }
 		var pendingUsage int64; if err := tx.Model(&AssistantItem{}).Where("thread_id = ? AND json_extract(detail, '$.usageRecordPending') = ?", thread.ID, true).Count(&pendingUsage).Error; err != nil { return err }; if pendingUsage > 0 { return problem(409, "usage_pending", "对话仍有用量待补记，请待账本保存完成后再删除") }
 		if err := tx.Delete(&AssistantItem{}, "thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Error; err != nil { return err }

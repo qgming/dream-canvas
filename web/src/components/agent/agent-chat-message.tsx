@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/ui/media-preview";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Popover, Tooltip } from "@/components/ui/popover";
-import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, FilePenLine, FileText, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, FilePenLine, FileText, ListChecks, LoaderCircle, Search, TerminalSquare, Wrench, XCircle } from "lucide-react";
 import { Streamdown, type LinkSafetyModalProps } from "streamdown";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { useAgentStore, type AgentCanvasReference, type AgentChatItem, type AgentPendingApproval, type AgentSkillReference } from "@/stores/use-agent-store";
+import { useAgentStore, type AgentCanvasReference, type AgentChatItem, type AgentSkillReference } from "@/stores/use-agent-store";
 import { resolveAgentMessageAssetUrl } from "@/services/api/assistant-skills";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
@@ -86,7 +86,7 @@ export type AgentChatMessageItem = {
     streamId?: string;
 };
 
-export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, theme }: { item: AgentChatMessageItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     useTranslation();
     const reducedMotion = useShouldReduceMotion();
     const isUser = item.role === "user";
@@ -103,7 +103,6 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
         );
     }
     if (item.role === "tool") {
-        if (objectField(item.detail, "status") === "pending" && (onRejectTool || onApproveTool)) return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={onRejectTool ? () => onRejectTool(item.id) : undefined} onApprove={onApproveTool ? () => onApproveTool(item.id) : undefined} />;
         return <AgentToolCard title={item.title || tr("toolCall")} text={item.text} detail={item.detail} theme={theme} />;
     }
     return (
@@ -168,66 +167,6 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
                 <span>{agentReferenceMarker(reference)}</span>
             </span>
         </Popover>
-    );
-}
-
-export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
-    const { t } = useTranslation();
-    const view = userDetail(detail);
-    const heading = (
-        <>
-            <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-5">
-                <CircleAlert className="size-4 shrink-0 text-warning" />
-                <span className="min-w-0 flex-1">{t("agent.notify.awaitingConfirmation")}</span>
-                {view ? <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180" style={{ color: theme.node.muted }} /> : null}
-            </div>
-            <div className="mt-1 pl-6 text-sm leading-5" style={{ color: theme.node.muted }}>{summary}</div>
-        </>
-    );
-    return (
-        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "color-mix(in srgb, var(--warning) 25%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
-            <Collapsible.Root className="group">
-                {view ? <Collapsible.Trigger asChild>
-                    <button type="button" className="block w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{heading}</button>
-                </Collapsible.Trigger> : <div>{heading}</div>}
-                {view ? <Collapsible.Content><div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div></Collapsible.Content> : null}
-            </Collapsible.Root>
-            {onReject || onApprove ? (
-                <div className="mt-3 flex justify-end gap-2 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                    <Button variant="ghost" data-destructive className="!h-8" icon={<XCircle className="size-3.5" />} onClick={() => onReject?.()}>
-                        {t("agent.notify.reject")}
-                    </Button>
-                    <Button variant="ghost" className="!h-8" icon={<CheckCircle2 className="size-3.5" />} style={{ color: "var(--success)" }} onClick={() => onApprove?.()}>
-                        {t("agent.notify.approve")}
-                    </Button>
-                </div>
-            ) : null}
-        </div>
-    );
-}
-
-export function AgentApprovalCard({ approval, theme, onDecision }: { approval: AgentPendingApproval; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onDecision: (decision: "accept" | "acceptForSession" | "decline") => void }) {
-    const { t } = useTranslation();
-    const isFile = approval.method === "item/fileChange/requestApproval";
-    const isNetwork = Boolean(approval.networkApprovalContext);
-    const title = t(isNetwork ? "agent.notify.networkApproval" : isFile ? "agent.notify.fileApproval" : approval.method === "item/permissions/requestApproval" ? "agent.notify.permissionApproval" : "agent.notify.commandApproval");
-    const target = isNetwork ? approvalTarget(approval.networkApprovalContext) : isFile ? approval.grantRoot || approval.cwd : commandText(approval.command) || approval.cwd;
-    return (
-        <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: "color-mix(in srgb, var(--warning) 25%, transparent)", background: "color-mix(in srgb, var(--warning) 5%, transparent)", color: theme.node.text }}>
-            <div className="flex items-start gap-2.5">
-                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-                <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{title}</div>
-                    {approval.reason ? <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>{approval.reason}</div> : null}
-                    {target ? <div className="mt-1.5 break-all rounded-lg px-2.5 py-2 font-mono text-xs leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{target}</div> : null}
-                </div>
-            </div>
-            <div className="mt-3 flex flex-wrap justify-end gap-1.5 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                <Button variant="ghost" data-destructive className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "decline"} onClick={() => onDecision("decline")}>{t("agent.notify.decline")}</Button>
-                <Button variant="ghost" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "accept"} onClick={() => onDecision("accept")}>{t("agent.notify.allowOnce")}</Button>
-                <Button variant="ghost" className="!h-8" disabled={Boolean(approval.deciding)} loading={approval.deciding === "acceptForSession"} style={{ color: "var(--warning)" }} onClick={() => onDecision("acceptForSession")}>{t("agent.notify.allowSession")}</Button>
-            </div>
-        </div>
     );
 }
 
@@ -441,18 +380,6 @@ function waitingTime(seconds: number) {
     if (seconds < 60) return tr("waitingSeconds", { seconds });
     const minutes = Math.floor(seconds / 60);
     return tr("waitingMinutes", { minutes, seconds: seconds % 60 });
-}
-
-function commandText(value: unknown) {
-    if (Array.isArray(value)) return value.map(String).join(" ");
-    return typeof value === "string" ? value : "";
-}
-
-function approvalTarget(value: unknown) {
-    const host = String(objectField(value, "host") || "");
-    const protocol = String(objectField(value, "protocol") || "");
-    const port = String(objectField(value, "port") || "");
-    return host ? `${protocol ? `${protocol}://` : ""}${host}${port ? `:${port}` : ""}` : "";
 }
 
 type PlanTask = { step: string; status: string };

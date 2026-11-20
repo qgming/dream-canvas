@@ -46,7 +46,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", wor
 export async function resolveMediaUrl(key?: string, fallback = "") { const id = assetId(key); return id ? assetUrl(id) : fallback; }
 export async function getMediaBlob(key: string) { const id = assetId(key); return id ? assetBlob(id) : null; }
 export async function deleteStoredMedia(_keys: Iterable<string>) { /* References do not own the server asset. */ }
-export async function cleanupUnusedMedia(_usedData: unknown) { /* Global deletion requires an explicit approval. */ }
+export async function cleanupUnusedMedia(_usedData: unknown) { /* Global deletion is owned by the server asset service. */ }
 export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
     if ("storageKey" in value && typeof value.storageKey === "string" && assetId(value.storageKey)) keys.add(value.storageKey);

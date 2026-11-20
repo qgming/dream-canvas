@@ -534,7 +534,7 @@ export default function ImagePage() {
                                         result.status === "success" && result.image ? (
                                             <ResultImageCard key={result.id} image={result.image} index={index} single={singleResult} gallery={resultGallery} onSaveAsset={saveResultToAssets} />
                                         ) : ["confirmation_required", "disconnected"].includes(result.status) ? (
-                                            <div key={result.id} className={cn("flex aspect-square min-w-0 flex-col items-center justify-center gap-4 rounded-lg border border-warning/25 p-5", singleResult && "xl:h-full xl:aspect-auto")}><GenerationProgress task={{ ...result.taskState, status: result.status, error: result.error }} /><Link className="text-xs underline" to={`/tasks?taskId=${encodeURIComponent(result.taskId || "")}`}>{t("workspace.taskDetails")}</Link></div>
+                                            <div key={result.id} className={cn("flex aspect-square min-w-0 flex-col items-center justify-center gap-4 rounded-lg border border-warning/25 p-5", singleResult && "xl:h-full xl:aspect-auto")}><GenerationProgress task={{ ...result.taskState, status: result.status, error: result.error }} /><Link className="text-xs underline" to={`/settings/tasks?taskId=${encodeURIComponent(result.taskId || "")}`}>{t("workspace.taskDetails")}</Link></div>
                                         ) : result.status === "failed" ? (
                                             <FailedImageCard key={result.id} single={singleResult} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(result.id)} />
                                         ) : (

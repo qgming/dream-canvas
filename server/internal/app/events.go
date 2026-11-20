@@ -49,6 +49,7 @@ func writeEvent(c *gin.Context, name string, value any) error {
 }
 
 func (a *App) sessionValid(c *gin.Context) bool {
+	if a.siteAccess(currentUser(c)) != nil { return false }
 	var count int64
 	return a.db.Model(&Session{}).Where("hash = ? AND user_id IN (?)", c.GetString("session"), a.db.Model(&User{}).Select("id").Where("id = ? AND disabled = ?", currentUser(c).ID, false)).Count(&count).Error == nil && count == 1
 }
@@ -58,11 +59,20 @@ func (a *App) userEvents(c *gin.Context) {
 	defer stop()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("X-Accel-Buffering", "no")
+	closed := func() bool {
+		if currentUser(c).Role == "admin" { return false }
+		open, err := a.siteOpen()
+		if err != nil || open { return false }
+		_ = writeEvent(c, "site_closed", map[string]string{"message": "梦想画布已关闭"})
+		return true
+	}
+	if closed() { return }
 	if writeEvent(c, "changed", map[string]bool{"refresh": true}) != nil { return }
 	for {
 		select {
 		case <-c.Request.Context().Done(): return
 		case topic := <-updates:
+			if closed() { return }
 			if !a.sessionValid(c) { return }
 			if writeEvent(c, "changed", map[string]any{"refresh": true, "topic": topic}) != nil { return }
 		}

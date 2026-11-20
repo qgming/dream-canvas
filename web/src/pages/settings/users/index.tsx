@@ -41,7 +41,7 @@ export default function UsersPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader title={<>{appI18n.t("workspace.users")}</>} description={<>{appI18n.t("workspace.usersDescription")}</>} actions={<><Button variant="outline" icon={<RefreshCw className="size-4" />} loading={users.isFetching} onClick={() => void users.refetch()}>{appI18n.t("workspace.refresh")}</Button><Button variant="default" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>{appI18n.t("workspace.createUser")}</Button></>} />
+            <PageHeader title={<>{appI18n.t("workspace.users")}</>} actions={<><Button variant="outline" icon={<RefreshCw className="size-4" />} loading={users.isFetching} onClick={() => void users.refetch()}>{appI18n.t("workspace.refresh")}</Button><Button variant="default" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>{appI18n.t("workspace.createUser")}</Button></>} />
             {users.error ? <Alert type="error" title={users.error.message} action={<Button onClick={() => void users.refetch()}>{appI18n.t("workspace.retry")}</Button>} /> : null}
                 <DataTable<User> rowId="id" loading={users.isLoading} failed={users.isError} rows={users.data} columns={[
                     { title: appI18n.t("workspace.username"), dataIndex: "username", render: (username) => <span className="font-medium break-words">{username}</span> },

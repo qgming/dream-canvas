@@ -188,7 +188,9 @@ func validateGenerationMessages(input generationInput) error {
 
 func (a *App) listTasks(c *gin.Context) {
 	tasks := []GenerationTask{}
-	if err := a.db.Where("user_id = ?", currentUser(c).ID).Order("created_at DESC").Find(&tasks).Error; err != nil { respondError(c, err); return }
+	query := a.db.Where("user_id = ?", currentUser(c).ID)
+	if c.Query("includeRemoved") != "true" { query = query.Where("removed = ?", false) }
+	if err := query.Order("created_at DESC").Find(&tasks).Error; err != nil { respondError(c, err); return }
 	c.JSON(200, tasks)
 }
 

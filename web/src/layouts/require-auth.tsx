@@ -38,11 +38,13 @@ export default function RequireAuth() {
     const catalog = useQuery({ queryKey: ["model-catalog", user?.id], queryFn: modelCatalog, enabled: Boolean(user && scope === user.id) });
     const plugins = useQuery({ queryKey: ["canvas-plugin-catalog", user?.id], queryFn: canvasPluginCatalog, enabled: Boolean(user && scope === user.id) });
 
-    useEffect(() => { void refresh(); }, [refresh]);
+    useEffect(() => { void refresh(); }, [refresh, pathname]);
     useEffect(() => {
         const clear = () => useAuthStore.getState().clear();
+        const closed = () => useAuthStore.getState().closeSite();
         window.addEventListener("session-expired", clear);
-        return () => window.removeEventListener("session-expired", clear);
+        window.addEventListener("site-closed", closed);
+        return () => { window.removeEventListener("session-expired", clear); window.removeEventListener("site-closed", closed); };
     }, []);
     useEffect(() => {
         queryClient.clear();
@@ -54,7 +56,7 @@ export default function RequireAuth() {
         useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, deleteProjectIds: [] });
         useWorkbenchAgentStore.setState({ imageCommand: null, videoCommand: null, tasks: [] });
         useWorkbenchDraftStore.getState().reset();
-        useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", pendingApprovals: [], pendingTool: null, prompt: "", modelParameters: {} });
+        useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", prompt: "", modelParameters: {} });
         useAgentSkillStore.getState().reset();
         void cleanupUnusedImages(null);
         setScope(user?.id || null);
@@ -89,14 +91,16 @@ export default function RequireAuth() {
         const connect = () => {
             if (source || useAuthStore.getState().user?.id !== user.id) return;
             source = new EventSource("/api/events");
-            source.onopen = refresh;
+            source.onopen = () => { void useAuthStore.getState().refresh(); refresh(); };
+            source.addEventListener("site_closed", () => { source?.close(); source = undefined; useAuthStore.getState().closeSite(); });
             source.addEventListener("changed", (event) => { const { topic } = JSON.parse((event as MessageEvent<string>).data) as { topic?: string }; if (!topic || topic === "all") refresh(); else { if (topic === "prompts") void queryClient.invalidateQueries({ queryKey: ["prompts"] }); if (topic === "skills") void useAgentSkillStore.getState().loadSkills(); window.dispatchEvent(new CustomEvent("server-changed", { detail: topic })); } });
             source.onerror = () => {
                 for (const task of Object.values(useGenerationProgressStore.getState().tasks)) if (["queued", "waiting_assets", "submitting", "running", "saving"].includes(task.status)) useGenerationProgressStore.getState().receive({ ...task, status: "disconnected", error: appI18n.t("errors.taskDisconnected") });
+                void useAuthStore.getState().refresh();
                 if (source?.readyState === EventSource.CLOSED) { source.close(); source = undefined; }
             };
         };
-        const focused = () => { connect(); refresh(); };
+        const focused = () => { void useAuthStore.getState().refresh(); connect(); refresh(); };
         connect();
         window.addEventListener("focus", focused);
         window.addEventListener("online", focused);
@@ -105,7 +109,7 @@ export default function RequireAuth() {
 
     if (!ready) return <div className="flex h-dvh items-center justify-center bg-background"><Spin label={appI18n.t("workspace.readingSession")} /></div>;
     if (error) return <div className="flex h-dvh items-center justify-center bg-background p-6"><Alert type="error" title={appI18n.t("workspace.serviceUnavailable")} description={error} action={<Button onClick={() => void refresh()}>{appI18n.t("workspace.retry")}</Button>} /></div>;
-    if (!user) return <Navigate to="/login" state={{ from: `${pathname}${search}` }} replace />;
+    if (!user) return <Navigate to="/" state={{ from: `${pathname}${search}` }} replace />;
     if (scope !== user.id) return <div className="flex h-dvh items-center justify-center bg-background"><Spin /></div>;
     return <>{plugins.error || pluginError ? <div className="fixed inset-x-6 top-3 z-[200] mx-auto max-w-2xl"><Alert type="error" title={appI18n.t("nodePlugins.loadFailed")} description={plugins.error?.message || pluginError} action={<Button loading={plugins.isFetching} onClick={() => { void plugins.refetch().then(() => setPluginRetry((value) => value + 1)); }}>{appI18n.t("workspace.retry")}</Button>} /></div> : null}<Outlet key={user.id} /></>;
 }

@@ -29,7 +29,7 @@ export default function AccountSettingsPage() {
     };
     return (
         <section className="space-y-6">
-            <PageHeader stickyActions title={appI18n.t("workspace.account")} description={appI18n.t("settings.accountDescription")} actions={<Button variant="default" icon={<KeyRound />} type="submit" form="account-password" disabled={!form.formState.isDirty} loading={saving}>{appI18n.t("workspace.changePassword")}</Button>} />
+            <PageHeader stickyActions title={appI18n.t("workspace.account")} actions={<Button variant="default" icon={<KeyRound />} type="submit" form="account-password" disabled={!form.formState.isDirty} loading={saving}>{appI18n.t("workspace.changePassword")}</Button>} />
             <dl>
                 <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
                     <dt className="font-medium">{appI18n.t("workspace.username")}</dt>
@@ -41,10 +41,9 @@ export default function AccountSettingsPage() {
                 <EditorForm id="account-password" form={form} onSubmit={submit} className="space-y-0">
                     <div>
                         <Field layout="horizontal" name="currentPassword" label={appI18n.t("workspace.currentPassword")} schema={z.string().trim().min(1, appI18n.t("workspace.currentPasswordRequired"))}><PasswordInput autoComplete="current-password" /></Field>
-                        <Field layout="horizontal" name="password" label={appI18n.t("workspace.newPassword")} schema={z.string().trim().min(1, appI18n.t("workspace.newPasswordRequired"))}><PasswordInput autoComplete="new-password" /></Field>
+                        <Field layout="horizontal" name="password" label={appI18n.t("workspace.newPassword")} help={appI18n.t("workspace.passwordSessions")} schema={z.string().trim().min(1, appI18n.t("workspace.newPasswordRequired"))}><PasswordInput autoComplete="new-password" /></Field>
                         <Field layout="horizontal" name="confirm" label={appI18n.t("workspace.confirmPassword")} schema={z.string().min(1, appI18n.t("workspace.confirmPasswordRequired"))} validate={(value) => value === form.getValues("password") || appI18n.t("workspace.passwordMismatch")}><PasswordInput autoComplete="new-password" /></Field>
                     </div>
-                    <p className="border-t border-border pt-4 text-xs leading-5 text-muted-foreground">{appI18n.t("workspace.passwordSessions")}</p>
                 </EditorForm>
             </section>
         </section>

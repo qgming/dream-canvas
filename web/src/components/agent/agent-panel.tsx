@@ -18,7 +18,6 @@ export function AgentPanel() {
     const open = useAgentStore((state) => state.panelOpen);
     const sending = useAgentStore((state) => state.sending);
     const waiting = useAgentStore((state) => state.waiting);
-    const approvals = useAgentStore((state) => state.pendingApprovals.length);
     const error = useAgentStore((state) => state.connectError);
     const launcher = useRef<HTMLButtonElement>(null);
     const panel = useRef<HTMLElement>(null);
@@ -60,7 +59,7 @@ export function AgentPanel() {
         window.addEventListener("pointerup", stop);
         window.addEventListener("pointercancel", stop);
     };
-    const status = error ? t("ui.assistantError") : approvals ? t("ui.assistantApproval") : sending || waiting ? t("ui.assistantRunning") : t("ui.assistantReady");
+    const status = error ? t("ui.assistantError") : sending || waiting ? t("ui.assistantRunning") : t("ui.assistantReady");
     return <>
         <motion.aside ref={panel} id="global-assistant" role="dialog" aria-modal="false" aria-label={t("ui.assistant")} aria-hidden={!open} inert={!open} tabIndex={-1} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore initial={false} animate={{ opacity: open ? 1 : 0, y: open || reducedMotion ? 0 : tokens.shift.tabs }} transition={resizing || reducedMotion ? tokens.transition.instant : open ? tokens.transition.sheet : tokens.transition.dismiss} className={cn("fixed bottom-20 right-4 z-[100] flex h-[calc(100dvh-96px)] max-h-[800px] max-w-[calc(100vw-32px)] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl outline-none", !open && "pointer-events-none", resizing && "select-none")} style={{ width }} onKeyDown={(event) => {
             if (event.key !== "Escape" || event.defaultPrevented || !panel.current?.contains(event.target as Node)) return;
@@ -78,7 +77,7 @@ export function AgentPanel() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">{owner ? <AssistantPanelContent key={owner} /> : null}</div>
         </motion.aside>
         <Button ref={launcher} variant="default" size="icon" className="fixed bottom-4 right-4 z-[110] size-12 rounded-2xl shadow-lg" aria-label={`${t(open ? "ui.collapseAssistant" : "ui.openAssistant")} · ${status}`} title={status} aria-expanded={open} aria-controls="global-assistant" data-canvas-shortcuts-ignore onClick={() => useAgentStore.getState().togglePanel()}>
-            {sending || waiting ? <LoaderCircle className="size-5 animate-spin" /> : error || approvals ? <CircleAlert className="size-5" /> : open ? <MessageSquare className="size-5" /> : <Bot className="size-5" />}
+            {sending || waiting ? <LoaderCircle className="size-5 animate-spin" /> : error ? <CircleAlert className="size-5" /> : open ? <MessageSquare className="size-5" /> : <Bot className="size-5" />}
         </Button>
     </>;
 }

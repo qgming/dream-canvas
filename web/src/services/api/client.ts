@@ -27,8 +27,9 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     if (!response.ok) {
         const error = await response.json().catch(() => ({})) as { code?: string; message?: string };
         assertSession();
+        if (error.code === "site_closed" && revision === sessionRevision) window.dispatchEvent(new Event("site-closed"));
         if (response.status === 401 && path !== "/auth/login" && revision === sessionRevision) window.dispatchEvent(new Event("session-expired"));
-        throw new ApiError(response.status, error.code || "request_failed", error.message || i18n.t("errors.requestFailed", { status: response.status }));
+        throw new ApiError(response.status, error.code || "request_failed", error.code === "site_closed" ? i18n.t("landing.closedTitle") : error.message || i18n.t("errors.requestFailed", { status: response.status }));
     }
     const result = response.status === 204 ? undefined as T : await response.json() as T;
     assertSession();

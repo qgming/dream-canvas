@@ -157,7 +157,7 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 
 // Only completed task responses are removed; durable asset originals remain authoritative.
 func (a *App) cleanupTaskResponses(task GenerationTask) {
-	if !terminalTask(task.Status) { return }
+	if a.db.First(&task, "id = ?", task.ID).Error != nil || !terminalTask(task.Status) || !task.ResponseCleanupPending { return }
 	if _, err := a.assetPath(task.ID); err != nil { return }
 	var failure error
 	for _, suffix := range []string{".json", ".media", ".script.json", ".pending", ".json.pending", ".media.pending"} { if err := os.Remove(filepath.Join(a.root, "results", task.ID+suffix)); err != nil && !errors.Is(err, os.ErrNotExist) { failure = err; break } }
@@ -165,7 +165,7 @@ func (a *App) cleanupTaskResponses(task GenerationTask) {
 	if failure != nil {
 		var snapshot executionSnapshot; if json.Unmarshal(task.Snapshot, &snapshot) != nil || len(snapshot.Policy.StorageRetrySeconds) == 0 { return }
 		index := task.ResponseCleanupAttempts; if index >= len(snapshot.Policy.StorageRetrySeconds) { index = len(snapshot.Policy.StorageRetrySeconds)-1 }
-		values = map[string]any{"response_cleanup_pending": true, "response_cleanup_error": "已保存成品，但供应商响应副本仍待清理，后台会继续处理", "response_cleanup_attempts": task.ResponseCleanupAttempts+1, "next_run_at": time.Now().Add(seconds(snapshot.Policy.StorageRetrySeconds[index]))}
+		values = map[string]any{"response_cleanup_pending": true, "response_cleanup_error": "任务已结束，但供应商响应副本仍待清理，后台会继续处理", "response_cleanup_attempts": task.ResponseCleanupAttempts+1, "next_run_at": time.Now().Add(seconds(snapshot.Policy.StorageRetrySeconds[index]))}
 	} else { var result providerResult; if json.Unmarshal(task.Result, &result) == nil { result.URL, result.ResponseFile = "", ""; values["result"] = encode(result) } }
 	if a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(values).Error == nil { a.notifyTopic(task.UserID, "tasks"); if failure == nil { a.signalWork() } }
 }

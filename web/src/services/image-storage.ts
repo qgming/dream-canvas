@@ -59,8 +59,8 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     return result;
 }
 
-// Removing a canvas reference never deletes an asset. Physical deletion goes through approvals.
-export async function deleteStoredImages(_keys: Iterable<string>) { /* Physical deletion is owned by the server approval flow. */ }
+// Removing a canvas reference never deletes an asset. Physical deletion belongs to the asset service.
+export async function deleteStoredImages(_keys: Iterable<string>) { /* Physical deletion is owned by the server asset service. */ }
 export async function cleanupUnusedImages(_usedData: unknown) { /* Unreferenced media remains in the private asset library. */ }
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;

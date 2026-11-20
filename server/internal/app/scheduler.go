@@ -28,7 +28,7 @@ func (a *App) recoverExecution() error {
 	if err := a.db.Model(&ClientCommand{}).Where("status = ?", "pending").Updates(map[string]any{"status": "interrupted", "error": "服务重启，页面操作未确认；请重新读取明确在线的客户端"}).Error; err != nil { return err }
 	// A process restart never turns an uncertain paid submission into another POST.
 	if err := a.db.Model(&GenerationTask{}).Where("status = ? OR (status = ? AND upstream_id = ?)", "submitting", "running", "").Updates(map[string]any{"status": "confirmation_required", "error": "服务在供应商响应确认前停止，结果与用量待确认；未重新提交"}).Error; err != nil { return err }
-	if err := a.db.Model(&AssistantTurn{}).Where("status = ?", "running").Updates(map[string]any{"status": "interrupted", "error": "服务在模型轮次完成前停止；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
+	if err := a.db.Model(&AssistantTurn{}).Where("status NOT IN ?", []string{"queued", "waiting_tasks", "succeeded", "failed", "cancelled", "interrupted"}).Updates(map[string]any{"status": "interrupted", "error": "轮次执行状态无法恢复；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
 	if err := a.db.Model(&TaskAsset{}).Where("task_id IN (?)", a.db.Model(&AssistantTurn{}).Select("'turn:' || id").Where("status IN ?", []string{"interrupted", "cancelled", "failed", "succeeded"})).Update("released", true).Error; err != nil { return err }
 	if err := a.db.Model(&Asset{}).Where("sync_state = ?", "syncing").Update("sync_state", "pending").Error; err != nil { return err }
 	return nil
@@ -93,15 +93,15 @@ func (a *App) dispatch(policy executionPolicy) {
 		if task.Status == "submitting" { continue }
 		if task.NextRunAt != nil && task.NextRunAt.After(time.Now()) { continue }
 		if task.Status == "queued" || task.Status == "waiting_assets" {
-			if !policy.Enabled || total >= policy.GenerationSlots || counts[task.UserID] >= policy.UserSlots { continue }
+			if total >= policy.GenerationSlots || counts[task.UserID] >= policy.UserSlots { continue }
 		}
 		if a.launch("task:"+task.ID, func(ctx context.Context) { a.executeTask(ctx, task.ID) }) && (task.Status == "queued" || task.Status == "waiting_assets") { total++; counts[task.UserID]++ }
 	}
 	var turns []AssistantTurn
-	if policy.Enabled && a.db.Where("status IN ?", []string{"queued", "waiting_approval", "waiting_tasks"}).Order("created_at").Find(&turns).Error == nil {
+	if a.db.Where("status IN ?", []string{"queued", "waiting_tasks"}).Order("created_at").Find(&turns).Error == nil {
 		running := 0
 		a.workMu.Lock(); for key := range a.active { if strings.HasPrefix(key, "turn:") { running++ } }; a.workMu.Unlock()
-		for _, turn := range turns { if running >= policy.AssistantSlots { break }; if turn.Status == "waiting_approval" && !a.approvalReady(turn) || turn.Status == "waiting_tasks" && !a.assistantTasksReady(turn) { continue }; if a.launch("turn:"+turn.ID, func(ctx context.Context) { a.executeAssistant(ctx, turn.ID) }) { running++ } }
+		for _, turn := range turns { if running >= policy.AssistantSlots { break }; if turn.Status == "waiting_tasks" && !a.assistantTasksReady(turn) { continue }; if a.launch("turn:"+turn.ID, func(ctx context.Context) { a.executeAssistant(ctx, turn.ID) }) { running++ } }
 	}
 	a.dispatchFiles()
 }
@@ -109,6 +109,7 @@ func (a *App) dispatch(policy executionPolicy) {
 func (a *App) executeTask(ctx context.Context, id string) {
 	var task GenerationTask
 	if a.db.First(&task, "id = ?", id).Error != nil { return }
+	if !includes([]string{"queued", "waiting_assets", "submitting", "running", "saving"}, task.Status) { return }
 	ctx = withLogContext(ctx, slog.String("task_id", task.ID), slog.String("user_id", task.UserID), slog.String("channel_id", task.ChannelID), slog.String("model_id", task.ModelID))
 	var snapshot executionSnapshot
 	var input generationInput

@@ -37,12 +37,14 @@ func businessTools() []toolDefinition {
 		{"client_command_get", "查询页面操作的 pending、applied、rejected 或 interrupted 结果", "read", toolSchema(map[string]any{"commandId": stringField("操作 ID")}, "commandId")},
 		{"projects_list", "读取有权限的项目及版本", "read", toolSchema(map[string]any{})},
 		{"project_get", "读取指定项目，不能猜测浏览器活动项目", "read", toolSchema(map[string]any{"projectId": stringField("项目 ID")}, "projectId")},
+		{"project_delete", "按读取版本直接删除授权项目与版本历史，解除媒体引用；保留资产、已提交任务与历史用量", "delete", toolSchema(map[string]any{"projectId": stringField("明确目标项目 ID"), "version": numberField("当前读取的项目版本")}, "projectId", "version")},
 		{"project_history", "读取项目统一撤销和重做历史；人工、助手、MCP 与生成结果使用相同历史", "read", toolSchema(map[string]any{"projectId": stringField("项目 ID")}, "projectId")},
 		{"project_revert", "按当前版本撤销或重做历史栈顶部的一次修改，作为新版本自动保存；不删除资产或取消已提交生成", "edit", toolSchema(map[string]any{"projectId": stringField("项目 ID"), "version": numberField("当前项目版本"), "targetVersion": numberField("project_history 的 past 或 future 栈顶版本")}, "projectId", "version", "targetVersion")},
 		{"project_create", "创建项目；仅未限制项目的令牌可用", "edit", toolSchema(map[string]any{"title": stringField("项目名称"), "document": map[string]any{"type": "object"}}, "title", "document")},
 		{"project_save", "提交相对读取版本的节点、连线和设置修改；服务端合并无关并发修改，同字段按提交顺序保存，目标已删除或结构冲突时保留服务端内容并报错", "edit", toolSchema(projectFields, "projectId", "title", "version", "document")},
 		{"assets_list", "读取私人资产库元数据；工作台文件须手动保存才进入资产库，项目范围令牌仅返回范围内项目引用的素材", "read", toolSchema(map[string]any{})},
 		{"asset_get", "读取私人资产元数据及保存、同步、删除状态", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
+		{"asset_delete", "直接全局删除当前账号资产，需要不限项目的删除授权；原件与本地、云端副本排队清理，在途任务结束后执行，deleteState=pending 不代表已清理完成", "delete", toolSchema(map[string]any{"assetId": stringField("明确目标资产 ID")}, "assetId")},
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_update", "修改资产名称与说明，并将工作台文件保留到资产库，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
 		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content 文本正文、note 备注、source 来源、coverUrl 封面地址"}}, "title", "metadata")},
@@ -64,14 +66,13 @@ func businessTools() []toolDefinition {
 		{"skill_delete", "按读取版本删除个人 Skill，不删除对话或项目", "edit", toolSchema(map[string]any{"name": stringField("Skill 标识"), "expectedRevision": stringField("读取的版本")}, "name", "expectedRevision")},
 		{"generation_create", "按明确渠道和模型提交持久生成任务；项目任务需要项目版本和已保存目标节点，独立工作台任务可指定记录归属并手动保留成品", "generate", toolSchema(map[string]any{"channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": map[string]any{"type": "string", "enum": []string{"text", "image", "video", "audio"}}, "projectId": stringField("明确目标项目 ID"), "workbenchRecordId": stringField("可选图片或视频工作台记录 ID，与 projectId 互斥；成品仅手动保存后进入资产库"), "nodeId": stringField("目标节点 ID"), "projectVersion": numberField("读取到的项目版本"), "prompt": stringField("提示词"), "parameters": map[string]any{"type": "object"}, "references": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"assetId": stringField("资产 ID"), "role": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}}, "required": []string{"assetId", "role"}, "additionalProperties": false}}}, "channelId", "modelId", "capability", "prompt", "parameters")},
 		{"tasks_wait", "读取明确任务是否均已结束或需人工核对；ready=false 返回待等待任务。云端助手会持久等待并让出执行名额，完成后自动续行；外部 MCP 返回同一状态快照，不阻塞 HTTP，也不重新生成", "read", toolSchema(map[string]any{"taskIds": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": stringField("明确生成任务 ID")}}, "taskIds")},
-		{"tasks_list", "读取授权项目内的生成任务和保存、同步状态", "read", toolSchema(map[string]any{})},
+		{"tasks_list", "读取授权项目内的生成任务和保存、同步状态，默认隐藏已删除记录", "read", toolSchema(map[string]any{"includeRemoved": map[string]any{"type": "boolean", "description": "读取画布执行历史时可包含已删除的列表记录"}})},
 		{"task_get", "读取生成任务、成品资产及待确认状态", "read", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_cancel", "取消未提交任务，已提交任务记录取消意愿并继续核对实际结果", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
 		{"task_resume", "仅继续查询已有上游编号或保存已收到结果，不重新提交供应商", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID")}, "taskId")},
+		{"task_resolve", "仅用户明确确认后手动结束待核对或中断任务并释放素材占用；不代表供应商接受取消，不修改真实用量，成功须已有完整保存结果，助手不能代确认", "generate", toolSchema(map[string]any{"taskId": stringField("任务 ID"), "expectedUpdatedAt": stringField("读取任务的 updatedAt"), "confirmed": map[string]any{"type": "boolean"}, "status": map[string]any{"type": "string", "enum": []string{"succeeded", "failed", "cancelled"}}, "note": stringField("可选核对备注")}, "taskId", "expectedUpdatedAt", "confirmed", "status")},
+		{"task_delete", "仅用户明确确认后删除已结束的任务列表记录，保留成品、项目历史、执行依据及用量；在途或仍占用素材的任务须先结束，助手不能代确认", "delete", toolSchema(map[string]any{"taskId": stringField("任务 ID"), "expectedUpdatedAt": stringField("读取任务的 updatedAt"), "confirmed": map[string]any{"type": "boolean"}}, "taskId", "expectedUpdatedAt", "confirmed")},
 		{"usage_list", "读取授权项目内的调用次数与用量汇总，可按开始执行时间和渠道模型筛选；pendingCount 为估算或未知用量的调用数", "read", toolSchema(map[string]any{"userId": stringField("用户 ID"), "projectId": stringField("项目 ID"), "channelId": stringField("渠道 ID"), "modelId": stringField("模型 ID"), "capability": stringField("能力"), "from": stringField("含时区的起始时间"), "to": stringField("含时区的结束时间")})},
-		{"approval_request", "为项目删除或全局资产删除创建持久确认请求，返回 pending 后等待用户明确确认", "delete", toolSchema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"delete_project", "delete_asset"}}, "targetId": stringField("目标 ID"), "version": numberField("删除项目时的版本")}, "action", "targetId", "version")},
-		{"approvals_list", "读取授权范围内的持久确认状态", "read", toolSchema(map[string]any{})},
-		{"approval_decide", "仅在用户明确确认后确认或拒绝删除，禁止自行批准", "delete", toolSchema(map[string]any{"approvalId": stringField("确认请求 ID"), "accept": map[string]any{"type": "boolean", "description": "用户明确确认后才可设为 true"}}, "approvalId", "accept")},
 	}, append(canvasTools(), managementTools()...)...)
 }
 
@@ -109,6 +110,7 @@ func toolResult(value any, err error) *mcp.CallToolResult {
 func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input map[string]any) (output any, failure error) {
 	started := time.Now()
 	defer func() {
+		if name == "admin_logs_read" || name == "admin_logs_clear" { return }
 		if !a.logEnabled(slog.LevelInfo) { return }
 		known := false; for _, tool := range businessTools() { if tool.Name == name { known = true; break } }
 		fields := []slog.Attr{slog.String("user_id", p.User.ID), slog.Bool("assistant", p.FixedProject), slog.Int64("duration_ms", time.Since(started).Milliseconds())}
@@ -117,6 +119,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	}()
 	if err := ctx.Err(); err != nil { return nil, err }
 	if err := a.db.First(&p.User, "id = ? AND disabled = ?", p.User.ID, false).Error; err != nil { return nil, problem(403, "account_disabled", "账号已停用或不存在") }
+	if err := a.siteAccess(p.User); err != nil { return nil, err }
 	text := func(key string) string { value, _ := input[key].(string); return value }
 	version := uint64(0)
 	if raw, exists := input["version"]; exists {
@@ -134,13 +137,15 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	}
 	if value, handled, err := a.callManagement(ctx, p, name, input); handled { return value, err }
 	if p.FixedProject && name == "project_create" && p.TargetProjectID != "" { return nil, problem(409, "target_project_fixed", "本轮已固定目标项目，创建其他项目请开启下一轮") }
-	if p.FixedProject && includes([]string{"project_get", "project_save", "project_history", "project_revert", "canvas_apply_ops"}, name) && (projectID == "" || projectID != p.TargetProjectID) { return nil, problem(409, "target_project_required", "请操作本轮明确的目标项目；未选择项目时可先创建一个项目") }
+	if p.FixedProject && includes([]string{"project_get", "project_save", "project_delete", "project_history", "project_revert", "canvas_apply_ops"}, name) && (projectID == "" || projectID != p.TargetProjectID) { return nil, problem(409, "target_project_required", "请操作本轮明确的目标项目；未选择项目时可先创建一个项目") }
 	if p.FixedProject && name == "generation_create" && projectID != p.TargetProjectID { return nil, problem(409, "target_project_fixed", "生成任务需要本轮明确的目标项目；无目标项目时可提交独立生成") }
 	switch name {
 	case "canvas_apply_ops": return a.ApplyCanvasOperations(p, input)
 	case "clients_list", "client_get", "client_select", "client_viewport", "client_navigate", "client_command_get": return a.clientBusiness(p, name, input)
 	case "projects_list": return a.ListProjects(p.User.ID, p.Projects)
 	case "project_get": return a.GetProject(p.User.ID, projectID)
+	case "project_delete":
+		err := a.DeleteProject(p.User.ID, projectID, version); return map[string]any{"projectId": projectID, "deleted": err == nil}, err
 	case "project_history":
 		project, err := a.GetProject(p.User.ID, projectID); if err != nil { return nil, err }; return a.ProjectHistory(project)
 	case "project_revert":
@@ -173,6 +178,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if err := a.checkTokenAsset(p, text("assetId")); err != nil { return nil, err }
 		var asset Asset
 		err := a.db.First(&asset, "id = ? AND user_id = ?", text("assetId"), p.User.ID).Error
+		if err == nil && len(p.Projects) == 0 { err = assetCleanupBlocker(a.db, &asset) }
 		return asset, err
 	case "asset_content", "asset_voices", "asset_voice_save", "asset_sync", "asset_update":
 		id := text("assetId")
@@ -235,33 +241,27 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	case "tasks_list":
 		tasks := []GenerationTask{}
 		query := a.db.Where("user_id = ?", p.User.ID)
+		if includeRemoved, _ := input["includeRemoved"].(bool); !includeRemoved { query = query.Where("removed = ?", false) }
 		if len(p.Projects) > 0 { query = query.Where("project_id IN ?", p.Projects) }
 		err := query.Order("created_at DESC").Find(&tasks).Error; return tasks, err
 	case "tasks_wait":
 		var request struct { IDs []string `json:"taskIds"` }; if json.Unmarshal(encode(input), &request) != nil { return nil, problem(400, "invalid_tasks", "请提供要等待的任务编号") }
 		return a.WaitTasks(p, request.IDs)
-	case "task_get", "task_cancel", "task_resume":
+	case "task_get", "task_cancel", "task_resume", "task_resolve", "task_delete":
 		var task GenerationTask
 		if err := a.db.First(&task, "id = ? AND user_id = ?", text("taskId"), p.User.ID).Error; err != nil { return nil, err }
-		if !p.allows(scope, task.ProjectID) { return nil, problem(403, "project_scope", "任务不在令牌项目或本轮目标范围内") }
+		if !p.allows(scope, task.ProjectID) || len(p.Projects) > 0 && !includes(p.Projects, task.ProjectID) { return nil, problem(403, "project_scope", "任务不在令牌项目或本轮目标范围内") }
+		if name == "task_resolve" || name == "task_delete" {
+			var request taskActionInput; if err := json.Unmarshal(encode(input), &request); err != nil { return nil, err }
+			if name == "task_resolve" { return a.ResolveTask(p.User.ID, task.ID, request) }
+			err := a.DeleteTask(p.User.ID, task.ID, request); return map[string]any{"removed": err == nil}, err
+		}
 		if name == "task_cancel" { return a.CancelTask(p.User.ID, task.ID) }; if name == "task_resume" { return a.ResumeTask(p.User.ID, task.ID) }; return task, nil
 	case "usage_list":
 		filters := map[string]string{}; for _, key := range []string{"userId", "projectId", "channelId", "modelId", "capability", "from", "to"} { filters[key] = text(key) }; return a.ListUsage(p.User.ID, p.Projects, filters)
-	case "approval_request":
-		if err := a.checkTokenDeletion(p, text("action"), text("targetId")); err != nil { return nil, err }
-		return a.RequestApproval(p.User.ID, text("action"), text("targetId"), version)
-	case "approvals_list":
-		approvals, err := a.ListApprovals(p.User.ID)
-		if err != nil { return nil, err }
-		result := []Approval{}
-		for _, approval := range approvals { if a.checkTokenDeletion(p, approval.Action, approval.TargetID) == nil { result = append(result, approval) } }
-		return result, nil
-	case "approval_decide":
-		var approval Approval
-		if err := a.db.First(&approval, "id = ? AND user_id = ?", text("approvalId"), p.User.ID).Error; err != nil { return nil, err }
-		if err := a.checkTokenDeletion(p, approval.Action, approval.TargetID); err != nil { return nil, err }
-		accept, _ := input["accept"].(bool)
-		return a.DecideApproval(p.User.ID, approval.ID, accept)
+	case "asset_delete":
+		if len(p.Projects) > 0 { return nil, problem(403, "delete_scope", "全局资产删除需要不限项目的令牌") }
+		return a.DeleteAsset(p.User.ID, text("assetId"))
 	}
 	return nil, problem(404, "unknown_tool", "不支持的业务工具")
 }
@@ -274,9 +274,3 @@ func (a *App) checkTokenAsset(p Principal, id string) error {
 	return nil
 }
 
-func (a *App) checkTokenDeletion(p Principal, action, target string) error {
-	if p.FixedProject && action == "delete_project" && (p.TargetProjectID == "" || target != p.TargetProjectID) { return problem(403, "target_project_fixed", "项目删除需要本轮明确的目标项目") }
-	if action == "delete_project" && (len(p.Projects) == 0 || includes(p.Projects, target)) { return nil }
-	if action == "delete_asset" && len(p.Projects) == 0 { return nil }
-	return problem(403, "delete_scope", "全局资产删除需要不限项目的令牌；项目删除需要目标项目授权")
-}

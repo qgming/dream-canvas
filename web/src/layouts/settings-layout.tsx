@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Archive, ChartNoAxesCombined, CheckCheck, Code2, Cpu, Database, Globe2, KeyRound, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
+import { Archive, Code2, Cpu, Database, Globe2, KeyRound, ListTodo, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -14,18 +14,16 @@ export default function SettingsLayout() {
             { path: "", label: "general", icon: Globe2 },
             { path: "/backup", label: "dataBackup", icon: Archive },
             { path: "/account", label: "account", icon: UserRound },
-            { path: "/preferences", label: "preferences", icon: SlidersHorizontal },
             ...(!admin ? [{ path: "/models", label: "models", icon: Cpu }] : []),
+            { path: "/tasks", label: "tasks", icon: ListTodo },
             { path: "/access-tokens", label: "accessTokens", icon: KeyRound },
-            { path: "/approvals", label: "approvals", icon: CheckCheck },
-            { path: "/usage", label: "usage", icon: ChartNoAxesCombined },
         ] },
         ...(admin ? [{ label: "settings.administration", items: [
+            { path: "/site", label: "site", icon: SlidersHorizontal },
             { path: "/users", label: "users", icon: UsersRound },
             { path: "/channels", label: "channels", icon: Cpu },
             { path: "/model-scripts", label: "modelScripts", icon: Code2 },
             { path: "/canvas-plugins", label: "nodePlugins", icon: Puzzle },
-            { path: "/runtime", label: "runtime", icon: SlidersHorizontal },
             { path: "/logging", label: "logging", icon: Logs },
             { path: "/storage", label: "storage", icon: Database },
         ] }] : []),

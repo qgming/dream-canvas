@@ -16,7 +16,6 @@ import (
 type assistantSnapshot struct {
 	Execution executionSnapshot `json:"execution"`
 	Messages []map[string]any `json:"messages"`
-	ApprovalIDs []string `json:"approvalIds"`
 	WaitingTaskIDs []string `json:"waitingTaskIds"`
 	Purpose string `json:"purpose,omitempty"`
 	Draft JSON `json:"draft,omitempty"`
@@ -39,7 +38,7 @@ func assistantInput(snapshot assistantSnapshot) generationInput {
 }
 
 func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, projectID, skill, clientID string, attachments, references []string, overrides map[string]any, channel Channel, model ChannelModel, policy executionPolicy) (AssistantTurn, error) {
-	system := "你是梦想画布网页内的云端文本 Agent，代表当前用户操作应用。你与外部 MCP 使用同一套业务工具、权限和校验。主动调用工具创建和编辑节点、连接节点、管理项目与素材、提交生成并核对任务结果，不要只提供手动操作建议。节点和连线使用 project_get、canvas_apply_ops 或 project_save 在服务端按版本保存，无需在线浏览器。生成任务按 catalog_list 返回的渠道、模型和动态参数通过 generation_create 提交；不要把你自己的文本模型当作所有生成能力。每轮目标项目固定为 "+projectID+"。未指定项目时可创建一个项目，创建后固定该项目；也可处理全局素材、Skill、偏好或独立生成。不得猜测浏览器选区。读取、编辑和生成可按授权执行；删除项目或全局资产必须申请确认，不能自行批准。不要声称尚未完成的任务已完成。不得请求或输出供应商、存储或账号真实凭据。"
+	system := "你是梦想画布网页内的云端文本 Agent，代表当前用户操作应用。你与外部 MCP 使用同一套业务工具、权限和校验。主动调用工具创建和编辑节点、连接节点、管理项目与素材、提交生成并核对任务结果，不要只提供手动操作建议。节点和连线使用 project_get、canvas_apply_ops 或 project_save 在服务端按版本保存，无需在线浏览器。生成任务按 catalog_list 返回的渠道、模型和动态参数通过 generation_create 提交；不要把你自己的文本模型当作所有生成能力。每轮目标项目固定为 "+projectID+"。未指定项目时可创建一个项目，创建后固定该项目；也可处理全局素材、Skill、偏好或独立生成。不得猜测浏览器选区。读取、编辑、生成及删除均可按用户要求在授权范围内直接执行；删除项目使用 project_delete 并提供最新读取版本，全局资产删除使用 asset_delete，不申请额外审批。素材删除返回 pending 时说明仍在排队清理，不能声称已物理清除。不要声称尚未完成的任务已完成。不得请求或输出供应商、存储或账号真实凭据。"
 	if user.Role == "admin" { system += "你可使用管理员配置工具；编写接口插件时先用 skill_get 读取内置 model-api-adapter Skill，再读取 admin_script_contract 和脚本草稿，可通过 admin_script_evidence 分析用户已提交任务的脱敏测试结果。内置脚本只读、不可复制；自建脚本只能保存草稿，真实测试和发布以及运行边界确认由管理员主动操作。" }
 	system += "创建画布节点前先用 canvas_nodes_list 读取管理员已启用的节点类型、尺寸与默认内容，不猜测插件是否安装。"
 	if user.Role == "admin" { system += "编写节点插件先读 admin_canvas_plugin_contract 和 admin_canvas_plugin_get，使用 admin_canvas_plugin_draft_save 保存完整文件映射；发布、启停和删除由管理员主动操作。" }
@@ -94,7 +93,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 	turn := AssistantTurn{ID: identifier(), UserID: user.ID, ThreadID: thread.ID, ProjectID: projectID, ChannelID: channel.ID, ModelID: model.ID, Status: "queued", Snapshot: encode(snapshot)}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		var active int64
-		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_approval", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
+		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
 		if active > 0 { return problem(409, "thread_busy", "此对话仍有未结束轮次") }
 		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Updates(map[string]any{"version": thread.Version+1})
 		if result.Error != nil { return result.Error }; if result.RowsAffected != 1 { return problem(409, "version_conflict", "对话已更新，请重新读取后发送") }
@@ -107,8 +106,9 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 }
 
 func assistantToolAllowed(name string) bool {
+	if name == "task_resolve" || name == "task_delete" { return false }
 	if includes([]string{"admin_canvas_plugin_publish", "admin_canvas_plugin_enabled", "admin_canvas_plugin_delete"}, name) { return false }
-	return !includes([]string{"approval_decide", "asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_runtime_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
+	return !includes([]string{"asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_site_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
 }
 
 func assistantTools(principal Principal) []map[string]any {
@@ -121,13 +121,6 @@ func assistantTools(principal Principal) []map[string]any {
 		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": tool.Schema}})
 	}
 	return tools
-}
-
-func (a *App) approvalReady(turn AssistantTurn) bool {
-	var snapshot assistantSnapshot
-	if json.Unmarshal(turn.Snapshot, &snapshot) != nil || len(snapshot.ApprovalIDs) == 0 { return false }
-	var count int64
-	return a.db.Model(&Approval{}).Where("id IN ? AND user_id = ? AND status <> ?", snapshot.ApprovalIDs, turn.UserID, "pending").Count(&count).Error == nil && count == int64(len(snapshot.ApprovalIDs))
 }
 
 func (a *App) finishAssistant(turn AssistantTurn, status, message string) {
@@ -144,12 +137,12 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	var turn AssistantTurn; var user User
 	if a.db.First(&turn, "id = ?", id).Error != nil { return }
 	if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未开始新模型调用"); return }
+	if err := a.siteAccess(user); err != nil { a.finishAssistant(turn, "interrupted", "站点暂停访问，助手已停止后续调用；已提交的生成任务继续处理"); return }
 	ctx = withLogContext(ctx, slog.String("turn_id", turn.ID), slog.String("thread_id", turn.ThreadID), slog.String("user_id", turn.UserID))
 	var snapshot assistantSnapshot
 	if json.Unmarshal(turn.Snapshot, &snapshot) != nil { a.finishAssistant(turn, "interrupted", "轮次快照无法读取"); return }
 	if turn.CancelRequested { a.finishAssistant(turn, "cancelled", "轮次已停止"); return }
 	if turn.Status == "waiting_tasks" && len(snapshot.WaitingTaskIDs) == 0 { a.finishAssistant(turn, "interrupted", "等待任务记录无法读取，请核对生成任务后继续"); return }
-	if len(snapshot.ApprovalIDs) > 0 && !a.approvalReady(turn) { return }
 	principal := Principal{User: user, Scopes: []string{"read", "edit", "generate", "delete", "assistant", "account", "admin"}, FixedProject: true, TargetProjectID: turn.ProjectID, ClientID: snapshot.ClientID}
 	if len(snapshot.WaitingTaskIDs) > 0 {
 		result, err := a.WaitTasks(principal, snapshot.WaitingTaskIDs)
@@ -160,19 +153,13 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	ready, err := a.prepareCloudInputs(turn.UserID, snapshot.Execution, assistantInput(snapshot))
 	if err != nil { a.finishAssistant(turn, "failed", "助手参考素材无法准备，请检查私有存储与同步状态；本次未调用模型"); return }
 	if !ready { if turn.Error == "" { a.db.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("error", "等待私有参考素材同步；本次尚未调用模型"); a.notifyTopic(turn.UserID, "assistant") }; return }
-	if a.db.Model(&AssistantTurn{}).Where("id = ? AND status IN ?", turn.ID, []string{"queued", "waiting_approval", "waiting_tasks"}).Updates(map[string]any{"status": "running", "error": ""}).RowsAffected != 1 { return }
+	if a.db.Model(&AssistantTurn{}).Where("id = ? AND status IN ?", turn.ID, []string{"queued", "waiting_tasks"}).Updates(map[string]any{"status": "running", "error": ""}).RowsAffected != 1 { return }
 	a.logEvent(ctx, slog.LevelInfo, "assistant.started", slog.Int("step", turn.Step), slog.String("channel_id", turn.ChannelID), slog.String("model_id", turn.ModelID))
 	ctx, cancel := context.WithTimeout(ctx, seconds(snapshot.Execution.Policy.TextSeconds)); defer cancel()
-	if len(snapshot.ApprovalIDs) > 0 {
-		for _, id := range snapshot.ApprovalIDs { var approval Approval
-			if a.db.First(&approval, "id = ? AND user_id = ? AND status <> ?", id, turn.UserID, "pending").Error != nil { a.finishAssistant(turn, "interrupted", "确认记录未完成或无法读取"); return }
-			snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "system", "content": "用户确认结果："+approval.ID+" "+approval.Status+"。删除确认已由业务层处理，不得再次执行同一删除。"})
-		}
-		snapshot.ApprovalIDs = nil
-	}
 	for {
 		if ctx.Err() != nil { a.stopAssistant(turn); return }
 		if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，停止后续操作"); return }
+		if err := a.siteAccess(user); err != nil { a.finishAssistant(turn, "interrupted", "站点暂停访问，助手已停止后续调用；已提交的生成任务继续处理"); return }
 		messages, parameters, err := a.assistantMaterials(snapshot)
 		if err != nil { a.finishAssistant(turn, "interrupted", "轮次材料无法安全整理，模型未提交"); return }
 		item := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: identifier(), UserID: turn.UserID, Role: "assistant"}
@@ -246,17 +233,17 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 			created, newProject := value.(Project); newProject = newProject && toolErr == nil && function["name"] == "project_create" && turn.ProjectID == ""
 			if newProject { turn.ProjectID, principal.TargetProjectID = created.ID, created.ID }
 			state := ""; if data, err := json.Marshal(value); err == nil { var result map[string]any; if json.Unmarshal(data, &result) == nil { state = text(result["status"]) } }
-			status := "completed"; if toolErr != nil { status = "failed" } else if includes([]string{"pending", "queued", "running", "waiting_assets", "waiting_approval"}, state) { status = "pending" }
+			status := "completed"; if toolErr != nil { status = "failed" } else if includes([]string{"pending", "queued", "running", "waiting_assets"}, state) { status = "pending" }
+			if deletion, ok := value.(assetDeleteResult); ok && deletion.DeleteState == "pending" { status = "pending" }
 			if wait, ok := value.(taskWaitResult); ok && !wait.Ready { status = "pending" }
 			toolItem := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: text(call["id"]), UserID: turn.UserID, Role: "tool", Text: string(encode(value)), Detail: encode(map[string]any{"name": function["name"], "kind": "tool", "status": status})}
 			if err := a.db.Transaction(func(tx *gorm.DB) error { if newProject { if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("project_id", turn.ProjectID).Error; err != nil { return err } }; return appendAssistantItem(tx, &toolItem) }); err != nil { a.finishAssistant(turn, "interrupted", "工具结果保存失败，未重复执行"); return }
 			snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "tool", "tool_call_id": call["id"], "content": toolItem.Text})
 			if newProject { snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "system", "content": "本轮新建项目已保存，目标项目现在固定为 "+turn.ProjectID+"，不能改用其他项目。"}) }
-			if approval, ok := value.(Approval); ok && approval.Status == "pending" && !includes(snapshot.ApprovalIDs, approval.ID) { snapshot.ApprovalIDs = append(snapshot.ApprovalIDs, approval.ID) }
 			if wait, ok := value.(taskWaitResult); ok && !wait.Ready { for _, id := range wait.TaskIDs { if !includes(snapshot.WaitingTaskIDs, id) { snapshot.WaitingTaskIDs = append(snapshot.WaitingTaskIDs, id) } } }
 		}
 		turn.Step++
-		nextStatus := "running"; if len(snapshot.ApprovalIDs) > 0 { nextStatus = "waiting_approval" } else if len(snapshot.WaitingTaskIDs) > 0 { nextStatus = "waiting_tasks" }
+		nextStatus := "running"; if len(snapshot.WaitingTaskIDs) > 0 { nextStatus = "waiting_tasks" }
 		if ctx.Err() != nil { a.stopAssistant(turn); return }
 		update := a.db.Model(&AssistantTurn{}).Where("id = ? AND status = ? AND cancel_requested = ?", turn.ID, "running", false).Updates(map[string]any{"snapshot": encode(snapshot), "step": turn.Step, "status": nextStatus})
 		if update.Error != nil { a.finishAssistant(turn, "interrupted", "轮次状态保存失败，未重复执行"); return }; if update.RowsAffected != 1 { a.stopAssistant(turn); return }

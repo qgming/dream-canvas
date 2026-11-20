@@ -38,6 +38,7 @@ type logSettingsInput struct {
 type appLogger struct {
 	logger *slog.Logger
 	settings atomic.Pointer[LogSettings]
+	store *logStore
 	mu sync.Mutex
 }
 
@@ -50,7 +51,8 @@ func withLogContext(ctx context.Context, fields ...slog.Attr) context.Context {
 
 func (a *App) openLogger() error {
 	settings, err := a.GetLogSettings(); if err != nil { return err }
-	a.logs = &appLogger{logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))}
+	store := newLogStore(a.root)
+	a.logs = &appLogger{store: store, logger: slog.New(slog.NewJSONHandler(store, &slog.HandlerOptions{Level: slog.LevelDebug}))}
 	a.logs.settings.Store(&settings)
 	return nil
 }
@@ -121,6 +123,7 @@ func (a *App) requestLogger() gin.HandlerFunc {
 		c.Header("X-Request-ID", requestID)
 		c.Request = c.Request.WithContext(withLogContext(c.Request.Context(), slog.String("request_id", requestID)))
 		c.Next()
+		if c.FullPath() == "/api/admin/logging/entries" { return }
 		if !strings.HasPrefix(c.Request.URL.Path, "/api/") && c.Request.URL.Path != "/mcp" { return }
 		if !a.logEnabled(slog.LevelInfo) { return }
 		route := c.FullPath(); if route == "" { route = "unmatched" }

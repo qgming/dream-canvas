@@ -10,11 +10,10 @@ export function scriptManifest(files: Record<string, string>) {
     return value as { schemaVersion: number; name: string; description: string; capability: "text" | "image" | "video" | "audio"; inputs: string; entry: string; phases: string[]; features?: { tools?: boolean; streaming?: boolean }; auth?: { type: string; header?: string; prefix?: string } };
 }
 
-export async function importScriptFiles(selected: File[]) {
+export async function importScriptPackage(file: File) {
+    if (!file.name.toLowerCase().endsWith(".zip")) throw new Error(i18n.t("modelScripts.zipRequired"));
     const decoder = new TextDecoder("utf-8", { fatal: true });
-    let entries: [string, string][];
-    if (selected.length === 1 && selected[0].name.toLowerCase().endsWith(".zip")) entries = Object.entries(unzipSync(new Uint8Array(await selected[0].arrayBuffer()))).filter(([name]) => !name.endsWith("/")).map(([name, content]) => [name, decoder.decode(content)]);
-    else entries = await Promise.all(selected.map(async (file) => [file.webkitRelativePath || file.name, decoder.decode(await file.arrayBuffer())] as [string, string]));
+    const entries = Object.entries(unzipSync(new Uint8Array(await file.arrayBuffer()))).filter(([name]) => !name.endsWith("/")).map(([name, content]) => [name, decoder.decode(content)] as const);
     const manifest = entries.find(([name]) => name === "script.json") || entries.find(([name]) => name.endsWith("/script.json"));
     if (!manifest) throw new Error(i18n.t("modelScripts.invalidPackage"));
     const prefix = manifest[0].slice(0, -"script.json".length);

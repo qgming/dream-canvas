@@ -184,7 +184,7 @@ export function ModelDialog({ entry, model, onClose, onSaved }: { entry: Channel
         })().catch((failure: unknown) => notify.error(failure instanceof Error ? failure.message : String(failure)));
     };
 
-    return <><Dialog open={!suspended} title={t(model ? "workspace.editModel" : "workspace.addModel")} description={<>{entry.channel.name}<span role="status" className="ml-2 text-xs">{busy ? t("workspace.saving") : t(dirty ? "workspace.unsaved" : "workspace.allSaved")}</span></>} onClose={onClose} busy={busy} dirty={dirty} width={1040} footer={<>
+    return <><Dialog open={!suspended} title={t(model ? "workspace.editModel" : "workspace.addModel")} description={entry.channel.name} onClose={onClose} busy={busy} dirty={dirty} width={1040} footer={<>
             <Button variant="outline" icon={<Eye />} disabled={!selectedReady || busy || scriptBusy} onClick={() => setPreview(true)}>{t("modelScripts.previewRequest")}</Button>
             <Button variant="outline" icon={<FlaskConical />} disabled={!selectedReady || busy || scriptBusy} onClick={() => setTest(true)}>{t("modelScripts.testModel")}</Button>
             <Button variant="default" icon={<Save />} type="submit" form="channel-model" loading={busy} disabled={!batchReady || scriptBusy}>{t("common.save")}{!model && rows.length ? ` (${rows.length})` : ""}</Button>
