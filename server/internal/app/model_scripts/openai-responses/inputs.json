@@ -91,5 +91,19 @@
     "description": "仅填写模型支持的参数；留空时不发送。",
     "descriptionEn": "Set only parameters supported by this model; omitted when empty.",
     "advanced": true
+  },
+  {
+    "key": "reasoning_summary",
+    "label": "思考摘要",
+    "labelEn": "Reasoning summary",
+    "type": "select",
+    "options": [
+      {"label": "自动", "labelEn": "Auto", "value": "auto"},
+      {"label": "简明", "labelEn": "Concise", "value": "concise"},
+      {"label": "详细", "labelEn": "Detailed", "value": "detailed"}
+    ],
+    "description": "仅在模型支持返回思考摘要时设置；留空不发送。",
+    "descriptionEn": "Set only for models that return reasoning summaries; omitted when empty.",
+    "advanced": true
   }
 ]

@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Internal execution bounds remain server defaults; only concurrency is exposed.
+// Each task and assistant turn captures the effective limits when accepted.
 type executionPolicy struct {
 	AssistantSlots int `json:"assistantSlots"`
 	GenerationSlots int `json:"generationSlots"`
@@ -34,23 +34,81 @@ type executionPolicy struct {
 	AudioBytes int64 `json:"audioBytes"`
 	VideoBytes int64 `json:"videoBytes"`
 	JSONBytes int64 `json:"jsonBytes"`
-	ScriptSeconds int `json:"scriptSeconds"`
-	ScriptMemoryMiB int `json:"scriptMemoryMiB"`
+	ScriptRuntime scriptRuntimeSettings `json:"scriptRuntime"`
+	ScriptSeconds int `json:"scriptSeconds,omitempty"`
+	ScriptMemoryMiB int `json:"scriptMemoryMiB,omitempty"`
 	PointsPerYuan string `json:"pointsPerYuan,omitempty"`
 }
 
+const (
+	scriptInitSeconds = "initSeconds"
+	scriptSubmitSeconds = "submitSeconds"
+	scriptResultSeconds = "resultSeconds"
+	scriptStreamSeconds = "streamEventSeconds"
+	scriptMemoryMiB = "memoryMiB"
+	scriptJSONMiB = "jsonLimitMiB"
+	modelHeaderSeconds = "firstResponseSeconds"
+	modelIdleSeconds = "idleSeconds"
+)
+
+type scriptRuntimeSettings map[string]int
+type scriptRuntimeRange struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+	Default int `json:"default"`
+}
+
+var scriptRuntimeRanges = map[string]scriptRuntimeRange{
+	scriptInitSeconds: {1, 60, 25},
+	scriptSubmitSeconds: {1, 60, 15},
+	scriptResultSeconds: {1, 60, 20},
+	scriptStreamSeconds: {1, 60, 10},
+	scriptMemoryMiB: {32, 256, 128},
+	scriptJSONMiB: {1, 32, 16},
+	modelHeaderSeconds: {5, 600, 120},
+	modelIdleSeconds: {5, 600, 120},
+}
+
+func defaultScriptRuntime() scriptRuntimeSettings {
+	settings := scriptRuntimeSettings{}
+	for field, limit := range scriptRuntimeRanges { settings[field] = limit.Default }
+	return settings
+}
+
+func (p executionPolicy) scriptLimit(field string, snapshotLimit int) int {
+	if value, ok := p.ScriptRuntime[field]; ok { return value }
+	return snapshotLimit
+}
+
+func (p executionPolicy) scriptJSONBytes() int64 {
+	if mib, ok := p.ScriptRuntime[scriptJSONMiB]; ok { return int64(mib) << 20 }
+	return p.JSONBytes
+}
+
 func suggestedPolicy() executionPolicy {
-	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 1 << 30, JSONBytes: 8 << 20, ScriptSeconds: 5, ScriptMemoryMiB: 64}
+	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 1 << 30, JSONBytes: 8 << 20, ScriptRuntime: defaultScriptRuntime()}
 }
 
 func encode(value any) JSON { data, _ := json.Marshal(value); return data }
 func seconds(value int) time.Duration { return time.Duration(value) * time.Second }
 
+// Disarm a scoped deadline before reusing the same sandbox or response body.
+func armDeadline(limit time.Duration, expire func()) func() {
+	done := make(chan struct{})
+	timer := time.AfterFunc(limit, func() { expire(); close(done) })
+	return func() { if !timer.Stop() { <-done } }
+}
+
 func (a *App) executionPolicy() (executionPolicy, error) {
 	var record RuntimeSettings
-	var policy executionPolicy
-	if err := a.db.First(&record, 1).Error; errors.Is(err, gorm.ErrRecordNotFound) { return suggestedPolicy(), nil } else if err != nil { return policy, err }
-	if json.Unmarshal(record.Policy, &policy) != nil { return policy, problem(503, "invalid_execution_policy", "运行参数无法读取，已停止接收新任务") }
+	if err := a.db.First(&record, 1).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return executionPolicy{}, err }
+	return record.executionPolicy()
+}
+
+func (record RuntimeSettings) executionPolicy() (executionPolicy, error) {
+	policy := suggestedPolicy()
+	if record.ID != 0 && json.Unmarshal(record.Policy, &policy) != nil { return policy, problem(503, "invalid_execution_policy", "站点运行配置无法读取") }
+	if policy.ScriptRuntime == nil { policy.ScriptRuntime = defaultScriptRuntime() }
 	return policy, nil
 }
 

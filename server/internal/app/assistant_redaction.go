@@ -10,8 +10,20 @@ import (
 var assistantCredentialPattern = regexp.MustCompile(`(?i)\b(?:sk-[a-z0-9_-]+|dc_[a-f0-9]{64}|bearer\s+[a-z0-9._~+/=-]+)`)
 var assistantURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 var assistantSecretAssignment = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|access[_-]?key[_-]?secret|secret[_-]?key|authorization|password|credential|token)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)`)
+var assistantLabelURL = regexp.MustCompile(`(?i)(?:https?://|file://|blob:|data:)[^\s<>"'\\]+`)
 
-// Only model-facing copies are redacted. User documents and private history retain their content.
+func redactAssistantLabel(value string, redact func(string) string) string {
+	if strings.TrimSpace(value) == "" { return "" }
+	return redact(assistantLabelURL.ReplaceAllString(value, "[REDACTED URL]"))
+}
+
+func compactAssistantLabel(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if chars := []rune(value); len(chars) > limit { return strings.TrimSpace(string(chars[:limit-1])) + "…" }
+	return value
+}
+
+// Redact copies sent to models or shown in the timeline without changing private history.
 func (a *App) assistantRedactor(snapshot executionSnapshot) (func(any) any, error) {
 	channels := []Channel{}; storages := []ObjectStorage{}
 	if err := a.db.Select("secret").Find(&channels).Error; err != nil { return nil, err }

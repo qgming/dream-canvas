@@ -177,6 +177,7 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	authed.GET("/assistant/threads", a.listAssistantThreads)
 	authed.POST("/assistant/threads", a.createAssistantThread)
 	authed.GET("/assistant/threads/:id", a.getAssistantThread)
+	authed.PATCH("/assistant/threads/:id", a.renameAssistantThread)
 	authed.DELETE("/assistant/threads/:id", a.deleteAssistantThread)
 	authed.POST("/assistant/threads/:id/turns", a.startAssistantTurn)
 	authed.POST("/assistant/turns/:id/cancel", a.cancelAssistantTurn)

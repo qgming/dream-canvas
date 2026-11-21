@@ -57,16 +57,30 @@ export type AgentUserDetail = { kind: string; status: string; rows?: Array<{ lab
 
 export type AgentLogContext = { endpoint: string; connected: boolean; enabled: boolean; activity: string; waiting: boolean; sending: boolean; messages: number; pendingTool?: string };
 
+export function agentReasoning(item: Pick<AgentChatItem, "role" | "detail">) {
+    return item.role === "assistant" ? stringText(objectField(item.detail, "reasoning")).trim() : "";
+}
+
 export function agentMessageToChatMessage(item: AgentChatItem) {
-    const name = stringText(objectField(item.detail, "name"));
-    if (item.role === "tool" && name) {
-        let result: unknown;
-        try { result = JSON.parse(item.text); } catch { result = null; }
-        const recordedStatus = stringText(objectField(item.detail, "status"));
-        const failed = recordedStatus === "failed" || Boolean(objectField(result, "error") && objectField(result, "code"));
-        return { ...item, title: toolName(name), text: failed ? stringText(objectField(result, "error")) || tr("toolFailed") : tr(recordedStatus === "pending" ? "toolCalled" : "toolCompleted"), detail: { kind: "tool", status: recordedStatus === "pending" ? "recorded" : failed ? "failed" : "completed", output: JSON.stringify(result ?? item.text, null, 2) } };
+    return { ...item, reasoning: agentReasoning(item), meta: item.role === "user" || item.role === "assistant" ? undefined : item.meta, attachments: item.attachments?.map(agentAttachmentToChatAttachment) };
+}
+
+type TimelineEntry = { type: "message"; item: AgentChatItem } | { type: "tools"; items: AgentChatItem[] };
+
+export function groupTimelineMessages(messages: AgentChatItem[]) {
+    const timeline: TimelineEntry[] = [];
+    for (const item of messages) {
+        if (item.role === "assistant" && !item.text.trim() && !agentReasoning(item)) continue;
+        if (item.role === "tool" && objectField(item.detail, "kind") === "tool") {
+            const previous = timeline.at(-1);
+            const first = previous?.type === "tools" ? previous.items[0] : undefined;
+            if (previous?.type === "tools" && first && item.threadId && item.turnId && item.threadId === first.threadId && item.turnId === first.turnId) previous.items.push(item);
+            else timeline.push({ type: "tools", items: [item] });
+        } else {
+            timeline.push({ type: "message", item });
+        }
     }
-    return { ...item, meta: item.role === "user" || item.role === "assistant" ? undefined : item.meta, attachments: item.attachments?.map(agentAttachmentToChatAttachment) };
+    return timeline;
 }
 
 export function agentAttachmentToChatAttachment(item: AgentMessageAttachment): AgentChatAttachment {

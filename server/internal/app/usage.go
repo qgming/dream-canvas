@@ -205,7 +205,7 @@ func (a *App) ListUsage(userID string, projects []string, filters map[string]str
 
 func (a *App) repairAssistantUsage() {
 	var items []AssistantItem
-	if a.db.Where("json_extract(detail, '$.usageRecordPending') = ? AND turn_id IN (?)", true, a.db.Model(&AssistantTurn{}).Select("id").Where("status IN ?", []string{"interrupted", "failed", "cancelled", "succeeded"})).Find(&items).Error != nil { return }
+	if a.db.Where("json_extract(detail, '$.usageRecordPending') = ? AND turn_id IN (?)", true, a.db.Model(&AssistantTurn{}).Select("id").Where("status IN ?", assistantTerminalStates)).Find(&items).Error != nil { return }
 	for _, item := range items {
 		var detail map[string]any; var turn AssistantTurn; var snapshot assistantSnapshot
 		if json.Unmarshal(item.Detail, &detail) != nil || text(detail["usageId"]) == "" { continue }

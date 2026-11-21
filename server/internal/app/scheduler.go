@@ -28,8 +28,8 @@ func (a *App) recoverExecution() error {
 	if err := a.db.Model(&ClientCommand{}).Where("status = ?", "pending").Updates(map[string]any{"status": "interrupted", "error": "服务重启，页面操作未确认；请重新读取明确在线的客户端"}).Error; err != nil { return err }
 	// A process restart never turns an uncertain paid submission into another POST.
 	if err := a.db.Model(&GenerationTask{}).Where("status = ? OR (status = ? AND upstream_id = ?)", "submitting", "running", "").Updates(map[string]any{"status": "confirmation_required", "error": "服务在供应商响应确认前停止，结果与用量待确认；未重新提交"}).Error; err != nil { return err }
-	if err := a.db.Model(&AssistantTurn{}).Where("status NOT IN ?", []string{"queued", "waiting_tasks", "succeeded", "failed", "cancelled", "interrupted"}).Updates(map[string]any{"status": "interrupted", "error": "轮次执行状态无法恢复；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
-	if err := a.db.Model(&TaskAsset{}).Where("task_id IN (?)", a.db.Model(&AssistantTurn{}).Select("'turn:' || id").Where("status IN ?", []string{"interrupted", "cancelled", "failed", "succeeded"})).Update("released", true).Error; err != nil { return err }
+	if err := a.db.Model(&AssistantTurn{}).Where("status NOT IN ?", append([]string{"queued", "waiting_tasks"}, assistantTerminalStates...)).Updates(map[string]any{"status": "interrupted", "error": "轮次执行状态无法恢复；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
+	if err := a.db.Model(&TaskAsset{}).Where("task_id IN (?)", a.db.Model(&AssistantTurn{}).Select("'turn:' || id").Where("status IN ?", assistantTerminalStates)).Update("released", true).Error; err != nil { return err }
 	if err := a.db.Model(&Asset{}).Where("sync_state = ?", "syncing").Update("sync_state", "pending").Error; err != nil { return err }
 	return nil
 }
@@ -146,8 +146,7 @@ func (a *App) executeTask(ctx context.Context, id string) {
 	result, err = a.callModelScript(callCtx, task, snapshot, input, query)
 	if err != nil {
 		a.logFailure(callCtx, "task.call_failed", err, slog.Bool("query", query))
-		var preparation *scriptPreparationError
-		if !query && errors.As(err, &preparation) {
+		if !query && beforeModelSubmission(err) {
 			if cleanupErr := a.discardUnsubmittedUsage("task:"+task.ID, task.UserID); cleanupErr != nil { a.taskProblem(task, "confirmation_required", "供应商请求尚未开始，但待确认用量记录无法清理", false); return }
 			var current GenerationTask
 			_ = a.db.First(&current, "id = ?", task.ID)
@@ -187,7 +186,7 @@ func taskWaitExpired(task GenerationTask, policy executionPolicy) bool {
 func (a *App) queryFailed(task GenerationTask, snapshot executionSnapshot, err error) {
 	a.logFailure(a.ctx, "task.query_failed", err, slog.String("task_id", task.ID), slog.Int("attempt", task.QueryFailures+1))
 	failures := task.QueryFailures + 1
-	if failures >= snapshot.Policy.QueryFailures || taskWaitExpired(task, snapshot.Policy) { a.taskProblem(task, "confirmation_required", "查询失败次数或等待时长已达配置边界，已暂停查询；可继续核对，不会重新生成", false); return }
+	if failures >= snapshot.Policy.QueryFailures || taskWaitExpired(task, snapshot.Policy) { a.taskProblem(task, "confirmation_required", "已达到查询重试或等待上限。最近一次查询："+providerError(err), false); return }
 	next := time.Now().Add(seconds(snapshot.Policy.PollSeconds))
 	a.db.Model(&task).Updates(map[string]any{"query_failures": failures, "next_run_at": next, "error": providerError(err)})
 	a.notify(task.UserID); a.signalWork()

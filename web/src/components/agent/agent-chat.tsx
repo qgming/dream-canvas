@@ -1,12 +1,14 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CountingNumber } from "@animate-ui/react/primitives/texts/counting-number";
 import { useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
+import { Clock } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useAgentStore, type AgentChatItem, type AgentTokenUsage } from "@/stores/use-agent-store";
-import { AgentChatMessage, AgentCommandGroup, AgentToolCard, AgentWorkingMessage } from "./agent-chat-message";
-import { agentMessageToChatMessage, currentPlanMessage, isPlanMessage, latestPlanMessage, workingActivity } from "./agent-event-formatters";
+import { AgentChatMessage, AgentWorkingMessage } from "./agent-chat-message";
+import { AgentToolSteps, isRunningAgentTool } from "./agent-chat-steps";
+import { agentMessageId, agentMessageToChatMessage, agentReasoning, groupTimelineMessages } from "./agent-event-formatters";
 import { AgentScrollToBottom } from "./agent-scroll-to-bottom";
 
 const SCROLL_BOTTOM_THRESHOLD = 48;
@@ -16,28 +18,31 @@ export function AgentChatTimeline({
     visible = true,
     theme,
     sending,
-    waiting,
+    turnStatus,
+    turnId,
+    empty,
 }: {
     visible?: boolean;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     sending: boolean;
-    waiting: boolean;
+    turnStatus?: string;
+    turnId?: string;
+    empty?: ReactNode;
 }) {
     const { t } = useTranslation();
     const reduceMotion = useShouldReduceMotion();
     const messages = useAgentStore((state) => state.messages);
     const activeThreadId = useAgentStore((state) => state.activeThreadId);
-    const bootstrapStatus = useAgentStore((state) => state.bootstrapStatus);
-    const mcpStartupStatuses = useAgentStore((state) => state.mcpStartupStatuses);
     const timeline = useMemo(() => groupTimelineMessages(messages), [messages]);
     const listRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const followMessagesRef = useRef(true);
     const positions = useRef(new Map<string, { top: number; follow: boolean }>());
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-    const streaming = messages.some((message) => message.streamId);
-    const showBootstrap = Boolean(bootstrapStatus && !messages.some((message) => message.role === "user" || message.role === "assistant"));
-    const working = showBootstrap ? bootstrapStatus! : workingActivity(messages.at(-1));
+    const activeItem = turnId ? messages.findLast((item) => item.turnId === turnId) : undefined;
+    const liveOutput = activeItem?.streamId && (activeItem.text.trim() || agentReasoning(activeItem));
+    const showEmpty = Boolean(empty && !timeline.length && !sending && !turnStatus);
+    const showWorking = (sending || turnStatus === "queued" || turnStatus === "running") && !liveOutput && !isRunningAgentTool(activeItem);
     const updateScrollState = useCallback(() => {
         const list = listRef.current;
         if (!list || !list.clientHeight) return;
@@ -64,7 +69,7 @@ export function AgentChatTimeline({
     useEffect(() => {
         const frame = requestAnimationFrame(() => (followMessagesRef.current ? scrollToBottom("auto") : updateScrollState()));
         return () => cancelAnimationFrame(frame);
-    }, [messages, scrollToBottom, updateScrollState, waiting]);
+    }, [messages, scrollToBottom, updateScrollState, turnStatus, sending]);
     useEffect(() => {
         const content = contentRef.current;
         if (!content) return;
@@ -81,28 +86,24 @@ export function AgentChatTimeline({
     }, [scrollToBottom, updateScrollState]);
     return (
         <div className="relative min-h-0 flex-1">
-            <div ref={listRef} className="thin-scrollbar h-full select-text overflow-y-auto" onScroll={updateScrollState}>
-                <div ref={contentRef} className="space-y-4 px-4 pt-4">
-                    {timeline.map((entry) => entry.type === "commands"
-                        ? <AgentCommandGroupRow key={entry.id} items={entry.items} theme={theme} />
-                        : <AgentChatMessageRow key={`${entry.item.threadId}:${entry.item.turnId}:${entry.item.itemId || entry.item.id}`} item={entry.item} theme={theme} />)}
-                    {(sending || waiting || showBootstrap) && !streaming ? <AgentWorkingMessage text={working.text} detail={"detail" in working && typeof working.detail === "string" ? working.detail : undefined} status={showBootstrap ? bootstrapStatus?.status : undefined} mcpStatuses={showBootstrap ? Object.entries(mcpStartupStatuses).map(([name, item]) => ({ name, ...item })) : []} activityKey={working.key} theme={theme} /> : null}
+            <div ref={listRef} className="thin-scrollbar h-full select-text overflow-y-auto overscroll-contain" onScroll={updateScrollState}>
+                <div ref={contentRef} className={showEmpty ? "grid min-h-full place-items-center px-6 py-8" : "space-y-4 p-4"}>
+                    {showEmpty ? empty : <>
+                        {timeline.map((entry) => {
+                            const item = entry.type === "tools" ? entry.items[0] : entry.item;
+                            const key = agentMessageId(item.threadId || "", item.turnId || "", item.itemId || item.id);
+                            return entry.type === "tools"
+                                ? <AgentToolSteps key={key} items={entry.items} />
+                                : <AgentChatMessageRow key={key} item={item} theme={theme} />;
+                        })}
+                        {turnStatus === "waiting_tasks" ? <p role="status" className="flex items-start gap-2 px-2 text-xs leading-5 text-muted-foreground"><Clock aria-hidden className="mt-0.5 size-4 shrink-0" />{t("workspace.assistantWaitingTasks")}</p>
+                            : showWorking ? <AgentWorkingMessage key={`working:${activeThreadId}:${turnId || ""}:${activeItem?.id || ""}`} text={t(sending && !turnId ? "agent.steps.sending" : turnStatus === "queued" ? "workspace.queued" : activeItem?.streamId ? "agent.steps.waitingResponse" : "agent.steps.processing")} /> : null}
+                    </>}
                 </div>
             </div>
             {showScrollToBottom ? (
                 <AgentScrollToBottom theme={theme} title={t("agent.chat.latestMessages")} onClick={() => scrollToBottom()} />
             ) : null}
-        </div>
-    );
-}
-
-export function AgentTaskProgress({ theme, busy }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; busy: boolean }) {
-    const { t } = useTranslation();
-    const plan = useAgentStore((state) => busy ? currentPlanMessage(state.messages) : latestPlanMessage(state.messages));
-    if (!plan) return null;
-    return (
-        <div className="shrink-0 px-4 pt-2">
-            <AgentToolCard key={`${plan.threadId}:${plan.turnId}:${plan.itemId || plan.id}`} title={plan.title || t("agent.events.progress")} text={plan.text} detail={plan.detail} theme={theme} />
         </div>
     );
 }
@@ -114,46 +115,6 @@ const AgentChatMessageRow = memo(function AgentChatMessageRow({ item, theme }: {
         </div>
     );
 });
-
-const AgentCommandGroupRow = memo(function AgentCommandGroupRow({ items, theme }: { items: AgentChatItem[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    return (
-        <div style={items.some((item) => item.streamId) ? undefined : historyMessageStyle}>
-            <AgentCommandGroup items={items} theme={theme} />
-        </div>
-    );
-});
-
-type AgentTimelineEntry = { type: "message"; item: AgentChatItem } | { type: "commands"; id: string; items: AgentChatItem[] };
-
-function groupTimelineMessages(messages: AgentChatItem[]) {
-    const timeline: AgentTimelineEntry[] = [];
-    let commands: AgentChatItem[] = [];
-    let commandScope = "";
-    const flushCommands = () => {
-        if (!commands.length) return;
-        timeline.push({ type: "commands", id: `commands:${commands[0].threadId}:${commands[0].turnId}:${commands[0].itemId || commands[0].id}`, items: commands });
-        commands = [];
-        commandScope = "";
-    };
-    messages.forEach((item) => {
-        if (isPlanMessage(item)) return;
-        if (isCommandMessage(item)) {
-            const scope = item.threadId && item.turnId ? `${item.threadId}\0${item.turnId}` : item.id;
-            if (commands.length && scope !== commandScope) flushCommands();
-            commands.push(item);
-            commandScope = scope;
-            return;
-        }
-        flushCommands();
-        timeline.push({ type: "message", item });
-    });
-    flushCommands();
-    return timeline;
-}
-
-function isCommandMessage(item: AgentChatItem) {
-    return item.role === "tool" && item.detail && typeof item.detail === "object" && (item.detail as { kind?: unknown }).kind === "command";
-}
 
 export function AgentUsageBar({ usage, theme }: { usage: AgentTokenUsage; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();

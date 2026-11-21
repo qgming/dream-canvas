@@ -58,6 +58,7 @@ type Asset struct {
 	SaveState string `json:"saveState"`
 	SyncState string `json:"syncState"`
 	DeleteState string `json:"deleteState"`
+	RetainCloud bool `json:"retainCloud,omitempty" gorm:"not null;default:false"`
 	CleanupTaskID string `json:"cleanupTaskId,omitempty" gorm:"-"`
 	Error string `json:"error,omitempty"`
 	StorageID string `json:"storageId,omitempty"`

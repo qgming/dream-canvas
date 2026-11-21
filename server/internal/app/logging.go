@@ -115,11 +115,27 @@ func diagnosticError(err error) slog.Attr {
 	if name := scriptExceptionPattern.FindString(details); name != "" { fields = append(fields, slog.String("exception", name)); if kind == "execution_error" { kind = "script_exception" } }
 	if location := scriptLocationPattern.FindString(details); location != "" { fields = append(fields, slog.String("location", location)) }
 	if function := wasmFunctionPattern.FindStringSubmatch(details); len(function) == 2 && includes([]string{"QJS_Eval", "QJS_Free", "QJS_FreeValue", "QJS_CreateEvalOption", "QJS_ToCString", "JS_FreeCString", "malloc", "free"}, function[1]) { fields = append(fields, slog.String("wasm_function", function[1])) }
+	var runtime *scriptRuntimeError; var supplier *providerTimeoutError
+	switch {
+	case errors.As(err, &runtime) && isTimeout(err):
+		kind = "script_execution_timeout"; if runtime.stage == "sandbox_init" { kind = "script_init_timeout" }
+	case errors.As(err, &supplier): kind = supplier.stage+"_timeout"
+	case errors.Is(err, errScriptJSONLimit): kind = "json_boundary"
+	case runtime != nil && runtime.stage == "sandbox_init" && kind == "execution_error": kind = "script_init_failed"
+	}
 	return slog.Attr{Key: "failure", Value: slog.GroupValue(append(fields, slog.String("kind", kind))...)}
 }
 
 func (a *App) logFailure(ctx context.Context, event string, err error, fields ...slog.Attr) {
 	if err == nil || !a.logEnabled(slog.LevelError) { return }
+	var runtime *scriptRuntimeError; var preparation *scriptPreparationError; var supplier *providerTimeoutError
+	if errors.As(err, &runtime) { fields = append(fields, slog.String("phase", runtime.phase))
+	} else if errors.As(err, &preparation) && preparation.phase != "" { fields = append(fields, slog.String("phase", preparation.phase)) }
+	if isTimeout(err) {
+		stage := "call_deadline"
+		switch { case runtime != nil: stage = runtime.stage; case errors.As(err, &supplier): stage = supplier.stage; case preparation != nil: stage = "request_preparation" }
+		fields = append(fields, slog.String("timed_out_stage", stage))
+	}
 	a.logEvent(ctx, slog.LevelError, event, append(fields, diagnosticError(err))...)
 }
 

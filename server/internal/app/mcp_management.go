@@ -9,13 +9,17 @@ import (
 func managementTools() []toolDefinition {
 	objectField := func(description string) map[string]any { return map[string]any{"type": "object", "description": description} }
 	tool := func(name, description, scope string, fields map[string]any, required ...string) toolDefinition { return toolDefinition{name, description, scope, toolSchema(fields, required...)} }
+	runtimeFields := map[string]any{}
+	for key, limits := range scriptRuntimeRanges { runtimeFields[key] = map[string]any{"type": "integer", "minimum": limits.Min, "maximum": limits.Max} }
+	runtimeSchema := toolSchema(runtimeFields); runtimeSchema["minProperties"] = 1
 	return []toolDefinition{
 		tool("preference_get", "读取个人创作偏好；需要不限项目的授权", "read", map[string]any{"name": stringField("generation")}, "name"),
 		tool("preference_save", "按版本保存个人画布交互偏好；生成参数使用模型接口插件定义，需要不限项目的授权", "edit", map[string]any{"name": stringField("generation"), "version": numberField("读取版本，新建为 0"), "value": objectField("完整配置对象；仅支持 nodeRegenerateBehavior/autoFocusOnSelect")}, "name", "version", "value"),
-		tool("asset_cleanup", "继续已确认的全局资产删除，不创建新的删除意愿", "edit", map[string]any{"assetId": stringField("待删除资产 ID")}, "assetId"),
+		tool("asset_cleanup", "继续已确认的资产删除；仅在用户明确要求保留云端对象时设置 retainCloud 和 confirmed，此时需不限项目的 delete 授权，只清理本地文件和应用内存储关联", "edit", map[string]any{"assetId": stringField("待删除资产 ID"), "retainCloud": map[string]any{"type": "boolean", "description": "保留云端对象并解除存储关联，不再清理云端；默认 false"}, "confirmed": map[string]any{"type": "boolean", "description": "用户已明确确认保留云端对象"}}, "assetId"),
 		tool("assistant_threads_list", "读取全局助手对话列表，需要单独的助手权限", "assistant", map[string]any{}),
 		tool("assistant_thread_get", "读取全局对话、轮次、消息与待确认项", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
 		tool("assistant_thread_create", "创建全局助手对话，不调用模型", "assistant", map[string]any{"title": stringField("对话标题")}),
+		tool("assistant_thread_rename", "按读取版本重命名全局助手对话", "assistant", map[string]any{"threadId": stringField("对话 ID"), "title": stringField("新标题"), "version": numberField("对话读取版本")}, "threadId", "title", "version"),
 		tool("assistant_thread_delete", "删除已停止且用量已保存的对话，历史用量账本保留", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
 		tool("assistant_turn_start", "主动提交助手轮次，可能产生模型和生成费用；项目明确绑定，页面操作可绑定在线客户端", "assistant", map[string]any{"threadId": stringField("对话 ID"), "version": numberField("读取到的对话版本"), "prompt": stringField("用户消息"), "projectId": stringField("目标项目 ID，无项目留空"), "clientId": stringField("可选明确在线客户端 ID"), "channelId": stringField("文本渠道 ID"), "modelId": stringField("文本模型配置 ID"), "parameters": objectField("本轮声明参数；命名素材传原始资产 ID，省略采用管理员模型默认值及脚本默认值"), "skill": stringField("可选 Skill 名称"), "attachments": map[string]any{"type": "array", "items": stringField("图片资产 ID")}, "references": map[string]any{"type": "array", "items": stringField("已保存节点 ID")}}, "threadId", "version", "prompt", "channelId", "modelId"),
 		tool("assistant_turn_cancel", "停止助手轮次，已提交生成任务由任务入口单独取消", "assistant", map[string]any{"turnId": stringField("轮次 ID")}, "turnId"),
@@ -47,7 +51,8 @@ func managementTools() []toolDefinition {
 		tool("admin_models_save", "原子添加同一渠道的多个模型；任一配置失败时全部保留为未写入", "admin", map[string]any{"channelId": stringField("渠道 ID"), "models": map[string]any{"type": "array", "items": objectField("完整模型配置，结构同 admin_model_save.config")}}, "channelId", "models"),
 		tool("admin_channel_templates", "读取内置渠道模板；模型初始关闭", "admin", map[string]any{}),
 		tool("admin_channel_install", "从模板创建渠道和初始关闭的模型，不调用供应商", "admin", map[string]any{"template": stringField("openai/seedance/minimax"), "name": stringField("可选名称"), "credential": stringField("仅写入的渠道凭据")}, "template", "credential"),
-		tool("admin_site_get", "读取站点开关及助手、生成任务并发设置；站点默认开放", "admin", map[string]any{}),
+		tool("admin_site_get", "读取站点开关、并发及接口插件运行设置，返回当前值、范围、默认值和保存所需的版本", "admin", map[string]any{}),
+		tool("admin_script_runtime_save", "按管理员明确要求修改接口插件运行设置。先读取 admin_site_get 的 version；只提供要改的字段。initSeconds、submitSeconds、resultSeconds、streamEventSeconds 分别限制初始化、校验/请求准备、结果/用量处理和单个 SSE 事件的执行；firstResponseSeconds、idleSeconds 限制供应商响应头和读取空闲；memoryMiB、jsonLimitMiB 以 MiB 为单位。保存应用于新提交的任务和助手轮次。", "admin", map[string]any{"version": numberField("站点设置读取版本"), "scriptRuntime": runtimeSchema}, "version", "scriptRuntime"),
 		tool("admin_logging_get", "读取全站后台日志开关；需要管理员及不限项目的 admin 授权", "admin", map[string]any{}),
 		tool("admin_logs_read", "读取应用日志占用、总条数及技术日志；支持数字页码或 nextCursor，默认最新 100 条，不返回服务器路径", "admin", map[string]any{"cursor": stringField("上次返回的 nextCursor，与 page / pageSize 分开使用"), "page": map[string]any{"type": "integer", "minimum": 1}, "pageSize": map[string]any{"type": "integer", "enum": []int{20, 50, 100}}}),
 		tool("admin_logs_clear", "明确确认后清空应用管理的当前及历史日志文件；不改业务数据或日志开关，服务继续记录新日志", "admin", map[string]any{"confirmed": map[string]any{"type": "boolean"}}, "confirmed"),
@@ -80,7 +85,10 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	if name == "preference_save" { var request struct { Version uint64 `json:"version"`; Value JSON `json:"value"` }; if err = decode(input, &request); err == nil { value, err = a.SavePreference(p.User.ID, read("name"), request.Version, request.Value) }; return value, true, err }
 	if name == "asset_cleanup" {
 		if len(p.Projects) > 0 { return nil, true, problem(403, "asset_scope", "全局删除清理需要不限项目的授权") }
-		err = a.RetryAssetCleanup(p.User.ID, read("assetId")); return map[string]any{"deleteState": "pending"}, true, err
+		var request assetCleanupInput
+		if err = decode(input, &request); err != nil { return nil, true, err }
+		if request.RetainCloud && !p.allows("delete", "") { return nil, true, problem(403, "asset_scope", "保留云端对象并解除存储关联需要不限项目的删除授权") }
+		err = a.RetryAssetCleanup(p.User.ID, read("assetId"), request); return map[string]any{"deleteState": "pending"}, true, err
 	}
 	switch name {
 	case "canvas_nodes_list": value, err = a.ListCanvasNodes()
@@ -95,6 +103,7 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "assistant_threads_list": rows := []AssistantThread{}; err = a.db.Where("user_id = ?", p.User.ID).Order("updated_at DESC").Find(&rows).Error; return rows, true, err
 	case "assistant_thread_get": value, err = a.GetAssistantThread(p.User.ID, read("threadId"))
 	case "assistant_thread_create": value, err = a.CreateAssistantThread(p.User.ID, read("title"))
+	case "assistant_thread_rename": var request assistantRenameInput; if err = decode(input, &request); err == nil { value, err = a.RenameAssistantThread(p.User.ID, read("threadId"), request) }
 	case "assistant_thread_delete": err = a.DeleteAssistantThread(p.User.ID, read("threadId"))
 	case "assistant_turn_start": var request assistantTurnInput; if err = decode(input, &request); err == nil { value, err = a.StartAssistantTurn(p.User, read("threadId"), request) }
 	case "assistant_turn_cancel": err = a.CancelAssistantTurn(p.User.ID, read("turnId"))
@@ -119,6 +128,9 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "admin_channel_templates": value = channelTemplates()
 	case "admin_channel_install": value, err = a.InstallChannelTemplate(read("template"), read("name"), read("credential"))
 	case "admin_site_get": value, err = a.GetSiteSettings()
+	case "admin_script_runtime_save":
+		for key := range input { if key != "version" && key != "scriptRuntime" { return nil, true, problem(400, "invalid_script_runtime", "此工具只接受 version 和 scriptRuntime") } }
+		var request scriptRuntimeUpdate; if err = decode(input, &request); err == nil { value, err = a.SaveScriptRuntime(p.User.ID, request) }
 	case "admin_logging_get": value, err = a.GetLogSettings()
 	case "admin_logs_read":
 		if input["page"] != nil || input["pageSize"] != nil {

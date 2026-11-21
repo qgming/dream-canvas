@@ -56,12 +56,20 @@ func New(options ...Option) (runtime *Runtime, err error) {
 	}
 
 	allocated = runtime
-	config := wazero.NewRuntimeConfig().WithCompilationCache(compilationCache).WithCloseOnContextDone(option.CloseOnContextDone)
+	config := wazero.NewRuntimeConfig().WithCloseOnContextDone(option.CloseOnContextDone)
+	embedded := len(option.QuickJSWasmBytes) == 0
+	qjsBytes := option.QuickJSWasmBytes
+	if embedded {
+		qjsBytes = wasmBytes
+		config = config.WithCompilationCache(compilationCache)
+	}
 	if option.MemoryLimitPages > 0 { config = config.WithMemoryLimitPages(option.MemoryLimitPages) }
 	runtime.wrt = wazero.NewRuntimeWithConfig(option.Context, config)
-	qjsBytes := wasmBytes; if len(option.QuickJSWasmBytes) > 0 { qjsBytes = option.QuickJSWasmBytes }
 	compiled, err := runtime.wrt.CompileModule(option.Context, qjsBytes)
-	if err != nil { return runtime, fmt.Errorf("failed to compile qjs: %w", err) }; defer compiled.Close(option.Context)
+	if err != nil { return runtime, fmt.Errorf("failed to compile qjs: %w", err) }
+	// Closing a compiled module evicts its machine code from the shared cache.
+	// Only the embedded module is retained; every runtime still owns its instance.
+	if !embedded { defer compiled.Close(option.Context) }
 
 	if _, err := wsp1.Instantiate(option.Context, runtime.wrt); err != nil {
 		return nil, fmt.Errorf("failed to instantiate WASI: %w", err)
@@ -131,10 +139,10 @@ func (r *Runtime) Close() {
 	defer func() { if r.wrt != nil { r.wrt.Close(context.Background()); r.wrt = nil } }()
 
 	// Free QJS runtime handle
-	if r.handle != nil {
+	if r.handle != nil && r.module != nil && !r.module.IsClosed() {
 		r.FreeQJSRuntime()
-		r.handle = nil
 	}
+	r.handle = nil
 
 	// Close WASM module
 	if r.module != nil {

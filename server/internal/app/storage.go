@@ -249,7 +249,11 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 		if index >= len(policy.StorageRetrySeconds) { index = len(policy.StorageRetrySeconds)-1 }
 		next := time.Now().Add(seconds(policy.StorageRetrySeconds[index]))
 		message := "云同步失败，本地原件仍保留，后台将按配置继续处理"
-		if operation.Kind == "delete" { message = "文件仍待删除，后台将按配置继续清理" } else if operation.Kind == "migrate" { message = "存储迁移未完成，现有原件仍保留，后台将继续重试复制或清理旧副本"; if code, status := storageTestFailure(err); status > 0 { message += "（存储服务返回 HTTP "+fmt.Sprint(status)+"）" } else if code == "timeout" { message += "（请求超时）" } else if code == "asset_size_changed" { message = "服务器原件大小与资产记录不符，未切换存储；请检查文件完整性后重试" } } else { a.db.Model(&asset).Update("sync_state", "failed") }
+		if operation.Kind == "delete" {
+			message = "文件仍待删除，后台将按配置继续清理"
+			var current Asset
+			if a.db.First(&current, "id = ?", asset.ID).Error == nil && current.Error != "" { message = current.Error }
+		} else if operation.Kind == "migrate" { message = "存储迁移未完成，现有原件仍保留，后台将继续重试复制或清理旧副本"; if code, status := storageTestFailure(err); status > 0 { message += "（存储服务返回 HTTP "+fmt.Sprint(status)+"）" } else if code == "timeout" { message += "（请求超时）" } else if code == "asset_size_changed" { message = "服务器原件大小与资产记录不符，未切换存储；请检查文件完整性后重试" } } else { a.db.Model(&asset).Update("sync_state", "failed") }
 		if operation.Kind != "migrate" { a.db.Model(&asset).Update("error", message) }
 		if a.db.Model(&operation).Updates(map[string]any{"attempts": operation.Attempts+1, "next_run_at": next, "error": message}).Error == nil { a.signalWork() }
 	}

@@ -39,7 +39,7 @@ func assistantInput(snapshot assistantSnapshot) generationInput {
 
 func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, projectID, skill, clientID string, attachments, references []string, overrides map[string]any, channel Channel, model ChannelModel, policy executionPolicy) (AssistantTurn, error) {
 	system := "你是梦想画布网页内的云端文本 Agent，代表当前用户操作应用。你与外部 MCP 使用同一套业务工具、权限和校验。主动调用工具创建和编辑节点、连接节点、管理项目与素材、提交生成并核对任务结果，不要只提供手动操作建议。节点和连线使用 project_get、canvas_apply_ops 或 project_save 在服务端按版本保存，无需在线浏览器。生成任务按 catalog_list 返回的渠道、模型和动态参数通过 generation_create 提交；不要把你自己的文本模型当作所有生成能力。每轮目标项目固定为 "+projectID+"。未指定项目时可创建一个项目，创建后固定该项目；也可处理全局素材、Skill、偏好或独立生成。不得猜测浏览器选区。读取、编辑、生成及删除均可按用户要求在授权范围内直接执行；删除项目使用 project_delete 并提供最新读取版本，全局资产删除使用 asset_delete，不申请额外审批。素材删除返回 pending 时说明仍在排队清理，不能声称已物理清除。不要声称尚未完成的任务已完成。不得请求或输出供应商、存储或账号真实凭据。"
-	if user.Role == "admin" { system += "你可使用管理员配置工具；编写接口插件时先用 skill_get 读取内置 model-api-adapter Skill，再读取 admin_script_contract 和脚本草稿，可通过 admin_script_evidence 分析用户已提交任务的脱敏测试结果。内置脚本只读、不可复制；自建脚本只能保存草稿，真实测试和发布以及运行边界确认由管理员主动操作。" }
+	if user.Role == "admin" { system += "你可使用管理员配置工具；编写接口插件时先用 skill_get 读取内置 model-api-adapter Skill，再读取 admin_script_contract 和脚本草稿，可通过 admin_script_evidence 分析用户已提交任务的脱敏测试结果。内置脚本只读、不可复制；自建脚本只能保存草稿，真实测试和发布由管理员主动操作。管理员明确要求调整接口插件运行设置时，先用 admin_site_get 读取版本及范围，再用 admin_script_runtime_save 保存指定字段；新的设置适用于新轮次和任务。" }
 	system += "创建画布节点前先用 canvas_nodes_list 读取管理员已启用的节点类型、尺寸与默认内容，不猜测插件是否安装。"
 	if user.Role == "admin" { system += "编写节点插件先读 admin_canvas_plugin_contract 和 admin_canvas_plugin_get，使用 admin_canvas_plugin_draft_save 保存完整文件映射；发布、启停和删除由管理员主动操作。" }
 	system += "生成任务尚未结束时使用 tasks_wait 等待明确任务，平台会持久等待并在结束或需人工核对后继续，无需反复调用模型查询。"
@@ -74,10 +74,11 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 			snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "user", "content": content})
 		case "assistant":
 			finishCalls()
+			if detail["incomplete"] == true && strings.TrimSpace(item.Text) == "" { continue }
 			message := map[string]any{"role": "assistant", "content": item.Text}; if detail["reasoning"] != nil { message["reasoning_content"] = detail["reasoning"] }; if detail["responseItems"] != nil { message["responseItems"] = detail["responseItems"] }
 			if calls := array(detail["toolCalls"]); len(calls) > 0 { message["tool_calls"] = calls; for _, call := range calls { pendingCalls[text(object(call)["id"])] = true } }
 			snapshot.Messages = append(snapshot.Messages, message)
-		case "tool": if pendingCalls[item.ID] { snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "tool", "tool_call_id": item.ID, "content": item.Text}); delete(pendingCalls, item.ID) }
+		case "tool": if pendingCalls[item.ID] && detail["status"] != "running" { snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "tool", "tool_call_id": item.ID, "content": item.Text}); delete(pendingCalls, item.ID) }
 		}
 	}
 	finishCalls()
@@ -90,12 +91,18 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 	if err := a.validateReferenceMedia(snapshot.Execution, prepared, user.ID); err != nil { return AssistantTurn{}, err }
 	tools := assistantTools(Principal{User: user, Scopes: []string{"read", "edit", "generate", "delete", "assistant", "account", "admin"}, FixedProject: true, TargetProjectID: projectID, ClientID: clientID})
 	if err := a.validateScriptInput(user.ID, snapshot.Execution, prepared, tools); err != nil { return AssistantTurn{}, err }
+	updates := map[string]any{"version": thread.Version + 1}
+	if thread.Title == "" && thread.Version == 1 {
+		if redact, redactErr := a.assistantRedactor(snapshot.Execution); redactErr == nil {
+			updates["title"] = assistantTitleSummary(redactAssistantLabel(prompt, func(value string) string { return text(redact(value)) }))
+		}
+	}
 	turn := AssistantTurn{ID: identifier(), UserID: user.ID, ThreadID: thread.ID, ProjectID: projectID, ChannelID: channel.ID, ModelID: model.ID, Status: "queued", Snapshot: encode(snapshot)}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		var active int64
 		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
 		if active > 0 { return problem(409, "thread_busy", "此对话仍有未结束轮次") }
-		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Updates(map[string]any{"version": thread.Version+1})
+		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Updates(updates)
 		if result.Error != nil { return result.Error }; if result.RowsAffected != 1 { return problem(409, "version_conflict", "对话已更新，请重新读取后发送") }
 		if err := tx.Create(&turn).Error; err != nil { return err }
 		for _, reference := range prepared.References { var asset Asset; if err := tx.First(&asset, "id = ? AND user_id = ? AND save_state = ? AND delete_state = ?", reference.AssetID, user.ID, "saved", "").Error; err != nil { return problem(409, "attachment_deleted", "附件已删除或尚未保存，未提交轮次") }; if err := tx.FirstOrCreate(&TaskAsset{TaskID: "turn:"+turn.ID, AssetID: asset.ID}).Error; err != nil { return err } }
@@ -108,7 +115,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 func assistantToolAllowed(name string) bool {
 	if name == "task_resolve" || name == "task_delete" { return false }
 	if includes([]string{"admin_canvas_plugin_publish", "admin_canvas_plugin_enabled", "admin_canvas_plugin_delete", "admin_storage_test"}, name) { return false }
-	return !includes([]string{"asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_site_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
+	return !includes([]string{"asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_site_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_rename", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
 }
 
 func assistantTools(principal Principal) []map[string]any {
@@ -125,17 +132,22 @@ func assistantTools(principal Principal) []map[string]any {
 
 func (a *App) finishAssistant(turn AssistantTurn, status, message string) {
 	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if status == "partial" || status == "failed" || status == "interrupted" || status == "succeeded" {
+			var current AssistantTurn
+			if err := tx.Select("cancel_requested").First(&current, "id = ?", turn.ID).Error; err != nil { return err }
+			if current.CancelRequested { status, message = "cancelled", "轮次已停止，已收到内容与工具结果保留" }
+		}
 		if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Updates(map[string]any{"status": status, "error": message}).Error; err != nil { return err }
 		return tx.Model(&TaskAsset{}).Where("task_id = ?", "turn:"+turn.ID).Update("released", true).Error
 	})
 	fields := []slog.Attr{slog.String("turn_id", turn.ID), slog.String("thread_id", turn.ThreadID), slog.String("status", status), slog.Int("step", turn.Step)}
-	if err != nil { a.logFailure(a.ctx, "assistant.status_save_failed", err, fields...) } else { level := slog.LevelInfo; if status == "failed" || status == "interrupted" { level = slog.LevelWarn }; a.logEvent(a.ctx, level, "assistant.finished", fields...) }
+	if err != nil { a.logFailure(a.ctx, "assistant.status_save_failed", err, fields...) } else { level := slog.LevelInfo; if includes([]string{"failed", "interrupted", "partial"}, status) { level = slog.LevelWarn }; a.logEvent(a.ctx, level, "assistant.finished", fields...) }
 	a.notify(turn.UserID); a.signalWork()
 }
 
 func (a *App) executeAssistant(ctx context.Context, id string) {
 	var turn AssistantTurn; var user User
-	if a.db.First(&turn, "id = ?", id).Error != nil { return }
+	if a.db.First(&turn, "id = ?", id).Error != nil || !includes([]string{"queued", "waiting_tasks"}, turn.Status) { return }
 	if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未开始新模型调用"); return }
 	if err := a.siteAccess(user); err != nil { a.finishAssistant(turn, "interrupted", "站点暂停访问，助手已停止后续调用；已提交的生成任务继续处理"); return }
 	ctx = withLogContext(ctx, slog.String("turn_id", turn.ID), slog.String("thread_id", turn.ThreadID), slog.String("user_id", turn.UserID))
@@ -157,12 +169,12 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	a.logEvent(ctx, slog.LevelInfo, "assistant.started", slog.Int("step", turn.Step), slog.String("channel_id", turn.ChannelID), slog.String("model_id", turn.ModelID))
 	ctx, cancel := context.WithTimeout(ctx, seconds(snapshot.Execution.Policy.TextSeconds)); defer cancel()
 	for {
-		if ctx.Err() != nil { a.stopAssistant(turn); return }
+		if ctx.Err() != nil { a.finishAssistantCallFailure(ctx, turn, &scriptPreparationError{phase: "submit", cause: context.Cause(ctx)}); return }
 		if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，停止后续操作"); return }
 		if err := a.siteAccess(user); err != nil { a.finishAssistant(turn, "interrupted", "站点暂停访问，助手已停止后续调用；已提交的生成任务继续处理"); return }
 		messages, parameters, err := a.assistantMaterials(snapshot)
 		if err != nil { a.finishAssistant(turn, "interrupted", "轮次材料无法安全整理，模型未提交"); return }
-		item := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: identifier(), UserID: turn.UserID, Role: "assistant"}
+		item := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: identifier(), UserID: turn.UserID, Role: "assistant", Detail: encode(map[string]any{"streaming": true})}
 		if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &item) }); err != nil { a.finishAssistant(turn, "interrupted", "消息持久保存失败，模型未提交"); return }
 		usageID := fmt.Sprintf("turn:%s:%d", turn.ID, turn.Step)
 		usageStartedAt := time.Now()
@@ -172,19 +184,24 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 		allowedTools := map[string]bool{}; for _, tool := range tools { allowedTools[text(object(tool["function"])["name"])] = true }
 		callCtx := withLogContext(ctx, slog.Int("step", turn.Step))
 		a.logEvent(callCtx, slog.LevelDebug, "assistant.model_started", slog.Int("messages", len(messages)), slog.Int("tools", len(tools)))
+		a.notifyTopic(turn.UserID, "assistant")
 		callStarted := time.Now()
-		result, err := a.callText(callCtx, turn, snapshot.Execution, messages, parameters, snapshot.Media, tools, func(content string) error {
-			if content == item.Text { return nil }; item.Text = content
-			if err := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Update("text", content).Error; err != nil { return err }
+		var streamedReasoning string
+		result, err := a.callText(callCtx, turn, snapshot.Execution, messages, parameters, snapshot.Media, tools, func(content, reasoning string) error {
+			if content == "" { content = item.Text }; if reasoning == "" { reasoning = streamedReasoning }
+			if content == item.Text && reasoning == streamedReasoning { return nil }
+			detail := encode(map[string]any{"streaming": true, "reasoning": reasoning})
+			if err := a.db.Model(&item).Updates(map[string]any{"text": content, "detail": detail}).Error; err != nil { return err }
+			item.Text, streamedReasoning = content, reasoning
 			a.notifyTopic(turn.UserID, "assistant"); return nil
 		})
+		if result.Text == "" { result.Text = item.Text }; if strings.TrimSpace(result.Reasoning) == "" { result.Reasoning = streamedReasoning }
 		fields := []slog.Attr{slog.Int64("duration_ms", time.Since(callStarted).Milliseconds()), slog.Int("text_bytes", len(result.Text)), slog.Int("reasoning_bytes", len(result.Reasoning)), slog.Int("tool_calls", len(result.ToolCalls))}
 		if err != nil { a.logFailure(callCtx, "assistant.model_failed", err, fields...) } else { a.logEvent(callCtx, slog.LevelDebug, "assistant.model_completed", fields...) }
-		if result.Text == "" && item.Text != "" { result.Text = item.Text }
 		usageState := result.UsageState; if usageState == "" { usageState = "actual" }; if err != nil || len(result.Usage) == 0 { usageState = "unknown" }; usageState = normalizedUsageState(usageState)
-		var preparation *scriptPreparationError
-		unsubmitted := err != nil && errors.As(err, &preparation)
-		detail := map[string]any{"usage": result.Usage, "usageState": usageState, "usageId": usageID, "usageStartedAt": usageStartedAt, "usageRecordPending": true, "usageUnsubmitted": unsubmitted, "toolCalls": result.ToolCalls, "reasoning": result.Reasoning, "responseItems": result.ResponseItems}
+		unsubmitted := beforeModelSubmission(err)
+		detail := map[string]any{"usage": result.Usage, "usageState": usageState, "usageId": usageID, "usageStartedAt": usageStartedAt, "usageRecordPending": true, "usageUnsubmitted": unsubmitted, "reasoning": result.Reasoning}
+		if err == nil && result.Status == "completed" { detail["toolCalls"], detail["responseItems"] = result.ToolCalls, result.ResponseItems } else { detail["incomplete"] = true }
 		saveDetail := func() bool {
 			if saveErr := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, item.ID).Updates(map[string]any{"text": result.Text, "detail": encode(detail)}).Error; saveErr != nil { return false }
 			return true
@@ -200,11 +217,12 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 			detail["usageRecordPending"] = false
 			if !saveDetail() { a.finishAssistant(turn, "interrupted", "用量确认记录保存失败，未执行后续工具"); return }
 		}
-		if err != nil { if ctx.Err() != nil { a.stopAssistant(turn) } else { a.finishAssistant(turn, "interrupted", providerError(err)) }; return }
+		a.notifyTopic(turn.UserID, "assistant")
+		if err != nil { a.finishAssistantCallFailure(ctx, turn, err); return }
 		if result.Status != "completed" { a.finishAssistant(turn, "failed", result.Error); return }
 		callIDs := map[string]bool{}
 		for _, call := range result.ToolCalls {
-			id := text(call["id"]); if id == "" || callIDs[id] { a.finishAssistant(turn, "interrupted", "供应商返回空白或重复工具编号，未执行本轮工具"); return }; callIDs[id] = true
+			id, _ := call["id"].(string); if strings.TrimSpace(id) == "" || callIDs[id] { a.finishAssistant(turn, "interrupted", "供应商返回空白或重复工具编号，未执行本轮工具"); return }; callIDs[id] = true
 			var count int64; if err := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, id).Count(&count).Error; err != nil { a.finishAssistant(turn, "interrupted", "工具执行记录无法核实，未执行本轮工具"); return }; if count > 0 { a.finishAssistant(turn, "interrupted", "供应商重复使用已执行工具编号，未重复执行"); return }
 		}
 		if snapshot.Purpose == "skill-draft" {
@@ -218,33 +236,54 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 		if len(result.ToolCalls) > 0 { message["tool_calls"] = result.ToolCalls }
 		snapshot.Messages = append(snapshot.Messages, message)
 		for _, call := range result.ToolCalls {
-			if ctx.Err() != nil { a.finishAssistant(turn, "interrupted", "轮次已停止，未执行后续工具"); return }
+			if ctx.Err() != nil { a.stopAssistant(turn); return }
 			if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未执行后续工具"); return }
 			function := object(call["function"]); arguments := map[string]any{}
+			name := text(function["name"]); allowed := allowedTools[name]
+			detail := map[string]any{"kind": "tool", "status": "running"}
+			if allowed { detail["name"] = name }
+			toolItem := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: text(call["id"]), UserID: turn.UserID, Role: "tool", Detail: encode(detail)}
 			toolStarted := time.Now()
 			var value any; var toolErr error
-			if !allowedTools[text(function["name"])] { toolErr = problem(403, "tool_not_allowed", "本轮未授权此工具，未执行操作")
-			} else if json.Unmarshal([]byte(text(function["arguments"])), &arguments) != nil { toolErr = errors.New("工具参数不是有效 JSON")
-			} else { principal.User = user; value, toolErr = a.CallBusiness(ctx, principal, text(function["name"]), arguments) }
-			toolFields := []slog.Attr{slog.Int("step", turn.Step), slog.String("tool_call_id_hash", digest(text(call["id"]))), slog.Int64("duration_ms", time.Since(toolStarted).Milliseconds()), slog.Bool("allowed", allowedTools[text(function["name"])])}
-			if allowedTools[text(function["name"])] { toolFields = append(toolFields, slog.String("tool", text(function["name"]))) }
+			if !allowed { toolErr = problem(403, "tool_not_allowed", "本轮未授权此工具，未执行操作")
+			} else if json.Unmarshal([]byte(text(function["arguments"])), &arguments) != nil || arguments == nil { toolErr = problem(400, "invalid_tool_arguments", "工具参数不是有效 JSON 对象")
+			} else {
+				if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &toolItem) }); err != nil { a.finishAssistant(turn, "interrupted", "工具调用记录保存失败，未执行操作"); return }
+				a.notifyTopic(turn.UserID, "assistant")
+				principal.User = user
+				value, toolErr = a.CallBusiness(ctx, principal, name, arguments)
+			}
+			toolFields := []slog.Attr{slog.Int("step", turn.Step), slog.String("tool_call_id_hash", digest(toolItem.ID)), slog.Int64("duration_ms", time.Since(toolStarted).Milliseconds()), slog.Bool("allowed", allowed)}
+			if allowed { toolFields = append(toolFields, slog.String("tool", name)) }
 			if toolErr != nil { a.logFailure(ctx, "assistant.tool_failed", toolErr, toolFields...) } else { a.logEvent(ctx, slog.LevelDebug, "assistant.tool_completed", toolFields...) }
 			if toolErr != nil { value = map[string]any{"error": "工具执行失败，请核对权限、版本与参数"}; var p *Problem; if errors.As(toolErr, &p) { value = map[string]any{"code": p.Code, "error": p.Message} } }
-			created, newProject := value.(Project); newProject = newProject && toolErr == nil && function["name"] == "project_create" && turn.ProjectID == ""
+			created, newProject := value.(Project); newProject = newProject && toolErr == nil && name == "project_create" && turn.ProjectID == ""
 			if newProject { turn.ProjectID, principal.TargetProjectID = created.ID, created.ID }
-			state := ""; if data, err := json.Marshal(value); err == nil { var result map[string]any; if json.Unmarshal(data, &result) == nil { state = text(result["status"]) } }
-			status := "completed"; if toolErr != nil { status = "failed" } else if includes([]string{"pending", "queued", "running", "waiting_assets"}, state) { status = "pending" }
+			body := encode(value)
+			var response struct { Status string `json:"status"`; Queued bool `json:"queued"`; CleanupPending bool `json:"cleanupPending"` }
+			_ = json.Unmarshal(body, &response)
+			status := "completed"
+			if errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded) {
+				status, body = "interrupted", encode(map[string]any{"error": "工具执行中断，实际结果待核对；不要盲目重复操作"})
+			} else if toolErr != nil { status = "failed"
+			} else if response.Status == "confirmation_required" { status = "confirmation_required"
+			} else if response.Queued || response.CleanupPending || includes([]string{"pending", "queued", "submitting", "running", "waiting_assets", "saving"}, response.Status) { status = "pending" }
 			if deletion, ok := value.(assetDeleteResult); ok && deletion.DeleteState == "pending" { status = "pending" }
 			if wait, ok := value.(taskWaitResult); ok && !wait.Ready { status = "pending" }
-			toolItem := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: text(call["id"]), UserID: turn.UserID, Role: "tool", Text: string(encode(value)), Detail: encode(map[string]any{"name": function["name"], "kind": "tool", "status": status})}
-			if err := a.db.Transaction(func(tx *gorm.DB) error { if newProject { if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("project_id", turn.ProjectID).Error; err != nil { return err } }; return appendAssistantItem(tx, &toolItem) }); err != nil { a.finishAssistant(turn, "interrupted", "工具结果保存失败，未重复执行"); return }
+			detail["status"] = status
+			toolItem.Text, toolItem.Detail = string(body), encode(detail)
+			if err := a.db.Transaction(func(tx *gorm.DB) error {
+				if newProject { if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("project_id", turn.ProjectID).Error; err != nil { return err } }
+				if toolItem.Sequence == 0 { return appendAssistantItem(tx, &toolItem) }
+				return tx.Model(&toolItem).Updates(map[string]any{"text": toolItem.Text, "detail": toolItem.Detail}).Error
+			}); err != nil { a.finishAssistant(turn, "interrupted", "工具结果保存失败，未重复执行"); return }
+			a.notifyTopic(turn.UserID, "assistant")
 			snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "tool", "tool_call_id": call["id"], "content": toolItem.Text})
 			if newProject { snapshot.Messages = append(snapshot.Messages, map[string]any{"role": "system", "content": "本轮新建项目已保存，目标项目现在固定为 "+turn.ProjectID+"，不能改用其他项目。"}) }
 			if wait, ok := value.(taskWaitResult); ok && !wait.Ready { for _, id := range wait.TaskIDs { if !includes(snapshot.WaitingTaskIDs, id) { snapshot.WaitingTaskIDs = append(snapshot.WaitingTaskIDs, id) } } }
 		}
 		turn.Step++
 		nextStatus := "running"; if len(snapshot.WaitingTaskIDs) > 0 { nextStatus = "waiting_tasks" }
-		if ctx.Err() != nil { a.stopAssistant(turn); return }
 		update := a.db.Model(&AssistantTurn{}).Where("id = ? AND status = ? AND cancel_requested = ?", turn.ID, "running", false).Updates(map[string]any{"snapshot": encode(snapshot), "step": turn.Step, "status": nextStatus})
 		if update.Error != nil { a.finishAssistant(turn, "interrupted", "轮次状态保存失败，未重复执行"); return }; if update.RowsAffected != 1 { a.stopAssistant(turn); return }
 		a.notify(turn.UserID)
@@ -253,10 +292,26 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 	}
 }
 
+func (a *App) finishAssistantCallFailure(ctx context.Context, turn AssistantTurn, err error) {
+	if errors.Is(ctx.Err(), context.Canceled) { a.stopAssistant(turn); return }
+	message := providerError(err)
+	if isTimeout(err) && turn.Step > 0 {
+		var statuses []string
+		records := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND user_id = ? AND role = ?", turn.ThreadID, turn.ID, turn.UserID, "tool")
+		if readErr := records.Pluck("COALESCE(json_extract(detail, '$.status'), '')", &statuses).Error; readErr == nil && includes(statuses, "completed") {
+			known := true
+			for _, status := range statuses { if !includes([]string{"completed", "failed", "pending", "confirmation_required"}, status) { known = false; break } }
+			if known { a.finishAssistant(turn, "partial", "后续回复未完成。已保存的工具结果和已收到的回复仍可查看。"+message); return }
+		}
+	}
+	if turn.Step == 0 && beforeModelSubmission(err) { a.finishAssistant(turn, "failed", message); return }
+	a.finishAssistant(turn, "interrupted", message)
+}
+
 func (a *App) stopAssistant(turn AssistantTurn) {
 	var current AssistantTurn
 	if a.db.First(&current, "id = ?", turn.ID).Error == nil && current.CancelRequested { a.finishAssistant(turn, "cancelled", "轮次已停止，已收到内容与用量保留；已提交生成任务可在任务列表单独取消"); return }
-	a.finishAssistant(turn, "interrupted", "轮次已中断或超过配置时限；已保存内容保留，未重提模型")
+	a.finishAssistant(turn, "interrupted", "轮次执行已中断；已保存内容保留，未重提模型")
 }
 
 func appendAssistantItem(tx *gorm.DB, item *AssistantItem) error {

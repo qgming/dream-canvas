@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import i18n from "@/i18n";
+import type { AssistantThread } from "@/services/api/assistant";
 
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -12,7 +13,6 @@ export type AgentSkillReference = { name: string; path: string; displayName?: st
 export type AgentChatItem = { id: string; itemId?: string; clientMessageId?: string; threadId?: string; turnId?: string; role: AgentChatRole; title?: string; text: string; meta?: string; detail?: unknown; attachments?: AgentMessageAttachment[]; canvasReferences?: AgentCanvasReference[]; skill?: AgentSkillReference; streamId?: string; activityItems?: Record<string, string> };
 export type AgentEventLog = { id: string; time: string; title: string; text: string; raw?: unknown };
 export type AgentCanvasContext = { clientId: string; snapshot: CanvasAgentSnapshot; applyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot; undoOps: () => CanvasAgentSnapshot | null; canUndo: boolean };
-export type AgentThreadSummary = { id: string; preview: string; name?: string | null; cwd?: string; status?: string; source?: unknown; createdAt?: number; updatedAt?: number };
 export type AgentTokenUsage = { input: number; cached: number; output: number };
 export type AgentBootstrapStatus = { key: string; text: string; detail: string; status: "running" | "ready" | "error" };
 export type AgentConversationState = {
@@ -36,13 +36,13 @@ type AgentStore = {
     enabled: boolean;
     prompt: string;
     attachments: AgentAttachment[];
-    canvasReferences: CanvasResourceReference[];
+    canvasReferences: (CanvasResourceReference & { projectId: string })[];
     sending: boolean;
     waiting: boolean;
     messages: AgentChatItem[];
     tokenUsage: AgentTokenUsage | null;
     eventLogs: AgentEventLog[];
-    threads: AgentThreadSummary[];
+    threads: AssistantThread[];
     activeThreadId: string;
     activeTurnId: string;
     workspacePath: string;
@@ -100,7 +100,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     connectError: "",
     setAgentState: (patch) => set(patch),
     openPanel: () => set({ panelOpen: true, panelMounted: true, panelClosing: false }),
-    closePanel: () => set({ panelOpen: false, panelClosing: false }),
+    closePanel: () => set({ panelOpen: false, panelClosing: false, activeTab: "chat" }),
     togglePanel: () => (get().panelOpen ? get().closePanel() : get().openPanel()),
     setCanvasContext: (canvasContext) => set({ canvasContext }),
     connectAgent: () => set({ connected: true, enabled: true, connectError: "" }),

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Bot, CircleAlert, LoaderCircle, MessageSquare } from "lucide-react";
+import { Bot, CircleAlert, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { motion } from "motion/react";
-import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
+import { Drawer } from "@animate-ui/react/primitives/base-ui/drawer";
 import { AssistantPanelContent } from "./assistant-panel-content";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,8 +10,6 @@ import { useAuthStore } from "@/stores/use-auth-store";
 
 export function AgentPanel() {
     const { t } = useTranslation();
-    const tokens = useMotionTokens();
-    const reducedMotion = useShouldReduceMotion();
     const owner = useAuthStore((state) => state.user?.id);
     const width = useAgentStore((state) => state.width);
     const open = useAgentStore((state) => state.panelOpen);
@@ -20,20 +17,10 @@ export function AgentPanel() {
     const waiting = useAgentStore((state) => state.waiting);
     const error = useAgentStore((state) => state.connectError);
     const launcher = useRef<HTMLButtonElement>(null);
-    const panel = useRef<HTMLElement>(null);
+    const panel = useRef<HTMLDivElement>(null);
     const cleanup = useRef<(() => void) | null>(null);
-    const previousOpen = useRef(false);
     const [resizing, setResizing] = useState(false);
     useEffect(() => () => cleanup.current?.(), []);
-    useEffect(() => {
-        const wasOpen = previousOpen.current;
-        previousOpen.current = open;
-        const frame = requestAnimationFrame(() => {
-            if (open) panel.current?.focus({ preventScroll: true });
-            else if (wasOpen) launcher.current?.focus({ preventScroll: true });
-        });
-        return () => cancelAnimationFrame(frame);
-    }, [open]);
     const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
         event.preventDefault();
         event.currentTarget.focus();
@@ -60,24 +47,32 @@ export function AgentPanel() {
         window.addEventListener("pointercancel", stop);
     };
     const status = error ? t("ui.assistantError") : sending || waiting ? t("ui.assistantRunning") : t("ui.assistantReady");
-    return <>
-        <motion.aside ref={panel} id="global-assistant" role="dialog" aria-modal="false" aria-label={t("ui.assistant")} aria-hidden={!open} inert={!open} tabIndex={-1} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore initial={false} animate={{ opacity: open ? 1 : 0, y: open || reducedMotion ? 0 : tokens.shift.tabs }} transition={resizing || reducedMotion ? tokens.transition.instant : open ? tokens.transition.sheet : tokens.transition.dismiss} className={cn("fixed bottom-20 right-4 z-[100] flex h-[calc(100dvh-96px)] max-h-[800px] max-w-[calc(100vw-32px)] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl outline-none", !open && "pointer-events-none", resizing && "select-none")} style={{ width }} onKeyDown={(event) => {
-            if (event.key !== "Escape" || event.defaultPrevented || !panel.current?.contains(event.target as Node)) return;
-            if (document.querySelector('[data-state="open"][data-ui-overlay]:not(#global-assistant)')) return;
-            event.stopPropagation();
-            useAgentStore.getState().closePanel();
-        }}>
-            <button type="button" className="absolute inset-y-4 -left-2 z-10 w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring" onPointerDown={startResize} aria-label={t("agent.panel.resize")} onKeyDown={(event) => {
-                if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-                event.preventDefault();
-                const next = Math.min(760, Math.max(360, width + (event.key === "ArrowLeft" ? 16 : -16)));
-                useAgentStore.setState({ width: next });
-                localStorage.setItem("canvas-agent-panel-width", String(next));
-            }} />
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">{owner ? <AssistantPanelContent key={owner} /> : null}</div>
-        </motion.aside>
-        <Button ref={launcher} variant="default" size="icon" className="fixed bottom-4 right-4 z-[110] size-12 rounded-2xl shadow-lg" aria-label={`${t(open ? "ui.collapseAssistant" : "ui.openAssistant")} · ${status}`} title={status} aria-expanded={open} aria-controls="global-assistant" data-canvas-shortcuts-ignore onClick={() => useAgentStore.getState().togglePanel()}>
-            {sending || waiting ? <LoaderCircle className="size-5 animate-spin" /> : error ? <CircleAlert className="size-5" /> : open ? <MessageSquare className="size-5" /> : <Bot className="size-5" />}
-        </Button>
-    </>;
+    return <Drawer.Root open={open} swipeDirection="right" modal={false} disablePointerDismissal onOpenChange={(next, details) => {
+        if (details.reason === "escape-key" && (details.event.defaultPrevented || !(details.event.target instanceof Node && panel.current?.contains(details.event.target)))) {
+            details.cancel();
+            details.allowPropagation();
+            return;
+        }
+        if (next) useAgentStore.getState().openPanel();
+        else useAgentStore.getState().closePanel();
+    }}>
+        <Drawer.Trigger ref={launcher} render={<Button variant="default" size="icon" className={cn("fixed bottom-4 right-4 z-[110] size-12 rounded-2xl shadow-lg", open && "hidden")} aria-label={`${t("ui.openAssistant")} · ${status}`} title={status} data-canvas-shortcuts-ignore
+            icon={sending || waiting ? <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" /> : error ? <CircleAlert className="size-5" /> : <Bot className="size-5" />} />} />
+        <Drawer.Portal keepMounted>
+            <Drawer.Viewport className="pointer-events-none fixed inset-0 z-[100] flex justify-end overflow-clip [&[hidden]]:hidden">
+                <Drawer.Popup ref={panel} initialFocus={panel} finalFocus={launcher} inert={!open} data-ui-overlay data-canvas-no-zoom data-canvas-shortcuts-ignore className={cn("pointer-events-auto relative flex h-dvh max-w-full flex-col border-l border-border bg-popover text-popover-foreground shadow-xl outline-none sm:rounded-l-2xl [&[hidden]]:hidden", resizing && "select-none")} style={{ width }}>
+                    <Drawer.Title className="sr-only">{t("ui.assistant")}</Drawer.Title>
+                    <Drawer.Description className="sr-only">{t("agent.drawer.description")}</Drawer.Description>
+                    <button type="button" data-base-ui-swipe-ignore className="absolute inset-y-4 left-0 z-10 hidden w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring sm:block" onPointerDown={startResize} aria-label={t("agent.panel.resize")} onKeyDown={(event) => {
+                        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+                        event.preventDefault();
+                        const next = Math.min(760, Math.max(360, width + (event.key === "ArrowLeft" ? 16 : -16)));
+                        useAgentStore.setState({ width: next });
+                        localStorage.setItem("canvas-agent-panel-width", String(next));
+                    }} />
+                    <Drawer.Content className="flex min-h-0 flex-1 flex-col overflow-hidden sm:rounded-l-2xl">{owner ? <AssistantPanelContent key={owner} /> : null}</Drawer.Content>
+                </Drawer.Popup>
+            </Drawer.Viewport>
+        </Drawer.Portal>
+    </Drawer.Root>;
 }

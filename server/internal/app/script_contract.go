@@ -8,7 +8,7 @@ func modelScriptContract(locale ...string) gin.H {
     return gin.H{
         "version": 7,
         "package": choose("script.json: schemaVersion/name/capability/description/entry/inputs/phases/features/auth。默认 entry=adapter.js、inputs=inputs.json。阶段为具名 async 函数导出，支持包内 JS/JSON 相对 import。", "script.json declares schemaVersion/name/capability/description/entry/inputs/phases/features/auth. Defaults: adapter.js and inputs.json. Export named async phase functions; relative JS/JSON imports stay inside the package."),
-        "runtime": choose("脚本在服务端隔离执行，返回请求或结果对象；不使用浏览器 File/Blob/FormData、fetch、npm、文件系统或进程。密钥只由服务端注入，不提供 apiKey 变量。", "Scripts run in the server sandbox and return request or result objects. No browser File/Blob/FormData, fetch, npm, filesystem or processes. The server injects credentials; apiKey is never exposed."),
+        "runtime": choose("脚本在服务端隔离执行，返回请求或结果对象；不使用浏览器 File/Blob/FormData、fetch、npm、文件系统或进程。密钥由服务端注入，不提供 apiKey。脚本初始化、请求准备、结果和单个流式事件各有时限，与供应商等待时限独立。运行边界由站点管理控制，通过 admin_site_get 读取，不在脚本包中声明。", "Scripts run in the server sandbox and return request or result objects. No browser File/Blob/FormData, fetch, npm, filesystem or processes. The server injects credentials; apiKey is not exposed. Sandbox initialization, request preparation, results, and each stream event have separate limits from provider waits. Runtime limits come from Site management (admin_site_get), not the script package."),
         "input": gin.H{
             "model": choose("供应商模型 ID，不包含渠道前缀", "Provider model ID without channel prefix"),
             "prompt": choose("提示词或 TTS 待朗读文本，不自动把系统提示词混入朗读正文", "Prompt or TTS input text; system instructions are not appended to spoken content"),
@@ -23,7 +23,7 @@ func modelScriptContract(locale ...string) gin.H {
             "validate": "optional: standard input -> {valid:true} or {valid:false,error}",
             "submit": "required: standard input -> request descriptor",
             "query": "optional asynchronous jobs: standard input with upstreamId -> ONE query request; platform schedules polling",
-            "stream": "optional SSE: {event,state,input} -> cumulative state {text,reasoning,toolCalls,usage,responseItems,progress,complete,status}; progress is an optional provider-reported number in [0,100]; complete=true only after a real protocol terminal event",
+            "stream": "optional SSE: {event,state,input} -> cumulative state {text,reasoning,toolCalls,usage,responseItems,progress,complete,status}; reasoning is only provider-returned readable text or summaries (not encrypted items); progress is an optional provider-reported number in [0,100]; complete=true only after a real protocol terminal event",
             "result": "required: {response,phase,input} -> normalized result or {request:{method:'GET',path:...}} for a read-only follow-up",
             "usage": "optional: {response,input} -> usage measurements; omit unknown values",
             "cancel": "optional: standard input with upstreamId -> cancel request; do not delete the evidence needed to query results",

@@ -27,7 +27,7 @@ import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
-import { retryAssetCleanup } from "@/services/api/assets";
+import { retryAssetCleanup, type ServerAsset } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 import { AssetStorageDialog } from "./components/asset-storage-dialog";
 
@@ -69,12 +69,15 @@ export default function AssetsPage() {
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
+    const [localCleanupAsset, setLocalCleanupAsset] = useState<ServerAsset | null>(null);
+    const [cleanupId, setCleanupId] = useState("");
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
     const [mediaDraft, setMediaDraft] = useState<UploadedFile | null>(null);
     const [saving, setSaving] = useState(false);
     const savingRef = useRef(false);
     const deleteRef = useRef(false);
+    const cleanupRef = useRef(false);
     const editorRevision = useRef(0);
     const title = useWatch({ name: "title", control: form.control }) || "";
     const content = useWatch({ name: "content", control: form.control }) || "";
@@ -211,6 +214,21 @@ export default function AssetsPage() {
         finally { deleteRef.current = false; }
     };
 
+    const retryCleanup = async (asset: ServerAsset, retainCloud = false) => {
+        if (cleanupRef.current) return;
+        cleanupRef.current = true;
+        setCleanupId(asset.id);
+        const assertSession = captureSession();
+        try {
+            await retryAssetCleanup(asset.id, { retainCloud, confirmed: retainCloud });
+            assertSession();
+            await useAssetStore.getState().loadAssets();
+            assertSession();
+            notify.info(t(retainCloud ? "assets.localCleanupQueued" : "assets.cleanupRetried"));
+            if (retainCloud) setLocalCleanupAsset(null);
+        } finally { cleanupRef.current = false; setCleanupId(""); }
+    };
+
     const assetContent = <div className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />)}
@@ -223,7 +241,15 @@ export default function AssetsPage() {
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:py-8">
                 <div className="mx-auto max-w-7xl">
                     {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
-                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={asset.error || appI18n.t("workspace.originalCleanupPending")} action={<div className="flex shrink-0 flex-col gap-2 sm:flex-row">{asset.cleanupTaskId ? <Button asChild variant="outline"><Link to={`/settings/tasks?taskId=${encodeURIComponent(asset.cleanupTaskId)}`}>{t("workspace.viewBlockingTask")}</Link></Button> : null}<Button variant="outline" onClick={() => { void retryAssetCleanup(asset.id).then(() => useAssetStore.getState().loadAssets()).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.cleanupFailed"))); }}>{appI18n.t("workspace.retryCleanup")}</Button></div>} />)}
+                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={<>
+                        {asset.error || t("workspace.originalCleanupPending")}
+                        {asset.retainCloud ? <p className="mt-1">{t("assets.cloudRetained")}</p> : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {asset.cleanupTaskId ? <Button asChild variant="outline"><Link to={`/settings/tasks?taskId=${encodeURIComponent(asset.cleanupTaskId)}`}>{t("workspace.viewBlockingTask")}</Link></Button> : null}
+                            <Button variant="outline" disabled={Boolean(cleanupId)} loading={cleanupId === asset.id} onClick={() => { void retryCleanup(asset).catch((error: unknown) => notify.error(error instanceof Error ? error.message : t("workspace.cleanupFailed"))); }}>{t("workspace.retryCleanup")}</Button>
+                            {!asset.retainCloud && (asset.storageId || asset.migration) ? <Button variant="outline" className="text-destructive hover:text-destructive" disabled={Boolean(cleanupId)} onClick={() => setLocalCleanupAsset(asset)}>{t("assets.localCleanup")}</Button> : null}
+                        </div>
+                    </>} />)}
                     <PageHeader className="mb-4" title={t("assets.title")} actions={<>
                         <SearchInput className="w-full sm:w-72" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
                         <Button variant="default" icon={<Plus />} disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
@@ -321,6 +347,7 @@ export default function AssetsPage() {
             <AssetDrawer asset={previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || null : null} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
             <AlertDialog title={t("assets.deleteTitle")} description={t("workspace.deleteAssetDescription", { title: deletingAsset?.title })} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive />
+            <AlertDialog title={t("assets.localCleanupTitle")} description={t("assets.localCleanupDescription", { title: localCleanupAsset?.title })} open={Boolean(localCleanupAsset)} onClose={() => setLocalCleanupAsset(null)} onConfirm={() => localCleanupAsset ? retryCleanup(localCleanupAsset, true) : undefined} confirmText={t("assets.localCleanupConfirm")} destructive />
         </div>
     );
 }

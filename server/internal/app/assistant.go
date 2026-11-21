@@ -25,8 +25,45 @@ func (a *App) createAssistantThread(c *gin.Context) {
 }
 
 func (a *App) CreateAssistantThread(userID, title string) (AssistantThread, error) {
-	if strings.TrimSpace(title) == "" { title = "新对话" }; thread := AssistantThread{ID: identifier(), UserID: userID, Title: strings.TrimSpace(title), Version: 1}
+	// An empty title is displayed as a localized placeholder until the first message.
+	thread := AssistantThread{ID: identifier(), UserID: userID, Title: strings.TrimSpace(title), Version: 1}
 	err := a.db.Create(&thread).Error; if err == nil { a.notify(userID) }; return thread, err
+}
+
+var assistantTitleLead = regexp.MustCompile(`(?i)^(?:(?:你好|您好|hi|hello)[，,]\s*|(?:请帮我|帮我|麻烦你|请)[，,:： ]*|(?:please|can you|could you|would you)[, ]+)+`)
+
+func assistantTitleSummary(prompt string) string {
+	for _, clause := range strings.FieldsFunc(strings.ReplaceAll(prompt, ". ", "。"), func(r rune) bool { return strings.ContainsRune("\r\n。！？!?；;", r) }) {
+		clause = strings.Trim(clause, " \t#>*`-，,：:")
+		if includes([]string{"你好", "您好", "hi", "hello"}, strings.ToLower(clause)) { continue }
+		if title := compactAssistantLabel(assistantTitleLead.ReplaceAllString(clause, ""), 36); title != "" { return title }
+	}
+	return compactAssistantLabel(prompt, 36)
+}
+
+type assistantRenameInput struct { Title string `json:"title"`; Version uint64 `json:"version"` }
+
+func (a *App) renameAssistantThread(c *gin.Context) {
+	var input assistantRenameInput
+	if !bind(c, &input) { return }
+	thread, err := a.RenameAssistantThread(currentUser(c).ID, c.Param("id"), input)
+	if err != nil { respondError(c, err); return }
+	c.JSON(200, thread)
+}
+
+func (a *App) RenameAssistantThread(userID, id string, input assistantRenameInput) (AssistantThread, error) {
+	var thread AssistantThread
+	if err := validTitle(input.Title); err != nil { return thread, err }
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", id, userID, input.Version).
+			Updates(map[string]any{"title": strings.TrimSpace(input.Title), "version": input.Version + 1})
+		if result.Error != nil { return result.Error }
+		if err := tx.First(&thread, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
+		if result.RowsAffected != 1 { return problem(409, "version_conflict", "对话已更新，请重新打开重命名窗口后再试") }
+		return nil
+	})
+	if err == nil { a.notify(userID) }
+	return thread, err
 }
 
 func (a *App) getAssistantThread(c *gin.Context) {
@@ -35,23 +72,142 @@ func (a *App) getAssistantThread(c *gin.Context) {
 
 func (a *App) GetAssistantThread(userID, id string) (gin.H, error) {
 	var thread AssistantThread
-	if err := a.db.First(&thread, "id = ? AND user_id = ?", id, userID).Error; err != nil { return nil, err }
 	items := []AssistantItem{}
 	turns := []AssistantTurn{}
-	if err := a.db.Where("thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Order("sequence").Find(&items).Error; err != nil { return nil, err }
-	if err := a.db.Where("thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Order("created_at").Find(&turns).Error; err != nil { return nil, err }
+	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&thread, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
+		if err := tx.Where("thread_id = ? AND user_id = ?", id, userID).Order("sequence").Find(&items).Error; err != nil { return err }
+		return tx.Where("thread_id = ? AND user_id = ?", id, userID).Order("created_at").Find(&turns).Error
+	}); err != nil { return nil, err }
 	prices := map[string]modelPricing{}
+	running := map[string]bool{}
 	for _, turn := range turns {
+		running[turn.ID] = turn.Status == "running"
 		var snapshot assistantSnapshot
 		if json.Unmarshal(turn.Snapshot, &snapshot) == nil { prices[turn.ID], _ = parseModelPricing(snapshot.Execution.Model.Pricing) }
 	}
+	var redact func(any) any
+	var redactErr error
+	redactText := func(value string) string {
+		if redact == nil && redactErr == nil { redact, redactErr = a.assistantRedactor(executionSnapshot{}) }
+		if redactErr != nil { return "" }
+		return text(redact(value))
+	}
 	for index := range items {
-		if items[index].Role != "assistant" || len(items[index].Detail) == 0 { continue }
+		item := &items[index]
+		if item.Role != "assistant" && item.Role != "tool" { continue }
 		var detail map[string]any
-		if json.Unmarshal(items[index].Detail, &detail) != nil { return nil, problem(409, "invalid_history", "历史消息无法读取，未覆盖或丢弃历史") }
-		if usage, exists := detail["usage"]; exists { detail["usage"] = publicUsageValues(object(usage), prices[items[index].TurnID]); items[index].Detail = encode(detail) }
+		if len(item.Detail) > 0 && json.Unmarshal(item.Detail, &detail) != nil { return nil, problem(409, "invalid_history", "历史消息无法读取，未覆盖或丢弃历史") }
+		if item.Role == "tool" {
+			item.Detail, item.Text = assistantToolView(detail, item.Text, running[item.TurnID], redactText), ""
+			continue
+		}
+		view := map[string]any{}
+		if detail["streaming"] == true && running[item.TurnID] { view["streaming"] = true }
+		if reasoning, _ := detail["reasoning"].(string); strings.TrimSpace(reasoning) != "" {
+			view["reasoning"] = redactText(reasoning)
+			if redactErr != nil { return nil, redactErr }
+		}
+		if usage, exists := detail["usage"]; exists { view["usage"], view["usageState"] = publicUsageValues(object(usage), prices[item.TurnID]), detail["usageState"] }
+		item.Detail = encode(view)
 	}
 	return gin.H{"thread": thread, "items": items, "turns": turns}, nil
+}
+
+var assistantTaskID = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+var assistantTerminalStates = []string{"succeeded", "failed", "cancelled", "interrupted", "partial"}
+
+var assistantTaskStates = []string{"queued", "waiting_assets", "submitting", "running", "saving", "succeeded", "failed", "cancelled", "interrupted", "confirmation_required"}
+
+type assistantTaskPreview struct { ID string `json:"id"`; Status string `json:"status,omitempty"` }
+
+type assistantResultLabel struct {
+	Title string `json:"title"`
+	Name string `json:"name"`
+	Interface struct { DisplayName string `json:"displayName"` } `json:"interface"`
+}
+
+// The private item remains available for model context; the timeline only needs a status and a small summary.
+func assistantToolView(detail map[string]any, body string, running bool, redact func(string) string) JSON {
+	name, _ := detail["name"].(string)
+	status, _ := detail["status"].(string)
+	if status == "running" && !running { status = "interrupted" }
+	view := map[string]any{"kind": "tool", "name": name, "status": status}
+	if status == "failed" {
+		var result struct { Code string `json:"code"` }
+		_ = json.Unmarshal([]byte(body), &result)
+		switch result.Code {
+		case "tool_not_allowed": delete(view, "name"); view["errorCode"] = result.Code
+		case "invalid_tool_arguments", "invalid_script_runtime", "forbidden", "version_conflict", "target_project_fixed", "target_project_required", "client_offline": view["errorCode"] = result.Code
+		}
+		return encode(view)
+	}
+	if status == "running" || status == "interrupted" { return encode(view) }
+	const previewCount = 4
+	preview := []string{}
+	add := func(row assistantResultLabel) {
+		name := row.Interface.DisplayName
+		if strings.TrimSpace(name) == "" { name = row.Title }; if strings.TrimSpace(name) == "" { name = row.Name }
+		if name = compactAssistantLabel(redactAssistantLabel(name, redact), 80); name != "" { preview = append(preview, name) }
+	}
+	list := func(rows []assistantResultLabel) {
+		if rows == nil { return }
+		view["resultCount"] = len(rows)
+		for _, row := range rows[:min(previewCount, len(rows))] { add(row) }
+	}
+	switch name {
+	case "generation_create", "task_get", "task_cancel", "task_resume":
+		var result struct { ID string `json:"id"`; TaskIDs []string `json:"taskIds"`; Status string `json:"status"` }
+		if json.Unmarshal([]byte(body), &result) == nil {
+			ids := []string{}
+			for _, id := range append(result.TaskIDs, result.ID) { if assistantTaskID.MatchString(id) { ids = append(ids, id) } }
+			if len(ids) > 0 { view["taskIds"] = ids }
+			if includes(assistantTaskStates, result.Status) { view["taskStatus"] = result.Status }
+		}
+	case "tasks_list":
+		var rows []assistantTaskPreview
+		if json.Unmarshal([]byte(body), &rows) == nil && rows != nil {
+			view["resultCount"] = len(rows)
+			tasks := []assistantTaskPreview{}
+			for _, row := range rows[:min(previewCount, len(rows))] {
+				if !assistantTaskID.MatchString(row.ID) { continue }
+				if !includes(assistantTaskStates, row.Status) { row.Status = "" }
+				tasks = append(tasks, row)
+			}
+			if len(tasks) > 0 { view["tasks"] = tasks }
+		}
+	case "tasks_wait":
+		var result struct { TaskIDs []string `json:"taskIds"` }
+		if json.Unmarshal([]byte(body), &result) == nil && result.TaskIDs != nil {
+			view["resultCount"] = len(result.TaskIDs)
+			ids := []string{}
+			for _, id := range result.TaskIDs[:min(previewCount, len(result.TaskIDs))] { if assistantTaskID.MatchString(id) { ids = append(ids, id) } }
+			if len(ids) > 0 { view["taskIds"] = ids }
+		}
+	case "projects_list", "assets_list", "prompts_search", "skills_list", "clients_list", "canvas_nodes_list", "asset_storages", "admin_canvas_plugins_list", "admin_channels_list", "admin_scripts_list":
+		var rows []assistantResultLabel
+		if json.Unmarshal([]byte(body), &rows) == nil { list(rows) }
+	case "catalog_list":
+		var result struct { Channels []assistantResultLabel `json:"channels"` }
+		if json.Unmarshal([]byte(body), &result) == nil { list(result.Channels) }
+	case "project_get", "project_create", "project_save", "project_revert", "canvas_apply_ops":
+		var result struct {
+			assistantResultLabel
+			Document struct { Nodes []struct{} `json:"nodes"`; Connections []struct{} `json:"connections"` } `json:"document"`
+		}
+		if json.Unmarshal([]byte(body), &result) == nil {
+			add(result.assistantResultLabel)
+			if result.Document.Nodes != nil && result.Document.Connections != nil {
+				view["nodeCount"], view["connectionCount"] = len(result.Document.Nodes), len(result.Document.Connections)
+			}
+		}
+	case "asset_get", "asset_text_create", "prompt_get", "prompt_save", "skill_get", "skill_save", "client_get":
+		var result assistantResultLabel
+		if json.Unmarshal([]byte(body), &result) == nil { add(result) }
+	}
+	if len(preview) > 0 { view["resultPreview"] = preview }
+	return encode(view)
 }
 
 func (a *App) deleteAssistantThread(c *gin.Context) {
@@ -122,7 +278,7 @@ func (a *App) CancelAssistantTurn(userID, id string) error {
 	var turn AssistantTurn
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&turn, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
-		if terminalTask(turn.Status) { return nil }
+		if includes(assistantTerminalStates, turn.Status) { return nil }
 		if turn.Status == "running" { return tx.Model(&turn).Update("cancel_requested", true).Error }
 		if err := tx.Model(&turn).Updates(map[string]any{"status": "cancelled", "cancel_requested": true}).Error; err != nil { return err }
 		return tx.Model(&TaskAsset{}).Where("task_id = ?", "turn:"+turn.ID).Update("released", true).Error

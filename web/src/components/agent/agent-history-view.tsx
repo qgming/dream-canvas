@@ -1,136 +1,75 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/controls";
-import { Tooltip } from "@/components/ui/popover";
-import { FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useId } from "react";
+import { Ellipsis, Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import { canvasThemes } from "@/lib/canvas-theme";
-import type { AgentThreadSummary } from "@/stores/use-agent-store";
+import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/display";
+import { EditorForm, Field, useEditorForm } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Menu } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import type { AssistantThread } from "@/services/api/assistant";
 
 export function AgentHistoryView({
-    theme,
     threads,
     activeThreadId,
-    workspacePath,
     loading,
     busy,
-    connected,
-    onRefresh,
-    onNewThread,
+    error,
     onResumeThread,
-    onDeleteThreads,
+    onRenameThread,
+    onDeleteThread,
 }: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    threads: AgentThreadSummary[];
+    threads: AssistantThread[];
     activeThreadId: string;
-    workspacePath: string;
     loading: boolean;
     busy: boolean;
-    connected: boolean;
-    onRefresh: () => void;
-    onNewThread: () => void;
+    error: string;
     onResumeThread: (threadId: string) => void;
-    onDeleteThreads: (threadIds: string[]) => void;
+    onRenameThread: (thread: AssistantThread) => void;
+    onDeleteThread: (thread: AssistantThread) => void;
 }) {
     const { i18n, t } = useTranslation();
-    const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
-    const selectedThreads = threads.filter((thread) => selectedIds.has(thread.id));
-    const allSelected = Boolean(threads.length) && selectedThreads.length === threads.length;
-    const canResume = connected && !loading && !busy;
-    const toggleThread = (threadId: string) => {
-        setSelectedIds((current) => {
-            const next = new Set(current);
-            next.has(threadId) ? next.delete(threadId) : next.add(threadId);
-            return next;
-        });
-    };
     return (
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-            <div className="space-y-3">
-                <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
-                    <FolderOpen className="size-3.5 shrink-0" />
-                    <span className="shrink-0">{t("agent.history.workspace")}</span>
-                    <Tooltip title={workspacePath}><span tabIndex={0} className="min-w-0 truncate">
-                        {workspacePath || t("agent.history.defaultWorkspace")}
-                    </span></Tooltip>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm" style={{ color: theme.node.muted }}>
-                        {threads.length ? <Checkbox checked={allSelected} indeterminate={Boolean(selectedThreads.length) && !allSelected} disabled={loading || busy} onChange={() => setSelectedIds(allSelected ? new Set() : new Set(threads.map((thread) => thread.id)))} /> : null}
-                        <span>{selectedThreads.length ? t("agent.history.selected", { count: selectedThreads.length }) : threads.length ? t("agent.history.count", { count: threads.length }) : connected ? t("agent.history.empty") : t("agent.status.disconnected")}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {selectedThreads.length ? (
-                            <Button size="sm" variant="outline" data-destructive icon={<Trash2 className="size-3.5" />} disabled={loading || busy} onClick={() => onDeleteThreads(selectedThreads.map((thread) => thread.id))}>
-                                {t("agent.history.deleteCount", { count: selectedThreads.length })}
-                            </Button>
-                        ) : null}
-                        <Button size="sm" icon={<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />} disabled={!connected || loading} onClick={onRefresh}>
-                            {t("agent.history.refresh")}
-                        </Button>
-                        <Button size="sm" variant="default" icon={<Plus className="size-3.5" />} disabled={!connected || loading || busy} onClick={onNewThread}>
-                            {t("agent.history.newThread")}
-                        </Button>
-                    </div>
-                </div>
-                <div className="space-y-2">
-                    {threads.map((thread) => {
-                        const active = thread.id === activeThreadId;
-                        return (
-                            <div
-                                key={thread.id}
-                                role="button"
-                                tabIndex={canResume ? 0 : -1}
-                                aria-disabled={!canResume}
-                                className={`${canResume ? "cursor-pointer hover:bg-accent" : "cursor-default opacity-60"} rounded-lg border px-2.5 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/20`}
-                                style={{ borderColor: active ? theme.node.text : theme.node.stroke, color: theme.node.text }}
-                                onClick={() => {
-                                    if (canResume) onResumeThread(thread.id);
-                                }}
-                                onKeyDown={(event) => {
-                                    if (!canResume || (event.key !== "Enter" && event.key !== " ")) return;
-                                    event.preventDefault();
-                                    onResumeThread(thread.id);
-                                }}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <Checkbox
-                                        checked={selectedIds.has(thread.id)}
-                                        disabled={loading || busy}
-                                        aria-label={t("agent.history.selectThread", { name: thread.name || thread.preview || t("agent.history.untitled") })}
-                                        onClick={(event) => event.stopPropagation()}
-                                        onKeyDown={(event) => event.stopPropagation()}
-                                        onChange={() => toggleThread(thread.id)}
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="flex min-w-0 items-center gap-1.5">
-                                            {active ? (
-                                                <span className="shrink-0 text-xs font-medium" style={{ color: theme.node.text }}>
-                                                    {t("agent.history.current")}
-                                                </span>
-                                            ) : null}
-                                            <div className="truncate text-sm font-medium leading-5">{thread.name || thread.preview || t("agent.history.untitled")}</div>
-                                        </div>
-                                        <div className="truncate text-xs leading-4 opacity-65">{thread.preview || thread.id}</div>
-                                    </div>
-                                    <span className="shrink-0 text-xs opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt, i18n.language)}</span>
-                                </div>
-                            </div>
-                        );
-                    })}
-                    {!threads.length ? (
-                        <div className="px-3 py-8 text-center text-sm" style={{ color: theme.node.muted }}>
-                            {t(connected ? "agent.history.noWorkspaceThreads" : "agent.history.connectHint")}
-                        </div>
-                    ) : null}
-                </div>
+        <section aria-label={t("workspace.history")} className="p-2">
+            {error ? <p role="alert" className="break-words px-2 pb-2 text-xs text-destructive">{error}</p> : null}
+            <div className="thin-scrollbar max-h-72 space-y-0.5 overflow-y-auto">
+                {threads.map((thread) => {
+                    const active = thread.id === activeThreadId;
+                    const name = thread.title || t("agent.history.newThread");
+                    const timestamp = thread.updatedAt || thread.createdAt;
+                    return <div key={thread.id} className={cn("group flex items-center gap-1 rounded-lg pr-1 hover:bg-accent/60 focus-within:bg-accent/60", active && "bg-accent")}>
+                        <button type="button" aria-current={active || undefined} disabled={busy} className="flex min-w-0 flex-1 items-start justify-between gap-2 rounded-lg px-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60" onClick={() => onResumeThread(thread.id)}>
+                            <span className="min-w-0 flex-1"><span title={name} className="block truncate text-sm font-medium">{name}</span>{timestamp ? <span className="block truncate text-xs text-muted-foreground">{new Date(timestamp).toLocaleString(i18n.language)}</span> : null}</span>
+                        </button>
+                        <Menu placement="bottomRight" items={[
+                            { key: "rename", label: t("agent.history.rename"), icon: <Pencil />, onClick: () => onRenameThread(thread) },
+                            { key: "delete", label: t("common.delete"), icon: <Trash2 />, danger: true, onClick: () => onDeleteThread(thread) },
+                        ]}>
+                            <Button variant="ghost" size="icon" icon={<Ellipsis />} aria-label={t("agent.history.moreActions", { name })} className="pointer-events-none size-7 bg-transparent opacity-0 hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100" />
+                        </Menu>
+                    </div>;
+                })}
+                {!threads.length && (loading || !error) ? <div className="flex justify-center px-3 py-6 text-center text-sm text-muted-foreground">{loading ? <Spinner size="small" /> : t("agent.history.noWorkspaceThreads")}</div> : null}
             </div>
-        </div>
+        </section>
     );
 }
 
-function formatThreadTime(value: number | undefined, locale: string) {
-    if (!value) return "";
-    return new Date(value * 1000).toLocaleString(locale);
+export function AgentThreadRenameDialog({ thread, onClose, onRename }: {
+    thread: AssistantThread | null;
+    onClose: () => void;
+    onRename: (thread: AssistantThread, title: string) => Promise<void>;
+}) {
+    const { t } = useTranslation();
+    const formId = useId();
+    const form = useEditorForm<{ title: string }>();
+    const saving = form.formState.isSubmitting;
+    useEffect(() => { if (thread) form.reset({ title: thread.title }); }, [form, thread]);
+    return <Dialog open={Boolean(thread)} title={t("agent.history.renameTitle")} onClose={onClose} width={448} busy={saving} secondaryAction={null} footer={<Button type="submit" variant="default" form={formId} loading={saving}>{t("common.save")}</Button>}>
+        <EditorForm id={formId} form={form} onSubmit={async ({ title }) => { if (thread) await onRename(thread, title.trim()); }}>
+            <Field name="title" label={t("workspace.name")} schema={z.string().trim().min(1, t("ui.nameRequired"))}><Input autoFocus placeholder={t("agent.history.newThread")} /></Field>
+        </EditorForm>
+    </Dialog>;
 }

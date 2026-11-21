@@ -191,6 +191,7 @@ func validateAssetMetadata(tx *gorm.DB, userID string, data JSON) (JSON, error) 
 }
 
 type assetDeleteResult struct { AssetID string `json:"assetId"`; DeleteState string `json:"deleteState"` }
+type assetCleanupInput struct { RetainCloud bool `json:"retainCloud"`; Confirmed bool `json:"confirmed"` }
 
 func (a *App) DeleteAsset(userID, id string) (assetDeleteResult, error) {
 	var asset Asset
@@ -215,7 +216,9 @@ func (a *App) deleteAsset(c *gin.Context) {
 }
 
 func (a *App) retryAssetCleanup(c *gin.Context) {
-	if err := a.RetryAssetCleanup(currentUser(c).ID, c.Param("id")); err != nil { respondError(c, err); return }
+	var input assetCleanupInput
+	if c.Request.ContentLength != 0 && !bind(c, &input) { return }
+	if err := a.RetryAssetCleanup(currentUser(c).ID, c.Param("id"), input); err != nil { respondError(c, err); return }
 	c.JSON(202, gin.H{"deleteState": "pending"})
 }
 
@@ -223,10 +226,20 @@ func queueAssetCleanup(db *gorm.DB, id string) error {
 	return db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "asset_id"}, {Name: "kind"}}, DoNothing: true}).Create(&FileOperation{ID: identifier(), AssetID: id, Kind: "delete"}).Error
 }
 
-func (a *App) RetryAssetCleanup(userID, id string) error {
+func (a *App) RetryAssetCleanup(userID, id string, input assetCleanupInput) error {
+	if input.RetainCloud {
+		if !input.Confirmed { return problem(400, "confirmation_required", "请确认仅删除本地文件和应用内存储关联，云端对象将保留且不再由应用清理") }
+		// Serialize with file dispatch so an active cloud operation cannot
+		// finish using the previous intent after this request is accepted.
+		a.workMu.Lock(); defer a.workMu.Unlock()
+	}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var asset Asset
 		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "pending").Error; err != nil { return err }
+		if input.RetainCloud {
+			if a.active["file:"+id] != nil { return problem(409, "asset_busy", "文件正在处理，请等待当前操作结束后重试仅本地清理") }
+			if err := tx.Model(&asset).Updates(map[string]any{"retain_cloud": true, "error": ""}).Error; err != nil { return err }
+		}
 		if err := queueAssetCleanup(tx, asset.ID); err != nil { return err }
 		return tx.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "delete").Update("next_run_at", nil).Error
 	})

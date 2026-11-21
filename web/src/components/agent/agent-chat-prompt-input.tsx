@@ -16,11 +16,12 @@ type ComposerCommand = { type: "skill" | "resource"; query: string; length: numb
 type ComposerCandidate = { type: "skill"; skill: AgentSkillSummary } | { type: "resource"; reference: CanvasResourceReference };
 type ReferenceHover = { reference: AgentCanvasReference; left: number; top: number; width: number; height: number };
 
-export function AgentChatPromptInput({ value, disabled, placeholder, theme, onChange, onSubmit, onAddFiles }: {
+export function AgentChatPromptInput({ value, disabled, placeholder, theme, targetProjectId, onChange, onSubmit, onAddFiles }: {
     value: string;
     disabled?: boolean;
     placeholder: string;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    targetProjectId: string;
     onChange: (value: string) => void;
     onSubmit: () => void;
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
@@ -35,7 +36,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
     const canvasReferences = useAgentStore((state) => state.canvasReferences);
     const [command, setCommand] = useState<ComposerCommand | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
-    const [resourceCandidates, setResourceCandidates] = useState<CanvasResourceReference[]>([]);
+    const canvasSnapshot = useAgentStore((state) => command?.type === "resource" ? state.canvasContext?.snapshot : undefined);
     const [referenceHover, setReferenceHover] = useState<ReferenceHover | null>(null);
 
     const messageSkill = useMemo<AgentSkillReference | undefined>(() => selectedSkill ? {
@@ -46,17 +47,20 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
     const tokens = useMemo(() => parseAgentInlineTokens(value, canvasReferences, messageSkill), [canvasReferences, messageSkill, value]);
     const selectedReferenceIds = useMemo(() => new Set(canvasReferences.map((item) => item.nodeId)), [canvasReferences]);
     const candidates = useMemo<ComposerCandidate[]>(() => {
-        if (!command) return [];
+        if (!command || disabled) return [];
         const query = command.query.trim().toLowerCase();
         if (command.type === "skill") {
             return skills
                 .filter((skill) => skill.enabled && (!query || [skill.name, skill.description, skill.interface?.displayName, skill.interface?.shortDescription, skill.shortDescription].some((item) => item?.toLowerCase().includes(query))))
                 .map((skill) => ({ type: "skill", skill }));
         }
-        return resourceCandidates
+        if (canvasSnapshot?.projectId !== targetProjectId || canvasReferences.some((item) => item.projectId !== targetProjectId)) return [];
+        const references = buildCanvasResourceReferences(canvasSnapshot.nodes);
+        const selectedIds = new Set(canvasSnapshot.selectedNodeIds);
+        return [...references.filter((item) => selectedIds.has(item.nodeId)), ...references.filter((item) => !selectedIds.has(item.nodeId))]
             .filter((reference) => !selectedReferenceIds.has(reference.nodeId) && (!query || `${reference.label} ${reference.title} ${reference.kind} ${reference.text || ""}`.toLowerCase().includes(query)))
             .map((reference) => ({ type: "resource", reference }));
-    }, [command, resourceCandidates, selectedReferenceIds, skills]);
+    }, [canvasReferences, canvasSnapshot, command, disabled, selectedReferenceIds, skills, targetProjectId]);
 
     useEffect(() => {
         const editor = editorRef.current;
@@ -69,6 +73,9 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
         }));
         lastEmittedRef.current = value;
     }, [theme, tokens, value]);
+    useEffect(() => {
+        if (disabled) { setCommand(null); setReferenceHover(null); }
+    }, [disabled]);
 
     const emit = (next: string) => {
         lastEmittedRef.current = next;
@@ -81,6 +88,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
     };
 
     const syncCommand = () => {
+        if (disabled) return;
         const text = textBeforeCaret(editorRef.current);
         const match = /(^|\s)([/@])([^\s/@]*)$/.exec(text);
         if (!match) return closeCommand();
@@ -91,12 +99,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
             const agent = useAgentStore.getState();
             const skillState = useAgentSkillStore.getState();
             if (agent.connected && !skillState.loaded && !skillState.loading) void skillState.loadSkills();
-            return;
         }
-        const snapshot = useAgentStore.getState().canvasContext?.snapshot;
-        const references = buildCanvasResourceReferences(snapshot?.nodes || []);
-        const selectedIds = new Set(snapshot?.selectedNodeIds || []);
-        setResourceCandidates([...references.filter((item) => selectedIds.has(item.nodeId)), ...references.filter((item) => !selectedIds.has(item.nodeId))]);
     };
 
     const syncFromEditor = () => {
@@ -110,26 +113,19 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
 
     const insertCandidate = (candidate: ComposerCandidate) => {
         const editor = editorRef.current;
-        if (!editor || !command) return;
+        if (!editor || !command || disabled) return;
         if (candidate.type === "skill") editor.querySelector<HTMLElement>("[data-agent-token-kind='skill']")?.remove();
         removeTextBeforeCaret(command.length);
 
         if (candidate.type === "skill") {
-            const base = serializeEditor(editor);
-            const defaultPrompt = candidate.skill.interface?.defaultPrompt?.trim();
-            if (!base.trim() && defaultPrompt) {
-                emit("");
-                useAgentSkillStore.getState().selectSkill(candidate.skill);
-                closeCommand();
-                return;
-            }
             insertTokenAtCaret(editor, createSkillToken({ name: candidate.skill.name, path: candidate.skill.path, displayName: candidate.skill.interface?.displayName || undefined }, theme));
             const next = serializeEditor(editor);
             emit(next);
-            useAgentSkillStore.getState().selectSkill(candidate.skill);
+            useAgentSkillStore.getState().selectSkill(candidate.skill, next);
         } else {
-            const current = useAgentStore.getState().canvasReferences;
-            if (!current.some((item) => item.nodeId === candidate.reference.nodeId)) useAgentStore.getState().setAgentState({ canvasReferences: [...current, candidate.reference] });
+            const state = useAgentStore.getState();
+            if (state.canvasContext?.snapshot.projectId !== targetProjectId || state.canvasReferences.some((item) => item.nodeId === candidate.reference.nodeId || item.projectId !== targetProjectId)) return closeCommand();
+            state.setAgentState({ canvasReferences: [...state.canvasReferences, { ...candidate.reference, projectId: targetProjectId }] });
             insertTokenAtCaret(editor, createReferenceToken(candidate.reference, theme));
             emit(serializeEditor(editor));
         }
@@ -176,8 +172,9 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                 suppressContentEditableWarning
                 role="textbox"
                 aria-multiline="true"
+                aria-readonly={disabled || undefined}
                 aria-label={placeholder}
-                className="thin-scrollbar max-h-32 min-h-20 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-1 py-1 text-sm leading-6 outline-none"
+                className="thin-scrollbar max-h-[min(28dvh,14rem)] min-h-[min(6rem,22dvh)] w-full overflow-x-hidden overflow-y-auto overscroll-contain whitespace-pre-wrap break-words bg-transparent px-1 py-1 text-sm leading-6 outline-none"
                 style={{ color: theme.node.text, cursor: disabled ? "default" : "text" }}
                 onInput={() => {
                     if (!composingRef.current) syncFromEditor();
@@ -188,6 +185,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                     syncFromEditor();
                 }}
                 onPaste={(event) => {
+                    if (disabled) return;
                     const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
                     if (images.length && onAddFiles) {
                         event.preventDefault();
@@ -225,7 +223,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                     window.setTimeout(closeCommand, 120);
                 }}
             />
-            {referenceHover ? (
+            {!disabled && referenceHover ? (
                 <Popover
                     open
                     placement="top"
@@ -238,7 +236,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                     />
                 </Popover>
             ) : null}
-            {command ? <AgentCommandMenu command={command} candidates={candidates} activeIndex={Math.min(activeIndex, Math.max(candidates.length - 1, 0))} loading={command.type === "skill" && skillsLoading} theme={theme} onSelect={insertCandidate} /> : null}
+            {!disabled && command ? <AgentCommandMenu command={command} candidates={candidates} activeIndex={Math.min(activeIndex, Math.max(candidates.length - 1, 0))} loading={command.type === "skill" && skillsLoading} theme={theme} onSelect={insertCandidate} /> : null}
         </div>
     );
 }
@@ -248,7 +246,7 @@ function AgentCommandMenu({ command, candidates, activeIndex, loading, theme, on
     useEffect(() => { activeItemRef.current?.scrollIntoView({ block: "nearest" }); }, [activeIndex]);
     const stopPropagation = (event: PointerEvent | MouseEvent) => event.stopPropagation();
     return (
-        <div data-agent-command-menu className="absolute bottom-[calc(100%+8px)] left-0 z-[120] w-full min-w-64 overflow-hidden rounded-xl border shadow-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onPointerDown={stopPropagation} onMouseDown={stopPropagation}>
+        <div data-agent-command-menu className="absolute bottom-[calc(100%+8px)] left-0 z-[120] w-full overflow-hidden rounded-xl border shadow-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onPointerDown={stopPropagation} onMouseDown={stopPropagation}>
             <div className="border-b px-3 py-2 text-xs" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}>
                 {t(command.type === "skill" ? "agent.composer.mentions.selectSkill" : "agent.composer.mentions.selectResource")}{command.query ? ` · ${command.query}` : ""}
             </div>
@@ -279,7 +277,7 @@ function ReferencePreview({ reference }: { reference: CanvasResourceReference })
 function createSkillToken(skill: AgentSkillReference, theme: (typeof canvasThemes)[keyof typeof canvasThemes]) {
     const token = createToken("skill", agentSkillMarker(skill), theme);
     token.dataset.skillName = skill.name;
-    token.title = skill.path;
+    token.classList.add("max-w-full", "truncate");
     token.textContent = `/${skill.displayName || skill.name}`;
     return token;
 }

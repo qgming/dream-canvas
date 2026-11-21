@@ -1,12 +1,13 @@
 import { useTranslation } from "react-i18next";
 import appI18n from "@/i18n";
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown, MessageSquarePlus, X } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import { Drawer } from "@animate-ui/react/primitives/base-ui/drawer";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
 import { Choice } from "@/components/ui/choice";
-import { History, MessageSquare, Plus, RefreshCw, Settings2, Sparkles, X } from "lucide-react";
-import { useLocation, useNavigate } from "react-router-dom";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -18,25 +19,23 @@ import { decodeChannelModel, resolveModelParameters, useEffectiveConfig } from "
 import { ModelPicker } from "@/components/model-picker";
 import { ModelParameters } from "@/components/model-parameters";
 import { Popover } from "@/components/ui/popover";
-import { AgentPanelTabs } from "./agent-panel-tabs";
 import { AgentChatTimeline } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
-import { AgentHistoryView } from "./agent-history-view";
+import { AgentHistoryView, AgentThreadRenameDialog } from "./agent-history-view";
 import * as api from "@/services/api/assistant";
 import { uploadImage } from "@/services/image-storage";
 import { assetId, assetUrl } from "@/services/api/assets";
-import { captureSession } from "@/services/api/client";
+import { ApiError, captureSession } from "@/services/api/client";
 import { nanoid } from "nanoid";
 import { inputVisible } from "@/lib/model-inputs";
 
 export function AssistantPanelContent() {
-    useTranslation();
+    const { t } = useTranslation();
     const { notify, confirm } = useFeedback();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useAuthStore((state) => state.user);
     const config = useEffectiveConfig();
     const { pathname } = useLocation();
-    const navigate = useNavigate();
     const routeProject = /^\/canvas\/([^/]+)$/.exec(pathname)?.[1] || "";
     const projects = useCanvasStore((state) => state.projects);
     const [target, setTarget] = useState("");
@@ -45,16 +44,22 @@ export function AssistantPanelContent() {
     routeProjectRef.current = routeProject;
     const followedTurn = useRef<{ threadId: string; turnId: string; projectId: string } | null>(null);
     const chooseTarget = (projectId: string) => { targetRef.current = projectId; setTarget(projectId); };
+    const panelOpen = useAgentStore((state) => state.panelOpen);
     const activeTab = useAgentStore((state) => state.activeTab);
-    const tab = activeTab === "history" ? activeTab : "chat";
+    const historyOpen = panelOpen && activeTab === "history";
     const setTab = (activeTab: "chat" | "history") => useAgentStore.setState({ activeTab });
     const [snapshot, setSnapshot] = useState<api.AssistantSnapshot | null>(null);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    const [loadingThreads, setLoadingThreads] = useState(false);
+    const [renamingThread, setRenamingThread] = useState<api.AssistantThread | null>(null);
+    const threadListRequest = useRef(0);
     const [creating, setCreating] = useState(false);
     const creatingRef = useRef(false);
     const [submitting, setSubmitting] = useState(false);
     const submittingRef = useRef(false);
+    const [uploading, setUploading] = useState(false);
+    const uploadingRef = useRef(false);
     const [stopping, setStopping] = useState(false);
     const stoppingRef = useRef(false);
     const sequence = useRef(0);
@@ -69,18 +74,35 @@ export function AssistantPanelContent() {
     const selected = decodeChannelModel(selectedModel);
     const modelEntry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text" && entry.features.tools);
     const attachments = useAgentStore((state) => state.attachments);
-    const selectedSkill = useAgentSkillStore((state) => state.selectedSkill);
+    const skills = useAgentSkillStore((state) => state.skills);
+    const selectedSkillName = useAgentSkillStore((state) => state.selectedSkill?.name);
     const running = snapshot?.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
     const reportedTurn = running || snapshot?.turns.at(-1);
     const busy = Boolean(running || submitting || creating);
+    const editingDisabled = !panelOpen || busy || loading || uploading || Boolean(activeId && !snapshot);
     useEffect(() => { useAgentStore.setState({ sending: submitting, waiting: Boolean(running) }); }, [submitting, running?.id]);
-    useEffect(() => { chooseTarget(routeProject); }, [routeProject]);
+    useEffect(() => {
+        if (!useAgentStore.getState().canvasReferences.length) chooseTarget(routeProject);
+    }, [routeProject]);
     const showError = (error: unknown) => { const text = error instanceof Error ? error.message : appI18n.t("workspace.operationFailed"); setError(text); useAgentStore.setState({ connectError: text }); };
+    const clearThread = () => {
+        sequence.current++;
+        requestedThread.current = "";
+        followedTurn.current = null;
+        setSnapshot(null); setLoading(false);
+        useAgentStore.setState({ activeThreadId: "", activeTurnId: "", messages: [] });
+    };
     const refreshThreads = async () => {
         const owner = user?.id;
-        const records = await api.listThreads();
-        if (useAuthStore.getState().user?.id !== owner) return;
-        useAgentStore.setState({ threads: records.map((thread) => ({ id: thread.id, name: thread.title, preview: "", createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt) })), connected: true, enabled: true, activity: appI18n.t("workspace.serviceConnected") });
+        const request = ++threadListRequest.current;
+        setLoadingThreads(true);
+        try {
+            const records = await api.listThreads();
+            if (request !== threadListRequest.current || useAuthStore.getState().user?.id !== owner) return;
+            useAgentStore.setState({ threads: records, connected: true, enabled: true, activity: appI18n.t("workspace.serviceConnected") });
+        } catch (error) {
+            if (request === threadListRequest.current && useAuthStore.getState().user?.id === owner) throw error;
+        } finally { if (request === threadListRequest.current) setLoadingThreads(false); }
     };
     const openThread = async (id: string, activate = true) => {
         if (!activate && requestedThread.current !== id) return;
@@ -100,18 +122,22 @@ export function AssistantPanelContent() {
             followedTurn.current = latest ? { threadId: id, turnId: latest.id, projectId: latest.projectId || "" } : null;
             const running = record.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
             useAgentStore.setState({ activeThreadId: id, connectError: "", messages: record.items.map((item) => {
-                const detail = item.detail as { attachments?: string[]; skill?: string } | undefined;
-                return { ...item, itemId: item.id, streamId: running?.status === "running" && item.role === "assistant" && item.turnId === running.id ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
+                const detail = item.detail as { streaming?: boolean; attachments?: string[]; skill?: string } | undefined;
+                return { ...item, itemId: item.id, streamId: item.role === "assistant" && detail?.streaming && running?.status === "running" && item.turnId === running.id ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
             }), activeTurnId: running?.id || "" });
             if (activate) setTab("chat");
-        } catch (error) { if (request === sequence.current) showError(error); }
+        } catch (error) {
+            if (request !== sequence.current) return;
+            if (error instanceof ApiError && error.status === 404) clearThread();
+            else showError(error);
+        }
         finally { if (request === sequence.current) setLoading(false); }
     };
     const newThread = async () => {
-        if (creatingRef.current || busy) return;
+        if (creatingRef.current || busy || uploadingRef.current) return;
         creatingRef.current = true; setCreating(true);
         const assertSession = captureSession();
-        try { const thread = await api.createThread(); assertSession(); chooseTarget(routeProjectRef.current); await refreshThreads(); assertSession(); await openThread(thread.id); }
+        try { const thread = await api.createThread(); assertSession(); if (!useAgentStore.getState().canvasReferences.length) chooseTarget(routeProjectRef.current); await openThread(thread.id); await refreshThreads(); }
         catch (error) { showError(error); }
         finally { creatingRef.current = false; setCreating(false); }
     };
@@ -122,14 +148,15 @@ export function AssistantPanelContent() {
         return () => { sequence.current++; };
     }, [user?.id]);
     useEffect(() => {
-        let refreshing = false, pending = false, disposed = false;
+        let refreshing = false, pending = false, listPending = false, disposed = false;
         const refresh = async (event: Event) => {
             const topic = (event as CustomEvent<string>).detail;
             if (topic && topic !== "all" && topic !== "assistant") return;
             pending = true;
+            if (!topic || topic === "all") listPending = true;
             if (refreshing) return;
             refreshing = true;
-            try { while (pending && !disposed) { pending = false; if (!topic || topic === "all") await refreshThreads(); const id = useAgentStore.getState().activeThreadId; if (id && !disposed) await openThread(id, false); } }
+            try { while (pending && !disposed) { pending = false; if (listPending) { listPending = false; await refreshThreads(); } const id = useAgentStore.getState().activeThreadId; if (id && !disposed) await openThread(id, false); } }
             catch (error) { if (!disposed) showError(error); }
             finally { refreshing = false; }
         };
@@ -137,16 +164,16 @@ export function AssistantPanelContent() {
         return () => { disposed = true; window.removeEventListener("server-changed", refresh); };
     }, [user?.id]);
     const send = async () => {
-        if (submittingRef.current) return;
+        if (submittingRef.current || uploadingRef.current || editingDisabled) return;
+        const draft = useAgentStore.getState();
+        const { selectedSkill, selectionRevision } = useAgentSkillStore.getState();
+        const text = draft.prompt.trim() ? draft.prompt : draft.attachments.length ? t("agent.eventMore.attachmentPrompt") : "";
+        if (!text) return;
         const entry = modelEntry;
         if (!selected || !entry) { notify.warning(appI18n.t("workspace.selectAssistantModel")); return; }
         const destination = target;
-        const text = prompt;
-        const owner = user?.id;
         const assertSession = captureSession();
-        if (!text.trim() || busy || loading) return;
-        const references = useAgentStore.getState().canvasReferences;
-        if (references.length && useAgentStore.getState().canvasContext?.snapshot.projectId !== destination) { notify.warning(appI18n.t("workspace.referencesProject")); return; }
+        if (draft.canvasReferences.some((reference) => reference.projectId !== destination)) { notify.warning(t("workspace.referencesProject")); return; }
         submittingRef.current = true; setSubmitting(true);
         try {
             const parameters = resolveModelParameters(config, selectedModel, modelParameters[selectedModel]);
@@ -166,10 +193,16 @@ export function AssistantPanelContent() {
             if (!snapshot) { await refreshThreads(); await openThread(thread.id); }
             assertSession();
             const context = useAgentStore.getState().canvasContext;
-            await api.startTurn(thread.id, { prompt: text, projectId: destination || undefined, clientId: context?.snapshot.projectId === destination ? context.clientId : undefined, channelId: selected.channelId, modelId: entry.id, parameters, version: thread.version, skill: selectedSkill?.name, attachments: attachments.map((item) => assetId(item.url) || ""), references: references.map((item) => item.nodeId) });
-            if (useAuthStore.getState().user?.id !== owner) return;
-            useAgentStore.setState({ prompt: "", attachments: [], canvasReferences: [] });
+            await api.startTurn(thread.id, { prompt: text, projectId: destination || undefined, clientId: context?.snapshot.projectId === destination ? context.clientId : undefined, channelId: selected.channelId, modelId: entry.id, parameters, version: thread.version, skill: selectedSkill?.name, attachments: draft.attachments.map((item) => assetId(item.url) || ""), references: draft.canvasReferences.map((item) => item.nodeId) });
+            assertSession();
+            const current = useAgentStore.getState();
+            const skillState = useAgentSkillStore.getState();
+            if (current.prompt === draft.prompt && current.attachments === draft.attachments && current.canvasReferences === draft.canvasReferences && skillState.selectionRevision === selectionRevision) {
+                useAgentStore.setState({ prompt: "", attachments: [], canvasReferences: [] });
+                if (selectedSkill) skillState.clearSelection(selectionRevision);
+            }
             await openThread(thread.id);
+            if (!thread.title) void refreshThreads().catch(showError);
         } catch (error) { showError(error); }
         finally { submittingRef.current = false; setSubmitting(false); }
     };
@@ -181,32 +214,87 @@ export function AssistantPanelContent() {
         catch (error) { showError(error); }
         finally { stoppingRef.current = false; setStopping(false); }
     };
+    const addFiles = async (files: FileList | File[] | null) => {
+        if (!files?.length || uploadingRef.current || submittingRef.current || editingDisabled) return;
+        const assertSession = captureSession();
+        uploadingRef.current = true;
+        setUploading(true);
+        try {
+            for (const file of Array.from(files)) {
+                assertSession();
+                const image = await uploadImage(file);
+                assertSession();
+                useAgentStore.setState((state) => ({ attachments: [...state.attachments, { id: nanoid(), name: file.name, type: image.mimeType, size: image.bytes, width: image.width, height: image.height, url: image.url, dataUrl: image.url }] }));
+            }
+        } catch (error) { showError(error); }
+        finally { uploadingRef.current = false; setUploading(false); }
+    };
+    const listedThread = threads.find((thread) => thread.id === activeId);
+    const currentThread = listedThread && listedThread.version >= (snapshot?.thread.version ?? 0) ? listedThread : snapshot?.thread;
+    const title = currentThread?.title || t("agent.history.newThread");
+    const shortcuts = skills.filter((skill) => skill.enabled).slice(0, 5);
+    const showReasoning = modelEntry?.parameters.some((control) => control.key === "reasoning_effort" && !control.hidden && inputVisible(control, resolveModelParameters(config, selectedModel, modelParameters[selectedModel])));
+    const reload = () => void refreshThreads().then(async () => {
+        setError("");
+        useAgentStore.setState({ connectError: "" });
+        if (requestedThread.current) await openThread(requestedThread.current, false);
+    }).catch(showError);
+    const renameThread = async (thread: api.AssistantThread, title: string) => {
+        const assertSession = captureSession();
+        try {
+            const updated = await api.renameThread(thread.id, title, thread.version);
+            assertSession();
+            setSnapshot((current) => current?.thread.id === thread.id && current.thread.version === thread.version ? { ...current, thread: updated } : current);
+        } catch (error) {
+            if (error instanceof ApiError && error.code === "version_conflict") { reload(); throw new Error(t("agent.history.renameConflict")); }
+            throw error;
+        }
+        setRenamingThread(null);
+        reload();
+    };
+    const deleteThread = (thread: api.AssistantThread) => {
+        const assertSession = captureSession();
+        setTab("chat");
+        confirm({ title: t("agent.history.deleteTitle", { name: thread.title || t("agent.history.newThread") }), content: t("workspace.deleteConversationDescription"), confirmText: t("workspace.deleteConversation"), destructive: true, onConfirm: async () => {
+            assertSession();
+            await api.deleteThread(thread.id);
+            assertSession();
+            if (thread.id === requestedThread.current) clearThread();
+            void refreshThreads().catch(showError);
+        } });
+    };
     return (
         <>
-            <AgentPanelTabs value={tab} theme={theme} onChange={setTab} items={[{ value: "chat", label: appI18n.t("workspace.chat"), icon: <MessageSquare className="size-4" /> }, { value: "history", label: appI18n.t("workspace.history"), icon: <History className="size-4" /> }]} right={<><Button variant="ghost" icon={<Sparkles className="size-4" />} title={appI18n.t("inspiration.title")} onClick={() => { navigate("/inspiration?kind=skills"); useAgentStore.getState().closePanel(); }} /><Button variant="ghost"  icon={<Plus className="size-4" />} disabled={loading || busy} onClick={() => void newThread()} aria-label={appI18n.t("workspace.newConversation")} /><Button variant="ghost"  icon={<X className="size-4" />} onClick={() => useAgentStore.getState().closePanel()} aria-label={appI18n.t("workspace.collapseAssistant")} /></>} />
-            {error ? <Alert type="error" title={error} className="mx-3 mt-3" action={<Button size="sm" disabled={loading} onClick={() => { void refreshThreads().then(() => { setError(""); useAgentStore.setState({ connectError: "" }); if (activeId) return openThread(activeId, false); }).catch(showError); }}>{appI18n.t("workspace.retry")}</Button>} onClose={() => setError("")} /> : null}
-            <div hidden={tab !== "history"} inert={tab !== "history"} className={tab === "history" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><AgentHistoryView theme={theme} threads={threads} activeThreadId={activeId} workspacePath={appI18n.t("workspace.allConversations")} loading={loading} busy={busy} connected onRefresh={() => void refreshThreads().catch(showError)} onNewThread={() => void newThread()} onResumeThread={(id) => void openThread(id)} onDeleteThreads={(ids) => {
-                const assertSession = captureSession();
-                confirm({ title: appI18n.t("workspace.deleteConversations", { count: ids.length }), content: appI18n.t("workspace.deleteConversationDescription"), confirmText: appI18n.t("workspace.deleteConversation"), cancelText: appI18n.t("workspace.cancel"), destructive: true, onConfirm: async () => {
-                    for (const id of ids) { assertSession(); await api.deleteThread(id); }
-                    assertSession();
-                    if (ids.includes(requestedThread.current)) { sequence.current++; requestedThread.current = ""; setSnapshot(null); setLoading(false); useAgentStore.setState({ activeThreadId: "", activeTurnId: "", messages: [] }); }
-                    await refreshThreads();
-                } });
-            }} /></div>
-            <div hidden={tab !== "chat"} inert={tab !== "chat"} className={tab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-                <div className="flex shrink-0 items-center gap-2 px-4 pt-3 text-xs" style={{ color: theme.node.muted }}><span>{appI18n.t("workspace.targetProject")}</span><Choice compact borderless aria-label={appI18n.t("workspace.targetProject")} className="min-w-0 flex-1" value={running ? running.projectId || "" : target} disabled={busy} onChange={chooseTarget} options={[{ value: "", label: appI18n.t("workspace.noProject") }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} /><Button variant="ghost" size="sm" icon={<RefreshCw className="size-3.5" />} disabled={loading} onClick={() => activeId ? void openThread(activeId) : void refreshThreads().catch(showError)} aria-label={appI18n.t("workspace.reloadConversation")} /></div>
-                {loading ? <div className="flex justify-center px-4 pt-3"><Spinner size="small" /></div> : null}
-                {running?.status === "waiting_tasks" ? <p role="status" className="px-4 pt-3 text-xs text-muted-foreground">{appI18n.t("workspace.assistantWaitingTasks")}</p> : null}
-                {reportedTurn?.error ? <Alert className="mx-4 mt-3" type={reportedTurn.status === "failed" || reportedTurn.status === "interrupted" ? "error" : "warning"} title={reportedTurn.error} /> : null}
-                {!snapshot && !loading ? <p className="px-5 pt-8 text-sm leading-6" style={{ color: theme.node.muted }}>{appI18n.t("workspace.assistantBoundary")}</p> : null}
-                <AgentChatTimeline visible={tab === "chat"} theme={theme} sending={submitting} waiting={Boolean(running)} />
-                <AgentChatComposer model={<ModelPicker config={config} value={selectedModel} capability="text" toolsOnly disabled={busy || loading} className="min-w-0 max-w-48" onChange={(model) => useAgentStore.setState({ model })} />} theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={loading} placeholder={appI18n.t("workspace.assistantPrompt")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined} onAddFiles={async (files) => {
-                    const assertSession = captureSession();
-                    try { for (const file of Array.from(files || [])) { assertSession(); const image = await uploadImage(file); assertSession(); useAgentStore.setState((state) => ({ attachments: [...state.attachments, { id: nanoid(), name: file.name, type: image.mimeType, size: image.bytes, width: image.width, height: image.height, url: image.url, dataUrl: image.url }] })); } }
-                    catch (error) { showError(error); }
-                }} onRemoveAttachment={(id) => useAgentStore.setState((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) }))} left={modelEntry?.parameters.length ? <Popover trigger="click" placement="topLeft" className="w-[356px]" content={<ModelParameters config={config} model={selectedModel} value={modelParameters[selectedModel]} disabled={busy || loading} onChange={(value) => useAgentStore.setState((state) => ({ modelParameters: { ...state.modelParameters, [selectedModel]: value } }))} />}><Button variant="ghost" size="sm" icon={<Settings2 className="size-4" />} aria-label={appI18n.t("workspace.parameters")} /></Popover> : null} />
+            <header className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3" data-base-ui-swipe-ignore>
+                <Popover trigger="click" placement="bottomLeft" open={historyOpen} onOpenChange={(open) => {
+                    setTab(open ? "history" : "chat");
+                    if (open) void refreshThreads().catch(showError);
+                }} className="w-[min(22rem,calc(100vw-32px))] p-0" content={<AgentHistoryView threads={threads} activeThreadId={activeId} loading={loadingThreads} busy={busy || loading || uploading} error={error}
+                    onResumeThread={(id) => { setTab("chat"); void openThread(id); }} onRenameThread={(thread) => { setTab("chat"); setRenamingThread(thread); }} onDeleteThread={deleteThread} />}>
+                    <Button variant="ghost" className="min-w-0 px-2 text-base" aria-label={t("agent.drawer.conversations", { title })}><span className="min-w-0 truncate">{title}</span><ChevronDown className="size-4 text-muted-foreground" /></Button>
+                </Popover>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <Button variant="ghost" size="icon" icon={<MessageSquarePlus />} title={t("workspace.newConversation")} aria-label={t("workspace.newConversation")} disabled={loading || busy || uploading} onClick={() => void newThread()} />
+                    <Drawer.Close render={<Button variant="ghost" size="icon" icon={<X />} title={t("ui.close")} aria-label={t("ui.close")} />} />
+                </div>
+            </header>
+            <AgentThreadRenameDialog thread={renamingThread} onClose={() => setRenamingThread(null)} onRename={renameThread} />
+            {error ? <Alert type="error" title={error} className="mx-4 mt-2 break-words" action={<Button size="sm" disabled={loading || loadingThreads} onClick={reload}>{t("workspace.retry")}</Button>} onClose={() => setError("")} /> : null}
+            {loading && !snapshot ? <div className="flex justify-center px-4 pt-3"><Spinner size="small" /></div> : null}
+            {reportedTurn?.error ? <Alert className="mx-4 mt-2" type={reportedTurn.status === "failed" || reportedTurn.status === "interrupted" ? "error" : "warning"} title={reportedTurn.status === "partial" ? t("agent.steps.partialReply") : reportedTurn.error} description={reportedTurn.status === "partial" ? reportedTurn.error : undefined} /> : null}
+            <AgentChatTimeline visible={panelOpen} theme={theme} sending={submitting} turnStatus={running?.status} turnId={running?.id} empty={!error && (!activeId || snapshot) ? <div className="flex flex-wrap items-center justify-center gap-2 text-center">
+                <h2 className="mb-1 w-full text-xl font-medium tracking-tight">{t("agent.drawer.emptyTitle")}</h2>
+                {shortcuts.map((skill) => <Button key={skill.path} size="sm" className="max-w-full rounded-full" disabled={editingDisabled} aria-pressed={selectedSkillName === skill.name} onClick={() => useAgentSkillStore.getState().selectSkill(skill)}><span aria-hidden className="text-muted-foreground">/</span><span className="truncate">{skill.interface?.displayName || skill.name}</span></Button>)}
+            </div> : null} />
+            <div className="flex shrink-0 items-center gap-1.5 px-4 text-xs" data-base-ui-swipe-ignore>
+                <span className="shrink-0 text-muted-foreground">{t("workspace.targetProject")}</span>
+                <Choice compact borderless aria-label={t("workspace.targetProject")} className="w-fit min-w-0 max-w-full px-2" value={running ? running.projectId || "" : target} disabled={editingDisabled} onChange={chooseTarget} options={[{ value: "", label: t("workspace.noProject") }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} />
             </div>
+            <AgentChatComposer theme={theme} prompt={prompt} attachments={attachments} sending={busy} stopping={stopping} disabled={editingDisabled} uploading={uploading} targetProjectId={target}
+                placeholder={t("agent.drawer.placeholder")} onPromptChange={(prompt) => useAgentStore.setState({ prompt })} onSubmit={() => void send()} onStop={running ? () => void stop() : undefined}
+                onAddFiles={addFiles} onRemoveAttachment={(id) => useAgentStore.setState((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) }))}
+                model={<ModelPicker config={config} value={selectedModel} capability="text" toolsOnly disabled={editingDisabled} className="min-w-0 gap-1 rounded-lg px-2 text-xs" onChange={(model) => useAgentStore.setState({ model })} />}
+                reasoning={showReasoning ? <ModelParameters key={selectedModel} config={config} model={selectedModel} value={modelParameters[selectedModel]} compact inline filterControls={(control) => control.key === "reasoning_effort"} disabled={editingDisabled} onChange={(value) => useAgentStore.setState((state) => ({ modelParameters: { ...state.modelParameters, [selectedModel]: value } }))} /> : null} />
         </>
     );
 }

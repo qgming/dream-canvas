@@ -11,7 +11,6 @@ type AgentSkillStore = {
     selectedSkill: AgentSkillSummary | null;
     selectionRevision: number;
     connectionRevision: number;
-    autoPrompt: string;
     draft: AgentSkillDraft | null;
     generatingSource: "conversation" | "canvas" | null;
     loading: boolean;
@@ -30,7 +29,6 @@ export const useAgentSkillStore = create<AgentSkillStore>((set, get) => ({
     selectedSkill: null,
     selectionRevision: 0,
     connectionRevision: 0,
-    autoPrompt: "",
     draft: null,
     generatingSource: null,
     loading: false,
@@ -47,11 +45,8 @@ export const useAgentSkillStore = create<AgentSkillStore>((set, get) => ({
             const selected = current.selectedSkill;
             const selectedSkill = selected ? skills.find((item) => item.name === selected.name && item.path === selected.path && item.enabled) || null : null;
             const selectionChanged = Boolean(selected && !selectedSkill);
-            if (selectionChanged) clearSelectedSkillPrompt(current);
-            const autoPrompt = selectedSkill
-                ? replaceAutoPrompt(current.autoPrompt, selectedSkill.interface?.defaultPrompt?.trim() || `$${selectedSkill.name}`, false)
-                : "";
-            set({ skills, selectedSkill, autoPrompt, selectionRevision: current.selectionRevision + (selectionChanged ? 1 : 0), loading: false, loaded: true, errors: (response.errors || []).map(skillErrorText) });
+            if (selectionChanged) clearSelectedSkillPrompt(selected);
+            set({ skills, selectedSkill, selectionRevision: current.selectionRevision + (selectionChanged ? 1 : 0), loading: false, loaded: true, errors: (response.errors || []).map(skillErrorText) });
         } catch (error) {
             if (sequence !== loadSequence) return;
             set({ loading: false, loaded: true, errors: [error instanceof Error ? error.message : i18n.t("agent.state.skillReadFailed")] });
@@ -63,54 +58,39 @@ export const useAgentSkillStore = create<AgentSkillStore>((set, get) => ({
         const marker = selectedSkill ? `$${selectedSkill.name}` : "";
         const previousMarker = current.selectedSkill ? `$${current.selectedSkill.name}` : "";
         let nextPrompt = prompt;
-        let autoPrompt = "";
         if (nextPrompt === undefined && selectedSkill) {
-            const defaultPrompt = selectedSkill.interface?.defaultPrompt?.trim() || marker;
-            if (!agent.prompt.trim() || Boolean(current.autoPrompt && agent.prompt === current.autoPrompt)) {
-                nextPrompt = defaultPrompt;
-                autoPrompt = defaultPrompt;
+            if (!agent.prompt.trim()) {
+                nextPrompt = `${marker} `;
             } else if (previousMarker && agent.prompt.includes(previousMarker)) {
                 nextPrompt = agent.prompt.replace(previousMarker, marker);
             } else {
-                nextPrompt = agent.prompt.includes(marker) ? agent.prompt : `${agent.prompt}${/\s$/.test(agent.prompt) ? "" : " "}${marker}`;
+                nextPrompt = agent.prompt.includes(marker) ? agent.prompt : `${agent.prompt}${/\s$/.test(agent.prompt) ? "" : " "}${marker} `;
             }
         }
         if (nextPrompt !== undefined && agent.prompt !== nextPrompt) agent.setAgentState({ prompt: nextPrompt });
-        set({ selectedSkill, autoPrompt, selectionRevision: current.selectionRevision + 1 });
+        set({ selectedSkill, selectionRevision: current.selectionRevision + 1 });
     },
     clearSelection: (expectedRevision) => {
         const current = get();
         if (expectedRevision !== undefined && expectedRevision !== current.selectionRevision) return;
-        clearSelectedSkillPrompt(current);
-        set({ selectedSkill: null, autoPrompt: "", selectionRevision: current.selectionRevision + 1 });
+        clearSelectedSkillPrompt(current.selectedSkill);
+        set({ selectedSkill: null, selectionRevision: current.selectionRevision + 1 });
     },
     setDraft: (draft) => set({ draft }),
     setGeneratingSource: (generatingSource) => set({ generatingSource }),
     reset: () => {
         loadSequence += 1;
         const current = get();
-        clearSelectedSkillPrompt(current);
-        set({ skills: [], selectedSkill: null, selectionRevision: current.selectionRevision + 1, connectionRevision: current.connectionRevision + 1, autoPrompt: "", draft: null, generatingSource: null, loading: false, loaded: false, errors: [] });
+        clearSelectedSkillPrompt(current.selectedSkill);
+        set({ skills: [], selectedSkill: null, selectionRevision: current.selectionRevision + 1, connectionRevision: current.connectionRevision + 1, draft: null, generatingSource: null, loading: false, loaded: false, errors: [] });
     },
 }));
 
-function replaceAutoPrompt(previous: string, next: string, fillEmpty: boolean) {
+function clearSelectedSkillPrompt(skill: AgentSkillSummary | null) {
+    if (!skill) return;
     const agent = useAgentStore.getState();
-    const ownsPrompt = Boolean(previous && agent.prompt === previous);
-    if (!ownsPrompt && !(fillEmpty && !agent.prompt.trim())) return "";
-    if (agent.prompt !== next) agent.setAgentState({ prompt: next });
-    return next;
-}
-
-function clearSelectedSkillPrompt(selection: Pick<AgentSkillStore, "selectedSkill" | "autoPrompt">) {
-    const agent = useAgentStore.getState();
-    if (selection.autoPrompt && agent.prompt === selection.autoPrompt) {
-        agent.setAgentState({ prompt: "" });
-        return;
-    }
-    if (!selection.selectedSkill) return;
-    const marker = `$${selection.selectedSkill.name}`;
-    if (agent.prompt.includes(marker)) agent.setAgentState({ prompt: agent.prompt.replace(marker, "") });
+    const prompt = agent.prompt.replace(`$${skill.name}`, "");
+    if (agent.prompt !== prompt) agent.setAgentState({ prompt: prompt.trim() ? prompt : "" });
 }
 
 function skillErrorText(value: unknown) {

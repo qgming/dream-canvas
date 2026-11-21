@@ -100,7 +100,7 @@ func (a *App) CheckModelScript(ctx context.Context, userID string, input scriptC
 		for _, key := range []string{"images", "videos", "audios"} { input.Input[key] = arguments[key] }
 		if stages["validate"] != "" { valid, err := a.runScript(ctx, snapshot, "validate", stages["validate"], input.Input); if err != nil { return nil, problem(400, "script_validation_failed", "样例校验阶段："+providerError(&scriptPreparationError{cause: err})) }; if valid["valid"] != true { return nil, problem(400, "script_validation_failed", "样例未通过校验 / Invalid sample: "+text(valid["error"])) } }
 		for _, key := range []string{"images", "videos", "audios"} { for _, item := range array(input.Input[key]) { asset := object(item); switch asset["transport"] { case "https": asset["url"] = "https://preview.invalid/assets/"+text(asset["assetId"]); case "data": asset["dataUrl"] = "data:"+text(asset["mimeType"])+";base64,PREVIEW" } } }
-		request, err := a.runScript(ctx, snapshot, "submit", stages["submit"], input.Input); if err != nil { return nil, problem(400, "script_preview_failed", "请求映射阶段："+providerError(&scriptPreparationError{cause: err})+"；签名接口需在真实测试时使用服务端凭据") }
+		request, err := a.runScript(ctx, snapshot, "submit", stages["submit"], input.Input); if err != nil { return nil, problem(400, "script_preview_failed", providerError(&scriptPreparationError{cause: err})) }
 		result["request"], result["placeholderMedia"] = debugResponseMaterial(request), len(preview.References) > 0
 		if input.BaseURL != "" { resolved, err := scriptRequestURL(input.BaseURL, text(request["path"])); if err != nil { return nil, problem(400, "invalid_request_path", "预览请求必须使用渠道的 HTTPS 域名 / Preview request must stay on the channel HTTPS origin") }; result["resolvedUrl"] = resolved }
 	}

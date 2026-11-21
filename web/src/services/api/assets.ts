@@ -3,7 +3,7 @@ import { apiRequest, captureSession, jsonRequest } from "./client";
 
 export type ServerAsset = {
     id: string; kind: "text" | "image" | "video" | "audio"; title: string; mimeType: string; bytes: number; width: number; height: number;
-    saveState: string; syncState: string; deleteState: string; cleanupTaskId?: string; error?: string; storageId?: string; metadata: Record<string, unknown>; durationMs: number; probeError?: string; previewError?: string;
+    saveState: string; syncState: string; deleteState: string; retainCloud?: boolean; cleanupTaskId?: string; error?: string; storageId?: string; metadata: Record<string, unknown>; durationMs: number; probeError?: string; previewError?: string;
     storageName?: string; migration?: AssetMigration;
     workbenchRecordId?: string; createdAt: string; updatedAt: string;
 };
@@ -15,7 +15,7 @@ export const assetUrl = (id: string) => `/api/assets/${encodeURIComponent(id)}/f
 export const assetId = (key = "") => key.startsWith("asset:") ? key.slice(6) : /^\/api\/assets\/([^/]+)\/(?:file|preview)$/.exec(key)?.[1];
 export const listAssets = () => apiRequest<ServerAsset[]>("/assets");
 export const listDeletingAssets = () => apiRequest<ServerAsset[]>("/assets?deleting=true");
-export const retryAssetCleanup = (id: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/cleanup`, { method: "POST" });
+export const retryAssetCleanup = (id: string, options: { retainCloud?: boolean; confirmed?: boolean } = {}) => apiRequest<{ deleteState: string }>(`/assets/${encodeURIComponent(id)}/cleanup`, jsonRequest("POST", options));
 export const retryAssetSync = (id: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/sync`, { method: "POST" });
 export const getAsset = (id: string) => apiRequest<ServerAsset>(`/assets/${encodeURIComponent(id)}`);
 export const deleteAsset = (id: string) => apiRequest<{ assetId: string; deleteState: string }>(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" });

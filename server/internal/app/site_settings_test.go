@@ -46,6 +46,46 @@ func TestSiteDefaultsOpenAndKeepsExecutionBounds(t *testing.T) {
 	policy, err = a.executionPolicy(); if err != nil || policy.QuerySeconds != 87 { t.Fatal("saving site settings replaced persisted server bounds") }
 }
 
+func TestSiteScriptRuntimeSaveSharesValidationAndVersionAcrossEntries(t *testing.T) {
+	a := siteTestApp(t)
+	old := suggestedPolicy()
+	old.ScriptRuntime, old.ScriptSeconds, old.ScriptMemoryMiB = nil, 5, 64
+	if err := a.db.Model(&RuntimeSettings{}).Where("id = ?", 1).Update("policy", encode(old)).Error; err != nil { t.Fatal(err) }
+	admin := Principal{User: User{ID: "admin", Role: "admin"}, Scopes: []string{"admin"}}
+	ctx := context.Background()
+	current, err := a.GetSiteSettings(); if err != nil { t.Fatal(err) }
+	if current.ScriptRuntime[scriptInitSeconds] != 25 || current.ScriptRuntimeBounds[scriptMemoryMiB].Default != 128 || old.scriptJSONBytes() != 8<<20 { t.Fatalf("unexpected defaults for new work or changed snapshot: %+v", current) }
+	call := func(p Principal, input map[string]any) (any, error) { return a.CallBusiness(ctx, p, "admin_script_runtime_save", input) }
+	input := map[string]any{"version": float64(current.Version), "scriptRuntime": map[string]any{"submitSeconds": 24, "jsonLimitMiB": 20}}
+	_, err = call(Principal{User: admin.User, Scopes: []string{"admin"}, Projects: []string{"project"}}, input); requireSiteError(t, err, "forbidden")
+	_, err = call(Principal{User: User{ID: "owner"}, Scopes: []string{"admin"}}, input); requireSiteError(t, err, "forbidden")
+	_, err = call(Principal{User: admin.User, Scopes: []string{"read"}}, input); requireSiteError(t, err, "forbidden")
+	input["open"] = false
+	_, err = call(admin, input); requireSiteError(t, err, "invalid_script_runtime")
+	delete(input, "open")
+	updates, stop := a.subscribe(admin.User.ID); defer stop()
+	mcpResult, err := call(admin, input); if err != nil { t.Fatal(err) }
+	saved := mcpResult.(siteSettings)
+	select { case <-updates: default: t.Fatal("web settings readers did not receive a change event") }
+	if !saved.Open || saved.Version != current.Version+1 || saved.AssistantSlots != current.AssistantSlots || saved.ScriptRuntime[scriptSubmitSeconds] != 24 || saved.ScriptRuntime[scriptJSONMiB] != 20 || saved.ScriptRuntime[scriptInitSeconds] != 25 { t.Fatalf("patch changed unrelated settings or was not applied: %+v", saved) }
+	_, err = call(admin, input); requireSiteError(t, err, "version_conflict")
+	assistant := admin; assistant.FixedProject = true
+	allowed := map[string]bool{}
+	for _, tool := range assistantTools(assistant) { allowed[text(object(tool["function"])["name"])] = true }
+	if !allowed["admin_script_runtime_save"] || allowed["admin_site_save"] { t.Fatal("assistant runtime tool permissions are incorrect") }
+	_, err = a.CallBusiness(ctx, assistant, "admin_site_save", map[string]any{}); requireSiteError(t, err, "direct_user_action")
+	input["version"], input["scriptRuntime"] = float64(saved.Version), map[string]any{"memoryMiB": 257}
+	_, err = call(assistant, input); requireSiteError(t, err, "invalid_script_runtime")
+	input["scriptRuntime"] = map[string]any{"memoryMiB": 96}
+	updated, err := call(assistant, input); if err != nil { t.Fatal(err) }
+	settings := updated.(siteSettings)
+	open := true
+	webPatch := scriptRuntimeSettings{scriptResultSeconds: 19}
+	if _, err := a.SaveSiteSettings(admin.User.ID, siteSettingsInput{Version: settings.Version, Open: &open, AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, ScriptRuntime: &webPatch}); err != nil { t.Fatal(err) }
+	policy, err := a.requireExecution(); if err != nil { t.Fatal(err) }
+	if policy.scriptJSONBytes() != 20<<20 || policy.JSONBytes != old.JSONBytes || policy.scriptLimit(scriptResultSeconds, 0) != 19 || policy.scriptLimit(scriptMemoryMiB, 0) != 96 { t.Fatalf("effective policy lost a saved value or altered the HTTP JSON limit: %+v", policy) }
+}
+
 func TestSiteClosureExpiresOnlyRegularSessionsAndPreservesSubmittedWork(t *testing.T) {
 	a := siteTestApp(t)
 	for _, value := range []any{&Session{Hash: "owner-session", UserID: "owner"}, &Session{Hash: "admin-session", UserID: "admin"}, &GenerationTask{ID: "submitted", UserID: "owner", Status: "running"}} {

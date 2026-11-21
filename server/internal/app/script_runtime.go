@@ -29,45 +29,72 @@ import (
 
 // Builtin and user scripts share the same WASM runtime and host capabilities.
 func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot, phase string) (runner func(string, any) (map[string]any, error), cleanup func(), failure error) {
-	ctx, cancelCause := context.WithCancelCause(parent)
-	cancel := func() { cancelCause(nil) }
-	ctx = withLogContext(ctx, slog.String("phase", phase), slog.String("channel_id", snapshot.ChannelID), slog.String("model_id", snapshot.Model.ID), slog.String("script_version", snapshot.Model.AdapterVersionID), slog.Int("script_seconds", snapshot.Policy.ScriptSeconds), slog.Int("script_memory_mib", snapshot.Policy.ScriptMemoryMiB), slog.Int64("json_limit_bytes", snapshot.Policy.JSONBytes))
+	policy := snapshot.Policy
+	limitField := scriptSubmitSeconds
+	switch phase { case "result", "usage": limitField = scriptResultSeconds; case "stream": limitField = scriptStreamSeconds }
+	initLimit, evalLimit := policy.scriptLimit(scriptInitSeconds, policy.ScriptSeconds), policy.scriptLimit(limitField, policy.ScriptSeconds)
+	memory, jsonBytes := policy.scriptLimit(scriptMemoryMiB, policy.ScriptMemoryMiB), policy.scriptJSONBytes()
+	lifetime, cancel := context.WithCancelCause(parent)
+	ctx := withLogContext(lifetime, slog.String("phase", phase), slog.String("channel_id", snapshot.ChannelID), slog.String("model_id", snapshot.Model.ID), slog.String("script_version", snapshot.Model.AdapterVersionID), slog.Int("script_init_seconds", initLimit), slog.Int("script_seconds", evalLimit), slog.Int("script_memory_mib", memory), slog.Int64("json_limit_bytes", jsonBytes))
 	started := time.Now()
+	endInit := armDeadline(seconds(initLimit), func() { cancel(context.DeadlineExceeded) })
+	var initMS int64
+	closeRuntime := func() { cancel(nil) }
 	defer func() {
-		if recovered := recover(); recovered != nil { failure = &scriptRuntimeError{stage: "脚本运行环境初始化", cause: fmt.Errorf("%v", recovered)}; cancel(); if cleanup != nil { cleanup() }; runner, cleanup = nil, nil }
-		if failure != nil { a.logFailure(ctx, "script.runtime_failed", failure, slog.Int64("duration_ms", time.Since(started).Milliseconds())) }
+		if recovered := recover(); recovered != nil { failure = panicError(recovered) }
+		endInit()
+		if cause := context.Cause(ctx); cause != nil { failure = cause }
+		if failure != nil {
+			failure = &scriptRuntimeError{phase: phase, stage: "sandbox_init", cause: failure}
+			elapsed := time.Since(started).Milliseconds()
+			closeRuntime(); runner, cleanup = nil, nil
+			a.logFailure(ctx, "script.runtime_failed", failure, slog.Int64("duration_ms", elapsed), slog.Int64("sandbox_init_ms", elapsed))
+		}
 	}()
-	runtime, err := qjs.New(qjs.Option{Context: ctx, NoFilesystem: true, CloseOnContextDone: true, MemoryLimit: snapshot.Policy.ScriptMemoryMiB << 20, MemoryLimitPages: uint32(snapshot.Policy.ScriptMemoryMiB)*16, Stdout: io.Discard, Stderr: io.Discard})
-	if err != nil { cancel(); return nil, nil, &scriptRuntimeError{stage: "脚本运行环境初始化", cause: err} }
-	cleanup = func() { defer func() { recovered := recover(); cancel(); if recovered != nil { a.logFailure(ctx, "script.runtime_close_failed", fmt.Errorf("%v", recovered)) } }(); runtime.Close() }
+	if ctx.Err() != nil { return nil, nil, context.Cause(ctx) }
+	runtime, err := qjs.New(qjs.Option{Context: ctx, NoFilesystem: true, CloseOnContextDone: true, MemoryLimit: memory << 20, MemoryLimitPages: uint32(memory)*16, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil { return nil, nil, err }
+	closeRuntime = func() {
+		defer cancel(nil)
+		defer func() { if recovered := recover(); recovered != nil && ctx.Err() == nil { a.logFailure(ctx, "script.runtime_close_failed", panicError(recovered)) } }()
+		runtime.Close()
+	}
 	js := runtime.Context()
 	js.SetFunc("$encode", func(this *qjs.This) (*qjs.Value, error) {
 		args := this.Args(); if len(args) != 2 { return nil, errors.New("encode(kind, value) required") }; kind, value := args[0].String(), args[1].String()
 		switch kind { case "base64": value = base64.StdEncoding.EncodeToString([]byte(value)); case "hex": value = hex.EncodeToString([]byte(value)); case "url": value = url.QueryEscape(value); case "sha256": sum := sha256.Sum256([]byte(value)); value = hex.EncodeToString(sum[:]); default: return nil, errors.New("unsupported encoding") }; return js.NewString(value), nil
 	})
 	js.SetFunc("$sign", func(this *qjs.This) (*qjs.Value, error) { args := this.Args(); if len(args) != 1 { return nil, errors.New("sign(value) required") }; secret, err := a.decryptSecret(snapshot.Credential); if err != nil { return nil, err }; mac := hmac.New(sha256.New, []byte(secret)); mac.Write([]byte(args[0].String())); return js.NewString(hex.EncodeToString(mac.Sum(nil))), nil })
-	a.logEvent(ctx, slog.LevelDebug, "script.runtime_ready", slog.Int64("duration_ms", time.Since(started).Milliseconds()), slog.Uint64("memory_bytes", uint64(runtime.Mem().Size())))
+	initMS = time.Since(started).Milliseconds()
+	a.logEvent(ctx, slog.LevelDebug, "script.runtime_ready", slog.Int64("sandbox_init_ms", initMS), slog.Uint64("memory_bytes", uint64(runtime.Mem().Size())))
 	evaluations := 0
 	run := func(source string, input any) (output map[string]any, err error) {
 		started := time.Now(); evaluations++
+		endEval := armDeadline(seconds(evalLimit), func() { cancel(context.DeadlineExceeded) })
+		stage := "input"
 		inputBytes, outputBytes := 0, 0
 		defer func() {
-			if recovered := recover(); recovered != nil { cause := fmt.Errorf("%v", recovered); if context.Cause(ctx) != nil { cause = fmt.Errorf("%w: %v", context.Cause(ctx), cause) }; if err == nil { output, err = nil, &scriptRuntimeError{stage: "脚本执行（中断或资源边界）", cause: cause} } }
-			fields := []slog.Attr{slog.Int("evaluation", evaluations), slog.Int("input_bytes", inputBytes), slog.Int("output_bytes", outputBytes), slog.Uint64("memory_bytes", uint64(runtime.Mem().Size())), slog.Int64("duration_us", time.Since(started).Microseconds())}
-			if err != nil { a.logFailure(ctx, "script.failed", err, fields...) } else { a.logEvent(ctx, slog.LevelDebug, "script.completed", fields...) }
+			if recovered := recover(); recovered != nil { err = panicError(recovered) }
+			endEval()
+			if cause := context.Cause(ctx); cause != nil { err = cause }
+			fields := []slog.Attr{slog.Int("evaluation", evaluations), slog.Int("input_bytes", inputBytes), slog.Int("output_bytes", outputBytes), slog.Int64("sandbox_init_ms", initMS), slog.Uint64("memory_bytes", uint64(runtime.Mem().Size())), slog.Int64("duration_us", time.Since(started).Microseconds())}
+			if err != nil { output, err = nil, &scriptRuntimeError{phase: phase, stage: stage, cause: err}; a.logFailure(ctx, "script.failed", err, fields...) } else { a.logEvent(ctx, slog.LevelDebug, "script.completed", fields...) }
 		}()
-		data, err := json.Marshal(input); if err != nil { return nil, err }; inputBytes = len(data); if int64(len(data)) > snapshot.Policy.JSONBytes { return nil, &scriptRuntimeError{stage: "脚本输入（超过 JSON 边界）"} }
-		timer := time.AfterFunc(seconds(snapshot.Policy.ScriptSeconds), func() { cancelCause(context.DeadlineExceeded) }); defer timer.Stop()
+		if ctx.Err() != nil { return nil, context.Cause(ctx) }
+		data, err := json.Marshal(input); if err != nil { return nil, err }; inputBytes = len(data); if int64(inputBytes) > jsonBytes { return nil, errScriptJSONLimit }
 		// QJS_Eval already awaits promises; its return value is the resolved JSON string.
-		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+strconv.Quote(string(data))+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, &scriptRuntimeError{stage: "脚本执行", cause: err} }; defer value.Free()
-		encoded := value.String(); outputBytes = len(encoded); if int64(len(encoded)) > snapshot.Policy.JSONBytes { return nil, &scriptRuntimeError{stage: "脚本输出（超过 JSON 边界）"} }
-		if json.Unmarshal([]byte(encoded), &output) != nil || output == nil { return nil, &scriptRuntimeError{stage: "脚本输出（需要 JSON 对象）"} }; return output, nil
+		stage = "script_eval"
+		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+strconv.Quote(string(data))+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, err }; defer value.Free()
+		stage = "output"
+		encoded := value.String(); outputBytes = len(encoded); if int64(outputBytes) > jsonBytes { return nil, errScriptJSONLimit }
+		if json.Unmarshal([]byte(encoded), &output) != nil || output == nil { return nil, errors.New("script must return a valid JSON object") }; return output, nil
 	}
-	return run, cleanup, nil
+	return run, closeRuntime, nil
 }
 
 func (a *App) runScript(ctx context.Context, snapshot executionSnapshot, phase, source string, input any) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(ctx, seconds(snapshot.Policy.ScriptSeconds)); defer cancel()
+	// Accepted snapshots without per-stage settings retain their old combined deadline.
+	if snapshot.Policy.ScriptRuntime == nil { var cancel context.CancelFunc; ctx, cancel = context.WithTimeout(ctx, seconds(snapshot.Policy.ScriptSeconds)); defer cancel() }
 	run, close, err := a.scriptRunner(ctx, snapshot, phase); if err != nil { return nil, err }; defer close(); return run(source, input)
 }
 
@@ -75,6 +102,7 @@ func (a *App) scriptArguments(task GenerationTask, snapshot executionSnapshot, i
 	var controls []parameterControl; if err := json.Unmarshal(snapshot.Model.Parameters, &controls); err != nil { return nil, err }
 	parameters := map[string]any{}; if err := json.Unmarshal(input.Parameters, &parameters); err != nil { return nil, err }
 	references := []map[string]any{}
+	remainingData := snapshot.Policy.scriptJSONBytes()
 	for _, reference := range input.References {
 		var asset Asset; if err := a.db.First(&asset, "id = ? AND user_id = ?", reference.AssetID, task.UserID).Error; err != nil { return nil, err }
 		for _, control := range materialControls(controls, parameters, reference) {
@@ -85,7 +113,8 @@ func (a *App) scriptArguments(task GenerationTask, snapshot executionSnapshot, i
 		row["transport"] = transport
 		if withFiles && transport == "https" { address, err := a.assetTaskURL(task.UserID, asset.ID, snapshot.Policy); if err != nil { return nil, err }; row["url"] = address }
 		if withFiles && transport == "data" {
-			if asset.Bytes > (snapshot.Policy.JSONBytes/4)*3 { return nil, problem(400, "asset_encoding_limit", "Base64 素材超过脚本 JSON 边界，请为此模型改用 file 或 https") }
+			if asset.Bytes < 0 || asset.Bytes > (remainingData/4)*3 { return nil, problem(400, "asset_encoding_limit", "Base64 素材总量超过接口插件 JSON 上限，请减少素材或为此模型改用 file 或 https") }
+			remainingData -= int64(base64.StdEncoding.EncodedLen(int(asset.Bytes)))
 			a.assetFiles.RLock(); name, err := a.assetOriginalPath(asset); var data []byte
 			if err == nil { var file *os.File; file, err = os.Open(name); if err == nil { data, err = io.ReadAll(io.LimitReader(file, asset.Bytes+1)); file.Close(); if int64(len(data)) != asset.Bytes { err = errors.New("asset size changed") } } }; a.assetFiles.RUnlock()
 			if err != nil { return nil, err }; row["dataUrl"] = "data:"+asset.MimeType+";base64,"+base64.StdEncoding.EncodeToString(data)
@@ -103,18 +132,43 @@ func (a *App) validateScriptInput(userID string, snapshot executionSnapshot, inp
 	if snapshot.Script == nil { return problem(400, "script_required", "模型尚未选择接口插件版本") }; scripts := map[string]string{}; if err := json.Unmarshal(snapshot.Script.Scripts, &scripts); err != nil { return err }; if scripts["validate"] == "" { return nil }
 	arguments, err := a.scriptArguments(GenerationTask{UserID: userID}, snapshot, input, false); if err != nil { return err }
 	if len(tools) > 0 { arguments["tools"] = tools[0] }
-	value, err := a.runScript(a.ctx, snapshot, "validate", scripts["validate"], arguments); if err != nil { return problem(400, "interface_validation_failed", "参数校验阶段："+providerError(&scriptPreparationError{cause: err})) }
+	value, err := a.runScript(a.ctx, snapshot, "validate", scripts["validate"], arguments); if err != nil { return problem(400, "interface_validation_failed", providerError(&scriptPreparationError{phase: "validate", cause: err})) }
 	if value["valid"] != true { message := text(value["error"]); if message == "" { message = "模型参数或素材组合不符合接口要求" }; return problem(400, "invalid_model_input", message) }; return nil
 }
 
+var errScriptJSONLimit = errors.New("script JSON boundary exceeded")
+
+func panicError(value any) error {
+	if err, ok := value.(error); ok { return err }
+	return fmt.Errorf("%v", value)
+}
+
 // Public diagnostics identify the failing stage without exposing script values or credentials.
-type scriptRuntimeError struct { stage string; cause error }
-func (e *scriptRuntimeError) Error() string { return e.stage+"失败，请核对接口插件及已配置运行边界" }
+type scriptRuntimeError struct { phase, stage string; cause error }
+func (e *scriptRuntimeError) Error() string {
+	if e.stage == "sandbox_init" {
+		if errors.Is(e, context.DeadlineExceeded) { return "接口插件运行环境初始化超时，请核对站点管理中的初始化时限" }
+		if errors.Is(e, context.Canceled) { return "接口插件初始化已停止" }
+		return "接口插件运行环境初始化失败，请查看后台日志"
+	}
+	label := map[string]string{"validate": "模型参数校验", "submit": "模型请求准备", "query": "查询请求准备", "result": "模型结果处理", "stream": "流式事件处理", "usage": "用量处理", "cancel": "取消请求准备"}[e.phase]
+	if label == "" { label = "接口插件执行" }
+	if errors.Is(e, context.DeadlineExceeded) { return label+"超时，请核对接口插件与站点管理中的对应时限" }
+	if errors.Is(e, context.Canceled) { return label+"已停止" }
+	if errors.Is(e, errScriptJSONLimit) { if e.stage == "output" { return label+"的输出超过接口插件 JSON 上限" }; return label+"的输入超过接口插件 JSON 上限" }
+	if e.stage == "output" { return label+"未返回有效的 JSON 对象" }
+	return label+"失败，请查看接口插件和后台日志"
+}
 func (e *scriptRuntimeError) Unwrap() error { return e.cause }
 
-type scriptPreparationError struct { cause error }
-func (e *scriptPreparationError) Error() string { return "接口插件调用准备失败，尚未提交供应商" }
+type scriptPreparationError struct { cause error; phase string }
+func (e *scriptPreparationError) Error() string { return "接口插件调用准备失败" }
 func (e *scriptPreparationError) Unwrap() error { return e.cause }
+
+func beforeModelSubmission(err error) bool {
+	var preparation *scriptPreparationError
+	return errors.As(err, &preparation) && preparation.phase == "submit"
+}
 
 func scriptRequestURL(baseURL, requestPath string) (string, error) {
 	address, err := url.Parse(requestPath); base, baseErr := url.Parse(strings.TrimRight(baseURL, "/")+"/")
@@ -124,7 +178,8 @@ func scriptRequestURL(baseURL, requestPath string) (string, error) {
 	return resolved.String(), nil
 }
 
-func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID string, snapshot executionSnapshot, descriptor map[string]any, arguments map[string]any, onStream func(map[string]any) error) (output map[string]any, failure error) {
+func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID string, snapshot executionSnapshot, phase string, descriptor map[string]any, arguments map[string]any, onStream func(map[string]any) error) (output map[string]any, failure error) {
+	ctx = withLogContext(ctx, slog.String("phase", phase))
 	submitted := false
 	started := time.Now()
 	statusCode := 0
@@ -132,7 +187,7 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 	loggedResponseType := responseType; if !includes([]string{"", "json", "binary", "image-json", "sse"}, responseType) { loggedResponseType = "invalid" }
 	defer func() {
 		fields := []slog.Attr{slog.Bool("submission_started", submitted), slog.String("response_type", loggedResponseType), slog.Int("http_status", statusCode), slog.Int64("duration_ms", time.Since(started).Milliseconds())}
-		if failure != nil { a.logFailure(ctx, "provider.failed", failure, fields...); if !submitted { failure = &scriptPreparationError{cause: failure} } } else { a.logEvent(ctx, slog.LevelDebug, "provider.completed", fields...) }
+		if failure != nil { a.logFailure(ctx, "provider.failed", failure, fields...); if !submitted { failure = &scriptPreparationError{cause: failure, phase: phase} } } else { a.logEvent(ctx, slog.LevelDebug, "provider.completed", fields...) }
 	}()
 	resolved, err := scriptRequestURL(snapshot.BaseURL, text(descriptor["path"])); if err != nil { return nil, err }
 	client, err := a.providerClient(snapshot); if err != nil { return nil, err }
@@ -160,6 +215,7 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 			}; return form.Close()
 		}(); writer.CloseWithError(err) }(); body = reader; opts = append(opts, option.WithHeader("Content-Type", form.FormDataContentType()))
 	}
+	if ctx.Err() != nil { return nil, context.Cause(ctx) }
 	submitted = true
 	a.logEvent(ctx, slog.LevelDebug, "provider.request_started", slog.String("method", method), slog.String("response_type", responseType))
 	var response *http.Response; if err := client.Execute(ctx, method, resolved, body, &response, opts...); err != nil { return nil, a.providerFailure(snapshot, err) }; defer response.Body.Close()
@@ -176,7 +232,8 @@ func (a *App) scriptRequest(ctx context.Context, task GenerationTask, leaseID st
 		name := task.ID+".media"; directory := filepath.Join(a.root, "results"); if err := os.MkdirAll(directory, 0700); err != nil { return nil, err }; file, err := os.OpenFile(filepath.Join(directory, name+".pending"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); if err != nil { return nil, err }; defer os.Remove(file.Name())
 		count, err := io.Copy(file, io.LimitReader(response.Body, snapshot.Policy.mediaLimit(task.Capability)+1)); if err == nil && (count == 0 || count > snapshot.Policy.mediaLimit(task.Capability)) { err = errors.New("binary output exceeds configured media boundary") }; if err == nil { err = file.Sync() }; closeErr := file.Close(); if err == nil { err = closeErr }; if err == nil { err = os.Rename(file.Name(), filepath.Join(directory, name)) }; if err != nil { return nil, err }; return map[string]any{"responseFile": name, "mimeType": response.Header.Get("Content-Type"), "bytes": count}, nil
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, snapshot.Policy.JSONBytes+1)); if err != nil { return nil, err }; if int64(len(data)) > snapshot.Policy.JSONBytes { return nil, errors.New("supplier JSON exceeds configured boundary") }
+	limit := snapshot.Policy.scriptJSONBytes()
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1)); if err != nil { return nil, err }; if int64(len(data)) > limit { return nil, &providerRequestError{cause: errScriptJSONLimit, message: "供应商 JSON 响应超过接口插件 JSON 上限；本次请求已提交，未自动重提"} }
 	var result any; if json.Unmarshal(data, &result) != nil { return nil, errors.New("supplier did not return valid JSON") }; if value, ok := result.(map[string]any); ok { return value, nil }; return map[string]any{"data": result}, nil
 }
 
@@ -190,19 +247,33 @@ func (a *App) readScriptStream(ctx context.Context, snapshot executionSnapshot, 
 		if failure != nil { a.logFailure(ctx, "provider.stream_failed", failure, fields...) } else { a.logEvent(ctx, slog.LevelDebug, "provider.stream_completed", fields...) }
 	}()
 	for stream.Next() {
-		event := stream.Event(); data := strings.TrimSpace(string(event.Data)); if data == "" || data == "[DONE]" { continue }
-		if int64(len(event.Data)) > snapshot.Policy.JSONBytes { return state, errors.New("stream event exceeds configured JSON boundary") }
+		event := stream.Event(); if int64(len(event.Data)) > snapshot.Policy.scriptJSONBytes() { return state, &providerRequestError{cause: errScriptJSONLimit, message: "供应商流式事件超过接口插件 JSON 上限；已收到的内容仍保留"} }
+		data := strings.TrimSpace(string(event.Data)); if data == "[DONE]" { break }; if data == "" { continue }
 		var value map[string]any; if json.Unmarshal(event.Data, &value) != nil || value == nil { return state, errors.New("invalid stream JSON") }; if value["type"] == nil && event.Type != "" { value["type"] = event.Type }
 		events++
 		next, err := run(scripts["stream"], map[string]any{"event": value, "state": state, "input": arguments}); if err != nil { return state, err }; state = next
-		if _, err := scriptProgress(state); err != nil { return state, &scriptRuntimeError{stage: "流式进度字段（需要 0–100 数值）", cause: err} }
+		if _, err := scriptProgress(state); err != nil { return state, &providerRequestError{cause: err, message: "接口插件返回的流式进度必须是 0–100 的数值"} }
 		if onStream != nil { if err := onStream(state); err != nil { return state, err } }
 	}
 	if err := stream.Err(); err != nil { return state, err }; if state["complete"] != true { return state, io.ErrUnexpectedEOF }; return state, nil
 }
 
-type scriptParseError struct { phase string; detail string; cause error }
-func (e *scriptParseError) Error() string { if e.detail != "" { return e.detail+"；原响应已保留，未重新提交供应商" }; return "接口"+e.phase+"解析失败；原响应已保存，可继续解析，未重新提交供应商" }
+type scriptParseError struct { phase string; detail string; cause error; responseSaved bool }
+func (e *scriptParseError) Error() string {
+	message := e.detail
+	if message == "" {
+		var runtime *scriptRuntimeError; var preparation *scriptPreparationError; var timeout *providerTimeoutError
+		switch {
+		case errors.As(e.cause, &runtime): message = runtime.Error()
+		case errors.As(e.cause, &preparation): message = providerError(preparation)
+		case errors.As(e.cause, &timeout): message = timeout.Error()
+		case isTimeout(e.cause): message = "接口"+e.phase+"处理超时"
+		default: message = "接口"+e.phase+"解析失败"
+		}
+	}
+	if e.responseSaved { message += "；原响应已保存，可继续核对" }
+	return message+"；未自动重提模型请求"
+}
 func (e *scriptParseError) Unwrap() error { return e.cause }
 
 func scriptProgress(value map[string]any) (*float64, error) {
@@ -219,7 +290,12 @@ func (a *App) persistScriptResponse(taskID, phase string, response, arguments ma
 }
 
 func (a *App) callModelScript(ctx context.Context, task GenerationTask, snapshot executionSnapshot, input generationInput, query bool) (providerResult, error) {
-	arguments, err := a.scriptArguments(task, snapshot, input, task.RawResponseFile == ""); if err != nil { return providerResult{}, &scriptPreparationError{cause: err} }
+	var arguments map[string]any
+	if task.RawResponseFile == "" {
+		phase := "submit"; if query { phase = "query" }
+		var err error
+		arguments, err = a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, &scriptPreparationError{cause: err, phase: phase} }
+	}
 	return a.executeModelScript(ctx, task, task.ID, snapshot, arguments, query, func(state map[string]any) error {
 		values := map[string]any{}
 		if content := text(state["text"]); task.Capability == "text" && content != task.Text { values["text"], task.Text = content, content }
@@ -232,44 +308,50 @@ func (a *App) callModelScript(ctx context.Context, task GenerationTask, snapshot
 func (a *App) executeModelScript(ctx context.Context, task GenerationTask, leaseID string, snapshot executionSnapshot, arguments map[string]any, query bool, onStream func(map[string]any) error) (providerResult, error) {
 	ctx = withLogContext(ctx, slog.String("channel_id", snapshot.ChannelID), slog.String("model_id", snapshot.Model.ID), slog.String("script_version", snapshot.Model.AdapterVersionID))
 	if task.ID != "" { ctx = withLogContext(ctx, slog.String("task_id", task.ID)) }
-	if task.RawResponseFile == "" {
-		if snapshot.Script == nil { return providerResult{}, &scriptPreparationError{cause: errors.New("missing script version")} }
-		if err := ctx.Err(); err != nil { return providerResult{}, &scriptPreparationError{cause: err} }
-	}
-	scripts := map[string]string{}; if snapshot.Script == nil || json.Unmarshal(snapshot.Script.Scripts, &scripts) != nil { return providerResult{}, errors.New("invalid script scripts") }
 	phase := "submit"; if query { phase = "query" }; response := map[string]any{}
+	if task.RawResponseFile == "" {
+		if snapshot.Script == nil { return providerResult{}, &scriptPreparationError{cause: errors.New("missing script version"), phase: phase} }
+		if err := ctx.Err(); err != nil { return providerResult{}, &scriptPreparationError{cause: context.Cause(ctx), phase: phase} }
+	}
+	scripts := map[string]string{}
+	if snapshot.Script == nil || json.Unmarshal(snapshot.Script.Scripts, &scripts) != nil {
+		err := errors.New("invalid script scripts")
+		if task.RawResponseFile == "" { return providerResult{}, &scriptPreparationError{cause: err, phase: phase} }
+		return providerResult{}, &scriptParseError{phase: "结果", cause: err}
+	}
 	if task.RawResponseFile != "" {
 		if task.RawResponseFile != task.ID+".script.json" { return providerResult{}, errors.New("invalid saved response") }; file, err := os.Open(filepath.Join(a.root, "results", task.RawResponseFile)); if err != nil { return providerResult{}, err }
 		var saved struct { Phase string `json:"phase"`; Response map[string]any `json:"response"`; Arguments map[string]any `json:"arguments"` }; err = json.NewDecoder(file).Decode(&saved); closeErr := file.Close(); if err != nil || closeErr != nil || saved.Response == nil || saved.Arguments == nil { return providerResult{}, errors.New("saved response unreadable") }; phase, response, arguments = saved.Phase, saved.Response, saved.Arguments
 		if task.UpstreamID != "" { arguments["upstreamId"] = task.UpstreamID }
 	} else {
-		if scripts[phase] == "" { return providerResult{}, &scriptPreparationError{cause: errors.New("missing script phase")} }
+		if scripts[phase] == "" { return providerResult{}, &scriptPreparationError{cause: errors.New("missing script phase"), phase: phase} }
 		if query && task.CancelRequested && !task.CancelSent && scripts["cancel"] != "" {
 			update := a.db.Model(&GenerationTask{}).Where("id = ? AND cancel_sent = ?", task.ID, false).Update("cancel_sent", true); if update.Error != nil { return providerResult{}, update.Error }
-			if update.RowsAffected == 1 { descriptor, cancelErr := a.runScript(ctx, snapshot, "cancel", scripts["cancel"], arguments); if cancelErr == nil { _, cancelErr = a.scriptRequest(ctx, task, leaseID, snapshot, descriptor, arguments, nil) }; message := "已发送取消请求，继续核对实际结果和用量"; if cancelErr != nil { message = "取消结果待确认，不重复发送；继续查询实际结果" }; a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("cancel_error", message) }
+			if update.RowsAffected == 1 { descriptor, cancelErr := a.runScript(ctx, snapshot, "cancel", scripts["cancel"], arguments); if cancelErr == nil { _, cancelErr = a.scriptRequest(ctx, task, leaseID, snapshot, "cancel", descriptor, arguments, nil) }; message := "已发送取消请求，继续核对实际结果和用量"; if cancelErr != nil { message = "取消结果待确认，不重复发送；继续查询实际结果" }; a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Update("cancel_error", message) }
 		}
-		descriptor, err := a.runScript(ctx, snapshot, phase, scripts[phase], arguments); if err != nil { return providerResult{}, &scriptPreparationError{cause: err} }
-		response, err = a.scriptRequest(ctx, task, leaseID, snapshot, descriptor, arguments, onStream); if err != nil { result := providerResult{}; _ = json.Unmarshal(encode(response), &result); return result, err }
+		descriptor, err := a.runScript(ctx, snapshot, phase, scripts[phase], arguments); if err != nil { return providerResult{}, &scriptPreparationError{cause: err, phase: phase} }
+		response, err = a.scriptRequest(ctx, task, leaseID, snapshot, phase, descriptor, arguments, onStream); if err != nil { result := providerResult{}; _ = json.Unmarshal(encode(response), &result); return result, err }
 		if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }
 	}
+	parseError := func(phase, detail string, cause error) error { return &scriptParseError{phase: phase, detail: detail, cause: cause, responseSaved: task.ID != ""} }
 	for {
-		if err := ctx.Err(); err != nil { return providerResult{}, err }
-		parsed, err := a.runScript(ctx, snapshot, "result", scripts["result"], map[string]any{"response": response, "phase": phase, "input": arguments}); if err != nil { return providerResult{}, &scriptParseError{phase: "结果", cause: err} }
+		if err := ctx.Err(); err != nil { return providerResult{}, parseError("结果", "", context.Cause(ctx)) }
+		parsed, err := a.runScript(ctx, snapshot, "result", scripts["result"], map[string]any{"response": response, "phase": phase, "input": arguments}); if err != nil { return providerResult{}, parseError("结果", "", err) }
 		if id := text(parsed["upstreamId"]); id != "" { arguments["upstreamId"] = id }
 		if follow := object(parsed["request"]); len(follow) > 0 {
-			if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, &scriptParseError{phase: "后续只读请求"} }
-			if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口插件 progress 必须为供应商提供的 0–100 数值", cause: err} }
+			if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, parseError("后续只读请求", "", nil) }
+			if _, err := scriptProgress(parsed); err != nil { return providerResult{}, parseError("进度", "接口插件 progress 必须为供应商提供的 0–100 数值", err) }
 			previous := object(arguments["previousResult"]); for _, key := range []string{"usage", "usageState", "progress"} { if parsed[key] != nil { previous[key] = parsed[key] } }; arguments["previousResult"] = previous
-			response, err = a.scriptRequest(ctx, task, leaseID, snapshot, follow, arguments, onStream); if err != nil { return providerResult{}, &scriptParseError{phase: "后续查询", cause: err} }; phase = "followup"; if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }; continue
+			response, err = a.scriptRequest(ctx, task, leaseID, snapshot, "followup", follow, arguments, onStream); if err != nil { return providerResult{}, parseError("后续查询", "", err) }; phase = "followup"; if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }; continue
 		}
-		if _, err := scriptProgress(parsed); err != nil { return providerResult{}, &scriptParseError{phase: "进度", detail: "接口插件 progress 必须为供应商提供的 0–100 数值", cause: err} }
-		var result providerResult; if json.Unmarshal(encode(parsed), &result) != nil || !includes([]string{"queued", "running", "completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) { return result, &scriptParseError{phase: "结果状态"} }
+		if _, err := scriptProgress(parsed); err != nil { return providerResult{}, parseError("进度", "接口插件 progress 必须为供应商提供的 0–100 数值", err) }
+		var result providerResult; if json.Unmarshal(encode(parsed), &result) != nil || !includes([]string{"queued", "running", "completed", "incomplete", "failed", "cancelled", "confirmation_required"}, result.Status) { return result, parseError("结果状态", "", nil) }
 		if result.Progress == nil { result.Progress, _ = scriptProgress(object(arguments["previousResult"])) }
 		if result.UpstreamID == "" { result.UpstreamID = text(arguments["upstreamId"]) }
-		if includes([]string{"queued", "running"}, result.Status) && (strings.TrimSpace(result.UpstreamID) == "" || scripts["query"] == "") { return result, &scriptParseError{phase: "查询依据", detail: "接口插件 result 返回排队或运行状态，但缺少 upstreamId 或 query 阶段；请管理员核对响应编号映射"} }
+		if includes([]string{"queued", "running"}, result.Status) && (strings.TrimSpace(result.UpstreamID) == "" || scripts["query"] == "") { return result, parseError("查询依据", "接口插件 result 返回排队或运行状态，但缺少 upstreamId 或 query 阶段；请管理员核对响应编号映射", nil) }
 		a.logEvent(ctx, slog.LevelDebug, "script.result_normalized", slog.String("status", result.Status), slog.Bool("has_upstream_id", result.UpstreamID != ""), slog.Bool("has_progress", result.Progress != nil))
-		if result.ResponseFile != "" && result.ResponseFile != text(response["responseFile"]) { return providerResult{}, &scriptParseError{phase: "文件标识"} }
-		if outputs := array(parsed["outputs"]); len(outputs) > 0 { if task.ID == "" { return providerResult{}, errors.New("media outputs require a persistent generation task") }; data := []map[string]any{}; for _, raw := range outputs { output := object(raw); if text(output["url"]) == "" && text(output["b64_json"]) == "" { return providerResult{}, &scriptParseError{phase: "成品"} }; data = append(data, map[string]any{"url": output["url"], "b64_json": output["b64_json"]}) }; saved, err := a.persistProviderResponse(task.ID, io.NopCloser(strings.NewReader(string(encode(map[string]any{"data": data}))))); if err != nil { return providerResult{}, err }; result.ResponseFile = saved.ResponseFile }
+		if result.ResponseFile != "" && result.ResponseFile != text(response["responseFile"]) { return providerResult{}, parseError("文件标识", "", nil) }
+		if outputs := array(parsed["outputs"]); len(outputs) > 0 { if task.ID == "" { return providerResult{}, errors.New("media outputs require a persistent generation task") }; data := []map[string]any{}; for _, raw := range outputs { output := object(raw); if text(output["url"]) == "" && text(output["b64_json"]) == "" { return providerResult{}, parseError("成品", "", nil) }; data = append(data, map[string]any{"url": output["url"], "b64_json": output["b64_json"]}) }; saved, err := a.persistProviderResponse(task.ID, io.NopCloser(strings.NewReader(string(encode(map[string]any{"data": data}))))); if err != nil { return providerResult{}, err }; result.ResponseFile = saved.ResponseFile }
 		if result.UsageState != "" { result.UsageState = normalizedUsageState(result.UsageState) }
 		if scripts["usage"] != "" { usage, err := a.runScript(ctx, snapshot, "usage", scripts["usage"], map[string]any{"response": response, "input": arguments}); if err != nil { result.Usage, result.UsageState, result.Error = nil, "unknown", "用量解析失败，结果保留；请按供应商账单修正统计" } else { result.Usage = usage } }
 		if result.Usage == nil { result.Usage = map[string]any{} }

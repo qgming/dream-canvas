@@ -7,11 +7,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
@@ -71,17 +73,52 @@ func externalTransport(policy executionPolicy) *http.Transport {
 type watchedBody struct { io.ReadCloser; timer *time.Timer; idle time.Duration; cancel context.CancelFunc; once sync.Once }
 func (b *watchedBody) Read(data []byte) (int, error) { n, err := b.ReadCloser.Read(data); if n > 0 { b.timer.Reset(b.idle) }; return n, err }
 func (b *watchedBody) Close() error { b.once.Do(func() { b.timer.Stop(); b.cancel() }); return b.ReadCloser.Close() }
-type providerTransport struct { base http.RoundTripper; idle time.Duration }
+
+type modelResponseBody struct { io.ReadCloser; ctx context.Context; cancel context.CancelCauseFunc; idle time.Duration }
+
+func (b *modelResponseBody) Read(data []byte) (int, error) {
+	if cause := context.Cause(b.ctx); cause != nil { return 0, cause }
+	stop := armDeadline(b.idle, func() { b.cancel(&providerTimeoutError{stage: "provider_idle", cause: context.DeadlineExceeded}) })
+	n, err := b.ReadCloser.Read(data)
+	stop()
+	if cause := context.Cause(b.ctx); cause != nil { return n, cause }
+	return n, err
+}
+
+func (b *modelResponseBody) Close() error { b.cancel(nil); return b.ReadCloser.Close() }
+
+type providerTransport struct { base http.RoundTripper; idle time.Duration; model bool }
 func (t providerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithCancel(request.Context())
+	ctx, cancel := context.WithCancelCause(request.Context())
+	var written atomic.Bool
+	if t.model { ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) { if info.Err == nil { written.Store(true) } }}) }
 	response, err := t.base.RoundTrip(request.Clone(ctx))
-	if err != nil { cancel(); return nil, err }
-	response.Body = &watchedBody{ReadCloser: response.Body, timer: time.AfterFunc(t.idle, cancel), idle: t.idle, cancel: cancel}
+	if err != nil {
+		if t.model && isTimeout(err) && ctx.Err() == nil {
+			stage := "provider_connection"; if written.Load() { stage = "provider_headers" }
+			err = &providerTimeoutError{stage: stage, cause: err}
+		}
+		cancel(nil); return nil, err
+	}
+	if t.model {
+		response.Body = &modelResponseBody{ReadCloser: response.Body, ctx: ctx, cancel: cancel, idle: t.idle}
+	} else {
+		close := func() { cancel(nil) }
+		response.Body = &watchedBody{ReadCloser: response.Body, timer: time.AfterFunc(t.idle, close), idle: t.idle, cancel: close}
+	}
 	return response, nil
 }
 
 func providerHTTP(policy executionPolicy) *http.Client {
-	return &http.Client{Transport: providerTransport{base: externalTransport(policy), idle: seconds(policy.IdleSeconds)}, CheckRedirect: func(request *http.Request, via []*http.Request) error {
+	return externalHTTP(policy, false)
+}
+
+func externalHTTP(policy executionPolicy, model bool) *http.Client {
+	if model {
+		policy.FirstResponseSeconds = policy.scriptLimit(modelHeaderSeconds, policy.FirstResponseSeconds)
+		policy.IdleSeconds = policy.scriptLimit(modelIdleSeconds, policy.IdleSeconds)
+	}
+	return &http.Client{Transport: providerTransport{base: externalTransport(policy), idle: seconds(policy.IdleSeconds), model: model}, CheckRedirect: func(request *http.Request, via []*http.Request) error {
 		if request.URL.Scheme != "https" || request.URL.User != nil { return errors.New("redirect must use HTTPS") }
 		if len(via) > 0 && request.URL.Host != via[0].URL.Host { request.Header.Del("Authorization") }
 		return http.ErrUseLastResponse
@@ -92,21 +129,45 @@ func (a *App) providerClient(snapshot executionSnapshot) (openai.Client, error) 
 	credential, err := a.decryptSecret(snapshot.Credential)
 	if err != nil { return openai.Client{}, err }
 	header, prefix := scriptAuth(snapshot)
-	opts := []option.RequestOption{option.WithAPIKey(""), option.WithHeaderDel("Authorization"), option.WithHeaderDel("OpenAI-Organization"), option.WithHeaderDel("OpenAI-Project"), option.WithBaseURL(strings.TrimRight(snapshot.BaseURL, "/")+"/"), option.WithMaxRetries(0), option.WithRequestTimeout(0), option.WithHTTPClient(providerHTTP(snapshot.Policy))}
+	opts := []option.RequestOption{option.WithAPIKey(""), option.WithHeaderDel("Authorization"), option.WithHeaderDel("OpenAI-Organization"), option.WithHeaderDel("OpenAI-Project"), option.WithBaseURL(strings.TrimRight(snapshot.BaseURL, "/")+"/"), option.WithMaxRetries(0), option.WithRequestTimeout(0), option.WithHTTPClient(externalHTTP(snapshot.Policy, true))}
 	if header != "" { opts = append(opts, option.WithHeader(header, prefix+credential)) }
 	return openai.NewClient(opts...), nil
 }
 
 func providerError(err error) string {
+	var parse *scriptParseError; if errors.As(err, &parse) { return parse.Error() }
 	var preparation *scriptPreparationError
-	if errors.As(err, &preparation) { var runtime *scriptRuntimeError; if errors.As(err, &runtime) { return runtime.Error()+"；尚未提交供应商" }; return "接口请求映射或素材准备失败，尚未提交供应商；请管理员使用请求预览核对路径、参数与素材" }
+	if errors.As(err, &preparation) {
+		message := "接口请求映射或素材准备失败，请核对路径、参数与素材"
+		var runtime *scriptRuntimeError; var rejected *Problem
+		switch { case errors.As(err, &runtime): message = runtime.Error(); case isTimeout(err): message = "模型请求准备超时"; case errors.Is(err, context.Canceled): message = "模型请求准备已停止"; case errors.As(err, &rejected) && rejected.Code == "asset_encoding_limit": message = rejected.Message }
+		if preparation.phase == "query" || preparation.phase == "followup" { return message+"；本次查询请求尚未发送" }
+		return message+"；本次请求尚未提交供应商"
+	}
 	var request *providerRequestError; if errors.As(err, &request) { return request.Error() }
-	var runtime *scriptRuntimeError; if errors.As(err, &runtime) { return runtime.Error()+"；请保留任务记录核对已经收到的响应" }
+	var runtime *scriptRuntimeError; if errors.As(err, &runtime) { return runtime.Error()+"；本次请求已提交供应商，未自动重提" }
 	var apiError *openai.Error
 	if errors.As(err, &apiError) { return fmt.Sprintf("供应商返回 HTTP %d，请核对模型、参数、权限和供应商账单", apiError.StatusCode) }
+	var timeout *providerTimeoutError; if errors.As(err, &timeout) { return timeout.Error()+"；未自动重提，请核对本次请求的结果与用量" }
 	if errors.Is(err, context.Canceled) { return "调用已停止；请求可能已提交，结果与用量仍待确认" }
-	if errors.Is(err, context.DeadlineExceeded) { return "调用超过已配置时限，结果与用量待确认，不会自动重新生成" }
-	return "供应商连接或响应读取失败，结果与用量待确认；请保留任务记录核对"
+	if isTimeout(err) { return "本次模型调用达到时限，结果与用量待确认；未自动重提" }
+	if errors.Is(err, io.ErrUnexpectedEOF) { return "供应商响应提前结束；结果与用量待确认，未自动重提" }
+	return "供应商连接或响应读取失败，结果与用量待确认；未自动重提"
+}
+
+type providerTimeoutError struct { stage string; cause error }
+func (e *providerTimeoutError) Error() string {
+	switch e.stage {
+	case "provider_headers": return "等待供应商响应头超时，请核对渠道或站点管理中的响应时限"
+	case "provider_idle": return "等待读取供应商响应数据超时，请核对渠道或站点管理中的响应空闲时限"
+	default: return "连接供应商超时，请核对渠道地址与服务器网络"
+	}
+}
+func (e *providerTimeoutError) Unwrap() error { return e.cause }
+
+func isTimeout(err error) bool {
+	var timeout net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())
 }
 
 type providerRequestError struct { cause error; message string }
@@ -114,7 +175,7 @@ func (e *providerRequestError) Error() string { return e.message }
 func (e *providerRequestError) Unwrap() error { return e.cause }
 
 func (a *App) providerFailure(snapshot executionSnapshot, err error) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) { return err }
+	if errors.Is(err, context.Canceled) || isTimeout(err) { return err }
 	var apiError *openai.Error
 	if !errors.As(err, &apiError) {
 		var dns *net.DNSError; if errors.As(err, &dns) { return &providerRequestError{cause: err, message: "供应商域名解析失败，请核对渠道地址和服务器 DNS；未自动重试生成"} }
@@ -132,16 +193,20 @@ func (a *App) providerFailure(snapshot executionSnapshot, err error) error {
 }
 
 func definitiveRejection(err error) bool {
-	var preparation *scriptPreparationError; if errors.As(err, &preparation) { return true }
+	if beforeModelSubmission(err) { return true }
 	var apiError *openai.Error
 	return errors.As(err, &apiError) && includes([]string{"400", "401", "403", "404", "405", "413", "415", "422", "429"}, strconv.Itoa(apiError.StatusCode))
 }
 
-func (a *App) callText(ctx context.Context, turn AssistantTurn, snapshot executionSnapshot, messages []map[string]any, parameters map[string]any, references []assetInput, tools []map[string]any, onText func(string) error) (providerResult, error) {
+func (a *App) callText(ctx context.Context, turn AssistantTurn, snapshot executionSnapshot, messages []map[string]any, parameters map[string]any, references []assetInput, tools []map[string]any, onOutput func(string, string) error) (providerResult, error) {
     input := assistantInput(assistantSnapshot{Execution: snapshot, Messages: messages, Parameters: parameters, Media: references})
     task := GenerationTask{UserID: turn.UserID, Capability: "text"}
-    arguments, err := a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, &scriptPreparationError{cause: err} }; arguments["tools"] = tools
-    return a.executeModelScript(ctx, task, "turn:"+turn.ID, snapshot, arguments, false, func(state map[string]any) error { if onText == nil { return nil }; return onText(text(state["text"])) })
+    arguments, err := a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, &scriptPreparationError{cause: err, phase: "submit"} }; arguments["tools"] = tools
+    return a.executeModelScript(ctx, task, "turn:"+turn.ID, snapshot, arguments, false, func(state map[string]any) error {
+        content, _ := state["text"].(string)
+        reasoning, _ := state["reasoning"].(string)
+        return onOutput(content, reasoning)
+    })
 }
 
 func (a *App) persistProviderResponse(id string, body io.ReadCloser) (providerResult, error) {

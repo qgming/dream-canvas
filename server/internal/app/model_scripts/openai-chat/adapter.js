@@ -1,3 +1,5 @@
+const reasoningText = message => (typeof message.reasoning_content === "string" && message.reasoning_content) || (typeof message.reasoning === "string" ? message.reasoning : "");
+
 export async function submit(input, { encode, sign }) {
   const p = input.params || {};
   const refs = new Map(([...(input.images || []), ...(input.videos || []), ...(input.audios || [])]).map(r => [r.assetId, r]));
@@ -22,7 +24,7 @@ export async function stream(input, { encode, sign }) {
   for (const choice of e.choices || []) {
       const d = choice.delta || {};
       s.text += d.content || "";
-      s.reasoning += d.reasoning_content || "";
+      s.reasoning += reasoningText(d);
       for (const call of d.tool_calls || []) {
           const current = s.toolCalls[call.index] ||= {id: "", type: "function", function: {name: "", arguments: ""}};
           if (call.id) current.id = call.id;
@@ -41,7 +43,7 @@ export async function result(input, { encode, sign }) {
     const choice = r.choices[0];
     if (!choice?.message || !choice.finish_reason) throw new Error("Missing completed chat choice");
     const incomplete = ["length", "content_filter"].includes(choice.finish_reason);
-    return {status: incomplete ? "incomplete" : "completed", upstreamId: r.id, text: choice.message.content || "", reasoning: choice.message.reasoning_content, toolCalls: choice.message.tool_calls || [], usage: r.usage || {}, error: incomplete ? "输出未完整结束，已收到内容保留 / Incomplete output retained" : ""};
+    return {status: incomplete ? "incomplete" : "completed", upstreamId: r.id, text: choice.message.content || "", reasoning: reasoningText(choice.message), toolCalls: choice.message.tool_calls || [], usage: r.usage || {}, error: incomplete ? "输出未完整结束，已收到内容保留 / Incomplete output retained" : ""};
   }
   if (r.complete !== true) throw new Error("Missing completed chat response");
   return {status: r.status || "completed", upstreamId: r.upstreamId, text: r.text || "", reasoning: r.reasoning, responseItems: r.responseItems, toolCalls: (r.toolCalls || []).filter(Boolean), usage: r.usage || {}, error: r.error || (r.status === "incomplete" ? "输出未完整结束，已收到内容保留 / Incomplete output retained" : "")};
