@@ -113,36 +113,65 @@ npm run dev
 
 ### Docker 部署（推荐）
 
-需要 Docker Engine 或 Docker Desktop（Linux 容器模式），以及 **Docker Compose v2.24.4+**（HTTPS 组合配置使用 `!override` 替换端口映射）。在仓库根目录执行，首次需要联网下载基础镜像与构建依赖；目前从本地源码构建镜像，不依赖尚未发布的预构建镜像。
+需要 Docker Engine 或 Docker Desktop（Linux 容器模式），以及 **Docker Compose v2.24.4+**（HTTPS 组合配置使用 `!override` 替换端口映射）。默认从 GHCR 拉取预构建镜像，部署服务器无需编译。对应镜像须先由仓库工作流成功发布，并将 GHCR 包设为 **Public**；若尚无可拉取的版本，使用下方「本地源码构建」。
 
 ```bash
 git clone https://github.com/qgming/dream-canvas.git
 cd dream-canvas
 cp .env.example .env
-docker compose build
+# 建议在 .env 中将 DREAM_CANVAS_TAG 改为已发布的 vX.Y.Z
+docker compose pull
 
 # 仅首次执行；在交互终端输入管理员密码，不要使用 -T 或管道输入
-docker compose run --rm --no-deps dream-canvas -data /data -init-admin admin
+docker compose run --rm --no-deps --pull never dream-canvas -data /data -init-admin admin
 
-docker compose up -d
+docker compose up -d --no-build --pull never
 docker compose ps
 ```
 
 PowerShell 将复制命令替换为 `Copy-Item .env.example .env`。已有 `.env` 时保留原配置；初始化仅允许空账号数据库，不会提供默认密码。打开 [http://localhost:8080](http://localhost:8080)，后续账号、渠道与模型配置见上方「首次配置」。
 
-镜像通过多阶段构建打包前端和 Go 服务，包含 ffmpeg / ffprobe、HTTPS 根证书与时区数据。运行时使用 **UID/GID `10001:10001` 的非 root 用户**，由 Go 同源提供网页、`/api` 与 `/mcp`，无需另起 Node.js 服务或数据库容器。前端构建会一并包含内置节点源码、插件 SDK 与根目录 `VERSION`；QuickJS WASM 随 Go 二进制嵌入。
+镜像通过多阶段构建打包前端和 Go 服务，包含固定 **FFmpeg / ffprobe 9.1**、HTTPS 根证书与时区数据。FFmpeg 使用[官方稳定版源码](https://ffmpeg.org/download.html)和固定 SHA-256 构建，保留对应源码、LGPL 许可证、编译参数与构建文件于 `/app/licenses/ffmpeg`，不启用 GPL / nonfree 组件；用于本地元数据探测和视频封面，不改动媒体原件。后续安全更新需显式调整版本与校验值并重新构建镜像。
+
+运行时使用 **UID/GID `10001:10001` 的非 root 用户**，由 Go 同源提供网页、`/api` 与 `/mcp`，无需另起 Node.js 服务或数据库容器。前端构建会一并包含内置节点源码、插件 SDK 与根目录 `VERSION`；QuickJS WASM 随 Go 二进制嵌入。
 
 | 文件 / 配置 | 作用 |
 | --- | --- |
 | [`Dockerfile`](Dockerfile) | npm / Go 分阶段构建、非 root 运行、媒体工具与 `/api/health` 健康探测；镜像作者署名 qgming，原项目和第三方许可随镜像保留。 |
 | [`.dockerignore`](.dockerignore) | 仅纳入必要源码，排除本机数据、环境文件、密钥、日志、依赖与旧构建产物。 |
 | [`compose.yaml`](compose.yaml) | 单服务 HTTP 部署、持久数据卷与容器退出后自动重启；默认仅绑定宿主机 `127.0.0.1:8080`。 |
+| [`compose.build.yaml`](compose.build.yaml) | 显式启用本地源码构建，与生产镜像拉取分开。 |
 | [`compose.https.yaml`](compose.https.yaml) / [`deploy/Caddyfile`](deploy/Caddyfile) | 可选 Caddy HTTPS 入口、自动证书与流式代理。 |
-| [`.env.example`](.env.example) | 项目名、HTTP 绑定地址 / 端口、时区及 HTTPS 域名示例；不配置管理员密码或供应商 KEY。 |
+| [`.github/workflows/docker.yml`](.github/workflows/docker.yml) | 原生 amd64 / arm64 构建、媒体与启动检查、GHCR 发布及匿名拉取验证；不登录或部署用户服务器。 |
+| [`.env.example`](.env.example) | 镜像标签、项目名、HTTP 绑定地址 / 端口、可信代理、时区及 HTTPS 域名示例；不配置管理员密码或供应商 KEY。 |
+
+镜像地址为 `ghcr.io/qgming/dream-canvas`，支持 `linux/amd64` 和 `linux/arm64`，Docker 自动选择宿主机架构。标签规则如下：
+
+| `DREAM_CANVAS_TAG` | 来源 |
+| --- | --- |
+| `vX.Y.Z` | 与根目录 `VERSION` 完全一致的正式 Git tag；推荐生产部署固定已发布版本，保留 `v` 前缀。 |
+| `latest`（默认） | 正式版本发布时更新；`main` 提交不会覆盖它。 |
+| `main` | `main` 分支的开发镜像。 |
+| `sha-<完整提交 SHA>` | 成功发布的具体提交镜像，便于定位构建。 |
+
+首次发布者需在 GitHub 包设置中确认公开可见性；仓库公开不代表 GHCR 包自动公开，工作流会在独立、未登录的环境实际拉取镜像，失败则明确报错。镜像大小和升级耗时以工作流输出及服务器实测为准，不承诺 250 MB 或一分钟内完成。
 
 `.env` 中的 `DREAM_CANVAS_PORT` 可修改宿主机 HTTP 端口，`DREAM_CANVAS_BIND` 默认仅允许本机访问；远程使用请配置下方 HTTPS。`TZ` 默认 `UTC`，可设为 `Asia/Shanghai`。`COMPOSE_PROJECT_NAME` 决定数据卷归属，首次部署后保持不变；多实例应分别设置项目名和端口，且不共享数据卷。
 
 **持久数据**全部写入 `/data`，默认由名为 `dream-canvas_data` 的 Docker 数据卷保存，包含数据库、`credentials.key`、原件、待处理响应和应用日志。重建镜像、重建容器及 `docker compose down` 不删除该卷；**不要执行 `docker compose down -v` 或删除数据卷**。不要将同一 SQLite 数据卷同时挂给多个运行中的应用实例，也不要把整个源码目录挂载到 `/app` 遮住静态产物。
+
+#### 本地源码构建
+
+需要修改源码或尚未发布预构建镜像时，显式使用构建覆盖文件；它使用 `dream-canvas:local`，不读取 `DREAM_CANVAS_TAG`，也不拉取同名镜像：
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml build --pull
+# 仅空账号数据库需要初始化
+docker compose -f compose.yaml -f compose.build.yaml run --rm --no-deps dream-canvas -data /data -init-admin admin
+docker compose -f compose.yaml -f compose.build.yaml up -d --no-build
+```
+
+后续管理和备份同样使用这两个 `-f` 参数。搭配 HTTPS 时，在它们之后追加 `-f compose.https.yaml`，首次启动前先拉取 Caddy：`docker compose -f compose.yaml -f compose.build.yaml -f compose.https.yaml pull caddy`。源码构建在当前机器完成，低配置服务器优先使用已发布镜像。
 
 #### HTTPS 与域名
 
@@ -151,13 +180,18 @@ PowerShell 将复制命令替换为 `Copy-Item .env.example .env`。已有 `.env
 ```bash
 # 从 HTTP 模式切换时先停止原容器，数据卷保留
 docker compose down
-docker compose -f compose.yaml -f compose.https.yaml up -d
+docker compose -f compose.yaml -f compose.https.yaml pull
+docker compose -f compose.yaml -f compose.https.yaml up -d --no-build --pull never
 docker compose -f compose.yaml -f compose.https.yaml logs -f caddy
 ```
 
 通过 `https://你的域名` 访问。Caddy 自动申请与续期证书，证书和状态保存在独立的 `caddy_data` / `caddy_config` 数据卷。后续 `up`、`down`、`stop`、日志及升级操作均使用相同的两个 `-f` 参数。
 
-HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器内 `127.0.0.1:8080`，同时移除宿主机 HTTP 端口映射。这样保留后端只信任回环代理的现有规则，由 Caddy 保留原始 `Host`、设置 `X-Forwarded-Proto`，并即时转发 SSE / MCP 响应。不要直接将普通桥接网络中的其他反向代理当成可信回环来源；如使用自己的代理，需在同一网络命名空间内连接应用的回环地址，并正确设置上述头部。示例不会开放 Docker 网段信任或改写鉴权规则。
+HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器内 `127.0.0.1:8080`，同时移除宿主机 HTTP 端口映射。默认仍只信任回环代理，由 Caddy 保留原始 `Host`、覆盖 `X-Forwarded-Proto`，并即时转发 SSE / MCP 响应，无需额外可信代理配置。
+
+如果使用**宿主机上的 Caddy / Nginx + Docker 端口映射**，应用看到的对端通常是 Docker 桥接网关。先通过 `docker inspect "$(docker compose ps -q dream-canvas)" --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{println}}{{end}}'` 核对实际网关；若有多个网络，确认代理实际使用的那个来源。在 `.env` 设置 `DREAM_CANVAS_TRUSTED_PROXIES=实际网关IP/32`（IPv6 用 `/128`，多个来源逗号分隔），再执行 `docker compose up -d --force-recreate`。原生启动可使用 `-trusted-proxies`，会覆盖同名环境变量。不要照抄示例 IP、信任整个 Docker 网段或设置 `0.0.0.0/0`；保持 HTTP 端口仅绑定 `127.0.0.1`，可信代理必须覆盖客户端传来的转发头，并保留原始 `Host`。
+
+仅当请求直接使用 TLS，或实际连接对端属于可信来源且 `X-Forwarded-Proto` 恰为 `https` 时，会话 Cookie 才带 `Secure`；缺失、`http` 或不可信来源均不会因转发头获得 `Secure`。未配置宿主机网关时，宿主机反代登录的 Cookie 不会自动带 `Secure`。网关地址变化后需同步更新配置。
 
 #### 日常管理与升级
 
@@ -167,20 +201,24 @@ HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器�
 docker compose logs -f --tail=100 dream-canvas
 docker compose ps
 docker compose stop
-docker compose up -d
+docker compose up -d --no-build --pull never
 ```
 
 健康探测只检查 `/api/health` 是否响应，不表示供应商、对象存储或全部任务链路通过验收，也不会单凭 `unhealthy` 状态自动重启。应用自己的文件日志开关与 Docker 收集的终端输出分别管理，后者沿用宿主机 Docker 日志配置。
 
-更新源码后，先按下方方式备份数据，再构建并替换容器：
+升级前记录当前镜像摘要，并按下方方式**在修改镜像标签前**完整备份数据；然后将 `.env` 中的 `DREAM_CANVAS_TAG` 改为目标已发布版本，拉取并替换容器：
 
 ```bash
-git pull --ff-only
-docker compose build --pull
-docker compose up -d --force-recreate
+docker inspect "$(docker compose ps -q dream-canvas)" --format '{{.Config.Image}} {{.Image}}'
+# 记录上述结果，完成数据备份后再修改 .env
+docker compose pull
+docker compose up -d --no-build --pull never --force-recreate
+docker compose ps
 ```
 
-HTTPS 模式的 `--force-recreate` 会一并重建共享网络的 Caddy。保留 `.env` 和原数据卷，升级前后查看 `ps` 与日志；不要重新执行管理员初始化。数据库结构可能随版本更新，仅回退镜像不保证能回退数据，应配合升级前的完整备份恢复。此配置不设置内存 / CPU 硬限制，不把未实测的 1 核 / 1 GiB 目标写成运行保证。
+HTTPS 模式的 `--force-recreate` 会一并重建共享网络的 Caddy。保留 `.env` 和原数据卷，升级前后查看 `ps` 与日志；不要重新执行管理员初始化。源码构建方式则在备份后更新源码、重新执行 `build --pull`，再带相同的覆盖文件重建容器。
+
+应用启动会自动调整数据库结构。仅当目标旧版确认兼容当前数据时，才可将 `DREAM_CANVAS_TAG` 改回旧版并重新拉取、启动；需要恢复数据时，应将升级前的完整备份恢复到新空卷，再用与备份匹配的旧镜像启动。**回退镜像不等于回退数据库**，数据库与 `credentials.key` 必须成套保存和恢复。此配置不设置内存 / CPU 硬限制，不把未实测的 1 核 / 1 GiB 目标写成运行保证。
 
 #### Docker 数据备份与恢复
 
@@ -189,8 +227,8 @@ HTTPS 模式的 `--force-recreate` 会一并重建共享网络的 Caddy。保留
 ```bash
 mkdir -p backups
 docker compose stop
-docker compose run --rm --no-deps --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup" dream-canvas -czpf /backup/dream-canvas-data.tar.gz -C /data .
-docker compose up -d
+docker compose run --rm --no-deps --pull never --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup" dream-canvas -czpf /backup/dream-canvas-data.tar.gz -C /data .
+docker compose up -d --no-build --pull never
 ```
 
 PowerShell 将建目录命令替换为 `New-Item -ItemType Directory -Force backups`。备份命令仅临时以 root 运行 `tar` 读取数据，正常应用继续使用非 root 用户；保留文件属主和权限，并妥善保护包含解密密钥与私有媒体的归档。HTTPS 模式的备份 / 恢复命令同样追加两个 `-f` 参数，Caddy 证书卷独立于应用数据备份。
@@ -199,8 +237,8 @@ PowerShell 将建目录命令替换为 `New-Item -ItemType Directory -Force back
 
 ```bash
 docker compose stop
-docker compose run --rm --no-deps --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup:ro" dream-canvas -xzpf /backup/dream-canvas-data.tar.gz -C /data
-docker compose up -d
+docker compose run --rm --no-deps --pull never --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup:ro" dream-canvas -xzpf /backup/dream-canvas-data.tar.gz -C /data
+docker compose up -d --no-build --pull never
 ```
 
 如果目标已有数据，先单独备份，并选择新的 Compose 项目名创建独立数据卷后再恢复，不向运行中或已有内容的卷直接覆盖解压。不自动导入本机 `server/data/`；确需转移时，先停原服务，按完整数据目录备份 / 恢复，并确保恢复后的文件归容器 UID/GID `10001:10001` 所有。自定义宿主机目录挂载也必须提前准备可由该用户读写的目录，遇到权限问题不要长期改用 root 运行服务。
@@ -234,6 +272,7 @@ Go 服务可直接提供 `web/dist` 中的静态页面，无需单独运行 Node
 | `-data` | `data` | 数据库、密钥、媒体及待处理文件的持久目录 |
 | `-listen` | `127.0.0.1:8080` | HTTP 监听地址 |
 | `-web` | `../web/dist` | 前端静态产物目录 |
+| `-trusted-proxies` | `DREAM_CANVAS_TRUSTED_PROXIES`，未设置时仅信任回环来源 | 额外可信反代 IP/CIDR，逗号分隔；用于客户端 IP 和 HTTPS Cookie 判定 |
 | `-init-admin` | 不启用 | 初始化管理员用户名，完成后退出 |
 
 对外访问时通过反向代理提供 HTTPS，保留原始 `Host`，由本机代理正确设置 `X-Forwarded-Proto`，并关闭 SSE 响应缓冲。单独托管静态文件时，同源转发 `/api` 与 `/mcp`，并为前端路由提供 `index.html` 回退。

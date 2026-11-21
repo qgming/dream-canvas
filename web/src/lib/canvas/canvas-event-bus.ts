@@ -25,7 +25,7 @@ export function onCanvasEvent(event: string, handler: Handler) {
         handlers.set(event, set);
     }
     set.add(handler);
-    return () => set!.delete(handler);
+    return () => { set!.delete(handler); };
 }
 
 // Browser-only plugin preferences are scoped by account; project data belongs in node metadata.

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Download, ScanLine, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
-import type { CanvasNodeContext } from "@/types/canvas-plugin";
+import type { CanvasNodeContext } from "@dream-canvas/plugin-sdk";
 import { ModelPicker } from "@/components/model-picker";
 import { ModelInputFields } from "@/components/model-parameters";
 import { Button } from "@/components/ui/button";

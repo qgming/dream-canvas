@@ -41,6 +41,17 @@ export function AppProviders({ children }: { children: ReactNode }) {
     }, [theme]);
 
     useEffect(() => {
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
+        const update = () => {
+            const { mode, setTheme } = useThemeStore.getState();
+            if (mode === "system") setTheme("system");
+        };
+        update();
+        media.addEventListener("change", update);
+        return () => media.removeEventListener("change", update);
+    }, []);
+
+    useEffect(() => {
         document.documentElement.lang = locale;
         document.title = t("meta.title");
         document.querySelector('meta[name="description"]')?.setAttribute("content", t("meta.description"));

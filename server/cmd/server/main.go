@@ -17,6 +17,7 @@ func main() {
 	data := flag.String("data", "data", "持久数据目录")
 	listen := flag.String("listen", "127.0.0.1:8080", "HTTP 监听地址")
 	web := flag.String("web", "../web/dist", "前端静态目录")
+	trustedProxies := flag.String("trusted-proxies", os.Getenv("DREAM_CANVAS_TRUSTED_PROXIES"), "额外可信反向代理 IP/CIDR，逗号分隔；默认仅信任回环来源")
 	initAdmin := flag.String("init-admin", "", "初始化管理员用户名，仅允许空数据库")
 	flag.Parse()
 	root, err := filepath.Abs(*data)
@@ -34,5 +35,5 @@ func main() {
 		return
 	}
 	fmt.Printf("梦想画布：http://%s\n持久目录：%s\n", *listen, root)
-	log.Fatal(http.ListenAndServe(*listen, service.Router(*web)))
+	log.Fatal(http.ListenAndServe(*listen, service.Router(*web, *trustedProxies)))
 }

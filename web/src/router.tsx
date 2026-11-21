@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/display";
 const GeneralSettingsPage = lazy(() => import("@/pages/settings/general"));
 const BackupPage = lazy(() => import("@/pages/settings/backup"));
 const AccountSettingsPage = lazy(() => import("@/pages/settings/account"));
+const AboutPage = lazy(() => import("@/pages/settings/about"));
 const InspirationPage = lazy(() => import("@/pages/inspiration"));
 const ModelsPage = lazy(() => import("@/pages/settings/models"));
 const AccessTokensPage = lazy(() => import("@/pages/settings/access-tokens"));
@@ -51,6 +52,7 @@ export const router = createBrowserRouter([
                         { path: "models", element: <ModelsPage /> },
                         { path: "access-tokens", element: <AccessTokensPage /> },
                         { path: "tasks", element: <TasksPage /> },
+                        { path: "about", element: <AboutPage /> },
                         { element: <RequireAdmin />, children: [
                             { path: "users", element: <UsersPage /> },
                             { path: "channels", element: <ChannelsPage /> },

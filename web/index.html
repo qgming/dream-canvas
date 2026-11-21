@@ -7,12 +7,14 @@
         <link rel="icon" href="/logo.svg" />
         <title>梦想画布</title>
         <script>
+            var mode = "system";
             try {
                 var s = JSON.parse(localStorage.getItem("infinite-canvas:theme_store") || "{}");
-                var t = s.state && s.state.theme === "light" ? "light" : "dark";
-                document.documentElement.classList.toggle("dark", t === "dark");
-                document.documentElement.style.colorScheme = t;
+                if (s.state && (s.state.mode === "light" || s.state.mode === "dark")) mode = s.state.mode;
             } catch (e) {}
+            var dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+            document.documentElement.classList.toggle("dark", dark);
+            document.documentElement.style.colorScheme = dark ? "dark" : "light";
         </script>
     </head>
     <body class="bg-background text-foreground antialiased">

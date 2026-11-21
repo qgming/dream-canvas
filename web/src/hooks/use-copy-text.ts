@@ -6,8 +6,10 @@ export function useCopyText() {
     const { notify } = useFeedback();
     const { t } = useTranslation();
 
-    return (value: string, successText = t("common.copied")) => {
-        if (copy(value)) notify.success(successText);
+    return async (value: string, successText = t("common.copied")) => {
+        let copied = false;
+        try { copied = await copy(value); } catch { /* Clipboard access can be rejected by the browser. */ }
+        if (copied) notify.success(successText);
         else notify.error(t("ui.copyFailed"));
     };
 }

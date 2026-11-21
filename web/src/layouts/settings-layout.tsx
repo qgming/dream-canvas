@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Archive, Code2, Cpu, Database, Globe2, KeyRound, ListTodo, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
+import { Archive, Code2, Cpu, Database, Globe2, Info, KeyRound, ListTodo, Logs, Puzzle, SlidersHorizontal, UserRound, UsersRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -17,6 +17,7 @@ export default function SettingsLayout() {
             ...(!admin ? [{ path: "/models", label: "models", icon: Cpu }] : []),
             { path: "/tasks", label: "tasks", icon: ListTodo },
             { path: "/access-tokens", label: "accessTokens", icon: KeyRound },
+            { path: "/about", label: "about", icon: Info },
         ] },
         ...(admin ? [{ label: "settings.administration", items: [
             { path: "/site", label: "site", icon: SlidersHorizontal },
