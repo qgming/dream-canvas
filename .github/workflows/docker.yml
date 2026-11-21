@@ -1,0 +1,180 @@
+name: Docker images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      version: ${{ steps.meta.outputs.version }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate version and select tags
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version=$(tr -d '\r\n' < VERSION)
+          [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'VERSION must be vX.Y.Z'; exit 1; }
+          tags=("$image:sha-$GITHUB_SHA")
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            [[ "$GITHUB_REF_NAME" == "$version" ]] || { echo 'Release tag must match VERSION'; exit 1; }
+            tags+=("$image:$version" "$image:latest")
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            tags+=("$image:main")
+          else
+            echo 'Only main and stable vX.Y.Z tags may publish images'
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          printf 'tags=%s\n' "$(printf '%s\n' "${tags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build native image for verification
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          target: runtime
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: dream-canvas:verify
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: Verify media tools and non-root runtime
+        env:
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          docker run --rm --env EXPECTED_VERSION --entrypoint /bin/sh dream-canvas:verify -ec '
+            test "$(id -u):$(id -g)" = 10001:10001
+            test "$(cat /app/VERSION)" = "$EXPECTED_VERSION"
+            test -s /app/web/index.html
+            ffmpeg -version | head -1 | grep -F "ffmpeg version 9.1 "
+            ffprobe -version | head -1 | grep -F "ffprobe version 9.1 "
+            test -s /app/licenses/ffmpeg/ffmpeg-9.1.tar.xz
+            cd /tmp
+            ffmpeg -nostdin -v error -f lavfi -i color=c=black:s=1280x720:r=1 -frames:v 1 -c:v mpeg4 sample.mp4
+            ffprobe -v error -protocol_whitelist file -show_entries format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate -of json sample.mp4 | grep -F mpeg4
+            ffmpeg -nostdin -v error -protocol_whitelist file -i sample.mp4 -frames:v 1 -an -vf scale=768:768:force_original_aspect_ratio=decrease -f image2 -c:v png -y cover.png
+            test -s cover.png
+            ffmpeg -nostdin -v error -f lavfi -i sine=frequency=440:duration=1 -c:a pcm_s16le sample.wav
+            ffprobe -v error -protocol_whitelist file -show_entries stream=codec_type,codec_name -of json sample.wav | grep -F pcm_s16le
+          '
+          trap 'docker logs dream-canvas-verify; docker rm -fv dream-canvas-verify' EXIT
+          docker run --detach --name dream-canvas-verify dream-canvas:verify
+          docker exec dream-canvas-verify curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/api/health
+          printf '### linux/%s\nUncompressed image size: %s bytes\n' '${{ matrix.arch }}' "$(docker image inspect dream-canvas:verify --format '{{.Size}}')" >> "$GITHUB_STEP_SUMMARY"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push verified architecture by digest
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          target: runtime
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ needs.prepare.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish multi-platform tags
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image }}
+          TAGS: ${{ needs.prepare.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sources=()
+          for digest in "$RUNNER_TEMP"/digests/*; do sources+=("$IMAGE@sha256:$(basename "$digest")"); done
+          docker buildx imagetools create --tag "$IMAGE:sha-$GITHUB_SHA" "${sources[@]}"
+          docker buildx imagetools inspect --raw "$IMAGE:sha-$GITHUB_SHA" > "$RUNNER_TEMP/index.json"
+          jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]' "$RUNNER_TEMP/index.json"
+          args=()
+          while IFS= read -r tag; do
+            [[ "$tag" == "$IMAGE:sha-$GITHUB_SHA" ]] || args+=(--tag "$tag")
+          done < <(jq -r '.[]' <<< "$TAGS")
+          docker buildx imagetools create "${args[@]}" "$IMAGE:sha-$GITHUB_SHA"
+
+  verify-public:
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify anonymous pull
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/docker-anonymous"
+          printf '{}\n' > "$RUNNER_TEMP/docker-anonymous/config.json"
+          docker --config "$RUNNER_TEMP/docker-anonymous" pull "$IMAGE:sha-$GITHUB_SHA" || {
+            echo 'Anonymous pull failed. Confirm the GHCR package visibility is Public, then rerun the workflow.'
+            exit 1
+          }
+          docker image inspect "$IMAGE:sha-$GITHUB_SHA" --format '{{index .RepoDigests 0}}' >> "$GITHUB_STEP_SUMMARY"

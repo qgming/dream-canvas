@@ -2,10 +2,7 @@ name: dream-canvas
 
 services:
   dream-canvas:
-    image: dream-canvas:local
-    build:
-      context: .
-      target: runtime
+    image: ghcr.io/qgming/dream-canvas:${DREAM_CANVAS_TAG:-latest}
     init: true
     restart: unless-stopped
     environment:
