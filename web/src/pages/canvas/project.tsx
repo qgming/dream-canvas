@@ -124,6 +124,9 @@ type CanvasGenerationRequest = {
 
 // Stable empty reference array prevents `... || []` from invalidating CanvasNode's React.memo on every render.
 const EMPTY_REFERENCES: CanvasResourceReference[] = [];
+// 视频节点默认展示尺寸：上游导入时就有的常量，重构时丢了定义，这里按原值恢复。
+const VIDEO_NODE_MAX_WIDTH = 420;
+const VIDEO_NODE_MAX_HEIGHT = 420;
 const EMPTY_NODES: CanvasNodeData[] = [];
 const EMPTY_CONNECTIONS: CanvasConnection[] = [];
 const EMPTY_VIEWPORT: ViewportTransform = { x: 0, y: 0, k: 1 };
