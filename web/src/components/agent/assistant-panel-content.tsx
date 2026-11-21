@@ -101,7 +101,7 @@ export function AssistantPanelContent() {
             const running = record.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
             useAgentStore.setState({ activeThreadId: id, connectError: "", messages: record.items.map((item) => {
                 const detail = item.detail as { attachments?: string[]; skill?: string } | undefined;
-                return { ...item, itemId: item.id, streamId: item.role === "assistant" && item.turnId === running?.id && running.status === "running" ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
+                return { ...item, itemId: item.id, streamId: running?.status === "running" && item.role === "assistant" && item.turnId === running.id ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
             }), activeTurnId: running?.id || "" });
             if (activate) setTab("chat");
         } catch (error) { if (request === sequence.current) showError(error); }
