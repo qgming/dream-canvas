@@ -1,0 +1,21 @@
+name: dream-canvas
+
+services:
+  dream-canvas:
+    image: dream-canvas:local
+    build:
+      context: .
+      target: runtime
+    init: true
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${DREAM_CANVAS_BIND:-127.0.0.1}:${DREAM_CANVAS_PORT:-8080}:8080"
+    volumes:
+      - data:/data
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  data:

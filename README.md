@@ -1,36 +1,94 @@
-# 梦想画布（dream-canvas）
+<div align="center">
 
-面向影视、短剧与 AI 视频创作的无限画布，供个人与小团队自托管使用，基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) v0.20.0 二次开发，由 [qgming](https://github.com/qgming) 维护。React、TypeScript、Vite 前端使用黑白中性浅深主题、shadcn/ui + Radix 与 Animate UI 动效，Go、Gin、GORM、SQLite 后端统一管理账号、项目、私有资产、渠道、任务、助手与统计；业务及组件细节参考 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat)。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/public/images/logo-on-dark.svg" />
+  <img src="web/public/logo.svg" alt="梦想画布 Logo" width="120" height="120" />
+</picture>
 
-当前处于后端化实施与验收阶段。**文本与图片模型接入已通过用户在本项目中的实际测试**，此前构建的正常使用及自建接口插件删除已获用户确认。此前画布自动保存、并发编辑、持久撤销与进度恢复，以及灵感库、资产库调整已完成前后端构建启动和 HTTP 可用性检查，其界面、交互与真实生成仍待验收。此前节点插件统一后台管理与接口插件命名已完成前后端构建、重启及 HTTP 可用性检查；本轮移除 SVG / HTML / Markdown 节点尚未构建与验收，不沿用此前结论。视频、TTS、Agent、安全、恢复与性能专项继续独立跟踪。完整进度和待办集中在 [CHANGELOG](CHANGELOG.md#unreleased)。
+# 梦想画布 · Dream Canvas
+
+**想象不设边界 · 创作，自由展开**
+
+面向影视、短剧与 AI 视频创作的自托管无限画布
+
+<p>
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" />
+  <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+  <img alt="Vite 7" src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white" />
+  <img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" />
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" />
+  <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" />
+</p>
+
+<p>
+  <a href="#核心功能">核心功能</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#docker-部署推荐">Docker 部署</a> ·
+  <a href="#部署说明">部署说明</a> ·
+  <a href="CHANGELOG.md">更新日志</a>
+</p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/public/images/landing/canvas-zh-dark.webp" />
+  <source media="(prefers-color-scheme: light)" srcset="web/public/images/landing/canvas-zh-light.webp" />
+  <img src="web/public/images/landing/canvas-zh-light.webp" alt="梦想画布实际界面：在同一画布中组织剧本、人物参考与分镜画面" width="1200" />
+</picture>
+
+<sub>实际界面截图，使用《归途》演示剧本与公开参考素材。<a href="web/public/images/landing/README.md">截图与素材说明</a></sub>
+
+</div>
+
+梦想画布把剧本、人物设定、场景参考、分镜与生成结果放在同一张无限画布上。通过节点和连线整理故事，也可以进入独立的生图工作台、视频创作台，或让助手协助操作项目。
+
+项目面向个人与小团队自托管：前端负责交互，Go 服务统一管理账号、项目、私有资产、模型渠道、生成任务和助手执行，数据保存在自己的服务器上。界面支持中文、英文与黑白中性浅深主题。
+
+> 项目仍在持续开发与验收。文本、图片模型接入已通过用户实际测试；视频、TTS、助手工具调用、安全、任务恢复及性能等专项仍需独立验收。代码实施与实际验收进度见 [CHANGELOG → Unreleased](CHANGELOG.md#unreleased)。
 
 ## 核心功能
 
-- 无限画布、独立图片 / 视频工作台、多项目、节点连线、导入导出；服务端按用户保存项目，版本冲突保留未保存编辑。
-- 工作台生成记录以 4:3 图片 / 视频封面展示，提供单条删除与新建；生图结果按原比例自适应，多图成组预览，结果底部提供手动加入资料库与当前浏览器下载原件。
-- 图片、视频、音频由服务端私有资产系统管理，成品先持久落盘再后台同步。资产按类型与内容查找，不使用标签；工作台文件手动加入资产库后保留，删除记录清理未保留且无其他记录或项目引用的专属文件；在途任务继续执行，文件清理可等待任务结束，历史用量保留。删除项目或节点只解除引用，助手与 MCP 可按授权直接删除项目及全局资产，网页手动删除保留就地确认。
-- 渠道默认使用 OpenAI 兼容连接；模型分别选择内置 OpenAI Chat Completions / Responses、图片生成 / 编辑、TTS、`/videos` 兼容接口、Seedance / MiniMax 视频，或自建接口插件。脚本包包含 `script.json`、`inputs.json`、`adapter.js` 及可选相对导入模块，内置只读且不可复制或删除，自建支持草稿、请求预览、可选真实测试与不可变发布版本；未被模型引用的自建脚本可确认删除，保留已有任务快照、资产与用量。
-- Cloudflare R2、阿里云 OSS、腾讯云 COS、七牛云 S3、通用 S3 配置模板；可保存多份，最多启用一份，历史文件保留原存储归属。
-- 持久排队、异步查询、待确认恢复、取消意愿和文件同步 / 删除队列；图片与视频展示供应商真实进度，无百分比时展示实际阶段，生成、原件保存与云同步分别显示。不确定的付费提交不自动重提或切换渠道。
-- 全局文本 Agent 助手，可调用工具创建和编辑节点、连线、项目、素材、生成任务及自建脚本草稿，按要求直接删除授权项目和资产；内置模型 API 适配 Skill 按真实文档定义创作模式、参数和条件素材，服务端保留会话与执行历史，明确目标项目与在线页面。外部 Streamable HTTP MCP 复用同一套工具定义、分发及业务层，大文件经同权限 Bearer HTTP 上传 / 读取。
-- 灵感库统一管理影视创作提示词与技能，按全部 / 文本 / 图片 / 视频 / 技能浏览，共用搜索、来源筛选与新建入口。内置模板和技能涵盖短剧编剧、人物三视图、场景道具、分镜、MiniMax H3 音画镜头及连戏交付，也支持按账号管理个人内容与在助手中选用技能；提示词无标签，无远程订阅与抓取，内置内容只读，模型 API 适配技能仅管理员可用。
-- 渠道与模型支持紧凑概要、搜索筛选、行内启停和批量配置；渠道、渠道内模型及各创作入口可排序，拖动结束后自动保存，新建入口采用首个启用且适用的模型，已有选择保持独立。
-- 「用量统计」提供今天、滚动时间范围、按模型汇总和调用明细，记录调用次数、tokens、图片数、时长及实际 / 估算 / 未知状态；全站不展示积分，渠道模型无需配置价格与成本。历史记录和任务快照保留。
-- 脚本输入定义是参数唯一来源，模型通过可视表单调整默认值与可用选项；画布、工作台、助手与 MCP 共用条件控件及校验，生成记录保留当次参数与版本。画布与工作台模型选择紧邻底部右侧生成按钮左侧、其他参数两列选择，标题提示展示说明与约束；视频模式按脚本声明联动素材，生图单次提交一个任务，张数由有效参数决定。
-- 支持中文与英文。[画布节点插件](plugins/canvas/README.md)由管理员在「设置 → 节点插件」统一启停，该页面仅提供已有节点的启用开关；基础节点及全景、便利贴、超分默认内置。普通用户直接使用启用节点，无需安装。节点插件在浏览器执行，接口插件在服务端执行。
+| 功能 | 说明 |
+| --- | --- |
+| 无限画布 | 用文本、图片、视频、音频、生成配置和组节点组织创作；支持节点连线、自动保存、撤销 / 重做及项目导入导出。内置便利贴、3D 全景和超分节点。 |
+| 生图与视频工作台 | 提示词、参考素材、模型参数和生成记录集中编辑；图片保持原始比例展示，成品可下载或手动加入资产库。支持的创作模式与参数由所选模型的接口插件决定。 |
+| 私有资产库 | 统一管理文本、图片、视频和音频，跨项目复用素材；媒体原件保存在服务端，可后台同步至私有对象存储，分别显示保存与同步状态。 |
+| 灵感库 | 在同一个入口管理文本、图片、视频提示词与技能；包含项目内置内容及账号个人内容，支持搜索、筛选与在创作中选用。 |
+| 助手与 MCP | 全局助手通过业务工具整理项目、编辑节点、查找素材及提交生成任务；外部客户端通过 Streamable HTTP MCP 访问同一业务能力，按令牌限制项目和操作范围。 |
+| 渠道与接口插件 | 按「渠道 → 模型」配置和选择模型；内置 OpenAI 兼容文本、图片、TTS、视频接口及 Seedance、MiniMax 视频适配，自建 JavaScript 接口插件可配置输入、保存草稿与发布版本。 |
+| 任务与用量 | 在「设置 → 任务与用量」查看任务阶段、结果与待处理状态，以及按时间、项目、渠道、模型和类型筛选的调用次数；任务切页后继续在服务端处理。 |
+| 账号与站点管理 | 管理员创建和停用账号，配置站点开关、并发、渠道、对象存储、节点启停与日志；项目、资产和助手历史默认按用户隔离。 |
+
+接口插件在服务端执行，画布节点插件在浏览器执行，两者的运行边界不同。节点扩展约定见 [节点插件说明](plugins/canvas/README.md)。
 
 ## 快速开始
 
-安装 Go 1.25+、Node.js 22.12+（包含 npm）。视频封面与音视频元数据还需要在业务服务的 `PATH` 中安装 `ffmpeg` 和 `ffprobe`；缺失时保留原件并报告原因，需要核实时长的模型会拒绝未核实素材。
+只需要部署使用时，可直接跳到 [Docker 部署](#docker-部署推荐)，宿主机无需安装 Go、Node.js 或 ffmpeg。以下为支持前端热更新的本地开发方式。
+
+### 环境准备
+
+- **Go 1.25+**。
+- **Node.js 22.12+ 与 npm**，前端依赖统一使用 npm 安装。
+- **ffmpeg、ffprobe**：安装在后端运行环境的 `PATH` 中，用于视频封面和音视频元数据探测。缺失时原件保留，但相关预览或素材校验可能无法完成。
+- 支持 **Web Locks** 的现代浏览器，通过 `localhost` 或 HTTPS 访问。
+
+### 启动后端
 
 ```bash
-cd server
+git clone https://github.com/qgming/dream-canvas.git
+cd dream-canvas/server
 go mod download
+
+# 仅首次初始化时执行，按提示在终端输入管理员密码
 go run ./cmd/server -init-admin admin
+
+# 启动业务服务
 go run ./cmd/server
 ```
 
-初始化只允许空账号数据库，密码在终端隐藏输入。默认持久目录为 `server/data/`，监听 `127.0.0.1:8080`。另开终端：
+初始化命令仅允许在没有账号的数据库中执行，不提供默认密码。后端默认监听 `127.0.0.1:8080`，数据保存在当前工作目录下的 `data/`；按上述方式启动时即为 `server/data/`。
+
+### 启动前端
+
+另开终端，在仓库根目录执行：
 
 ```bash
 cd web
@@ -38,33 +96,163 @@ npm ci
 npm run dev
 ```
 
-使用支持 Web Locks 的现代浏览器，通过 `localhost` 或 HTTPS 登录。Vite 将 `/api` 与 `/mcp` 同源转发到后端。管理员在设置中完成以下配置：
+打开 [http://localhost:3000](http://localhost:3000)。开发前端使用 Vite，支持热更新，并将 `/api`、`/mcp` 同源转发到后端。
 
-1. 默认开放站点并使用后台运行边界，不再单独启用模型执行。「站点管理」位于「账号管理」上方，仅调整站点开关及全站助手、全站生成、单用户生成三项并发，按版本自动保存。关闭会让普通用户退出并暂停网页 / API / MCP 访问，管理员仍可登录重新开启；已提交的生成继续处理和保存。其余超时、文件和脚本限制保留后台默认值及已保存配置。
-2. 在「渠道与模型」仅填写名称、完整 API Base URL 和 Key 保存渠道；通过标准模型列表或手动输入添加模型，逐个选择类型与调用方式。URL 必须包含服务实际需要的路径，系统不自动补 `/v1`。
-3. 在模型表单设置参数默认值与可用选项，并在渠道页调整各入口排序；保存位于页面或弹窗顶部。非标准接口在「接口插件」创建或通过「导入接口」上传 ZIP 整包；内置和自建插件均可导出 ZIP，自建插件可从更多菜单直接创建带序号的独立副本。可视配置输入，`adapter.js` 具名导出提交、结果及按需的查询等阶段，可复制适配说明给 AI，或调用全局助手的 `model-api-adapter` Skill 编写草稿。检查不调用供应商；真实测试可选且需确认费用，发布不要求先测试。模型固定所选发布版本，已有任务保留完整快照。
-4. 需要公网 HTTPS 素材时，在「对象存储」配置私有 Bucket。平台等待素材同步完成后按任务签发受限地址；无需公开 Bucket。
+### 首次配置
 
-OpenAI 格式的其他服务可直接选择对应内置调用方式；Agnes 的差异字段通过自建脚本适配，不提供专用内置分支。[可导入的 Agnes 脚本示例](examples/model-scripts/README.md)包含图片和视频 Flash 两个独立目录，未携带密钥，完整项目验收待完成。音频内置接口是 TTS `/audio/speech`，不提供音乐生成。
+1. 点击首页右上角「登录」，使用初始化的管理员账号进入应用；其他账号由管理员在「设置 → 账号管理」创建。
+2. 在「设置 → 渠道与模型」添加渠道，填写名称、完整 API URL 和 KEY，再添加模型并选择能力类型与接口插件。**URL 不会自动补 `/v1`**，请按服务实际地址填写。
+3. 调整模型参数与各创作入口的排序，然后进入画布或工作台。助手需要支持工具调用的文本模型；非标准接口可在「设置 → 接口插件」编写或导入 ZIP 整包，发布后绑定模型。真实测试会调用供应商，费用由配置的服务决定。
+4. 如果模型要求公网 HTTPS 素材，在「设置 → 对象存储」配置私有存储。支持阿里云 OSS、Cloudflare R2、腾讯云 COS、七牛云 S3 与通用 S3 模板；素材同步后按任务提供受限访问地址，无需公开 Bucket。
 
-默认访问地址展示创作宣传首页，点击顶部「登录」打开弹窗；已登录用户可进入画布，站点关闭时显示「梦想画布已关闭」，管理员仍可从顶部登录管理。
+站点默认开放。管理员可在「设置 → 站点管理」暂停普通用户访问；已提交的生成任务继续处理和保存，管理员仍可登录重新开启。
 
-业务数据以服务端为准；工作台当前模型、参数、提示词与稳定素材引用自动保存为按账号隔离的本机草稿，切页和返回继续编辑，保存失败可重试，不写入个人默认模型或参数，也不跨设备同步。localforage 不缓存媒体正文，不迁移旧本地数据。网页不使用浏览器供应商凭据或直连请求，外部接入统一使用业务服务与远程 MCP。提示词与技能仅使用项目内置内容及当前账号自建内容，不连接远程内容来源。
-
-外部 MCP 在「设置 → 访问令牌」生成连接配置，按需授予读取、编辑、生成与删除权限；助手会话、账号令牌及管理员配置使用独立的 `assistant`、`account`、`admin` 权限，要求不限项目的令牌，`admin` 还要求账号为管理员。管理员网页编辑渠道时可读取并显隐已保存的 KEY；渠道列表、普通用户、助手与 MCP 不返回真实凭据，存储凭据继续只写不读。云端助手只能保存自建接口草稿，真实调试及发布仍由管理员主动操作。
+需要连接外部工具时，在「设置 → 访问令牌」生成远程 MCP 配置，服务端入口为 `/mcp`。项目、素材和任务操作不依赖在线浏览器；选区、视口等页面操作需要绑定在线页面。
 
 ## 部署说明
 
-前端静态产物可在 `web/` 执行 `npm run build` 后交给 Go 服务，默认路径为 `../web/dist`。在 `server/` 可用 `go run ./cmd/server -data /absolute/path/data -web ../web/dist -listen 127.0.0.1:8080` 明确持久目录、静态目录与监听地址；独立托管静态文件时，将 `/api`、`/mcp` 同源转发。反向代理提供 HTTPS，并关闭 SSE 响应缓冲。
+### Docker 部署（推荐）
 
-工作台文件归属、记录删除、提示词及技能接口需要前后端共同更新；项目内置提示词、技能与第 7 版运行契约随后端重新构建、重启加载，已有接口插件与模型绑定不自动升级。最新灵感库路由、提示词去标签与节点插件目录也需更新前后端后使用；节点插件目录在后端启动时初始化，已有全站启停设置保留。不自动迁移旧开发记录、远程提示词缓存或旧标签。
+需要 Docker Engine 或 Docker Desktop（Linux 容器模式），以及 **Docker Compose v2.24.4+**（HTTPS 组合配置使用 `!override` 替换端口映射）。在仓库根目录执行，首次需要联网下载基础镜像与构建依赖；目前从本地源码构建镜像，不依赖尚未发布的预构建镜像。
 
-持久目录包含 SQLite、原件、缩略图、待处理供应商响应及 `credentials.key`，需要一起保护与备份；丢失加密密钥将无法解密渠道、存储和任务快照。原始响应在可靠入库后清理，未完成或待确认任务仍需保留恢复依据。
+```bash
+git clone https://github.com/qgming/dream-canvas.git
+cd dream-canvas
+cp .env.example .env
+docker compose build
 
-管理员可在「设置 → 日志」启用后台运行日志及开发诊断；初始关闭，选项变化后按版本静默自动保存并动态应用，失败保留选择和重试，冲突需重新读取，不记录凭据和业务正文。JSON 日志同时输出到后端标准输出和持久目录的应用日志文件，单文件 5 MiB，保留当前文件及 3 份历史文件，总量约 20 MiB，持续写入自动清理最旧历史文件。页面展示实际占用与文件数，复用资产页分页，默认每页 100 条、可选 20 / 50 / 100，按真实总数显示有效页码、手动刷新并展开详情，支持确认清空应用日志；关闭记录后仍可查看与清空已有文件。终端 / 容器另行收集的日志不计入此占用，也不在此清空。写盘失败保留终端输出并显示错误，清理失败暂停文件追加，恢复后仅继续保存新事件。此前文件日志已于 2026-11-21 完成编译、重启及基础连通性核对；后续自动保存及数字分页已编译、分页定向用例通过，但自动审批阻止了后端替换重启，当前接口尚未更新、浏览器功能待验收，需同步更新前后端，详见 [CHANGELOG](CHANGELOG.md#日志占用查看与循环清理)。
+# 仅首次执行；在交互终端输入管理员密码，不要使用 -T 或管道输入
+docker compose run --rm --no-deps dream-canvas -data /data -init-admin admin
 
-首版按单进程 SQLite 部署，不依赖 PostgreSQL、Redis；1 核 CPU / 1 GiB 内存是待实测目标，不是配置保证。当前登录防刷仍待确认与实施，日志轮转、真实云存储、恢复、隔离及性能仍待验收。首版不提供公开注册、支付、对外分享、实时协同或产品内备份恢复页面。
+docker compose up -d
+docker compose ps
+```
+
+PowerShell 将复制命令替换为 `Copy-Item .env.example .env`。已有 `.env` 时保留原配置；初始化仅允许空账号数据库，不会提供默认密码。打开 [http://localhost:8080](http://localhost:8080)，后续账号、渠道与模型配置见上方「首次配置」。
+
+镜像通过多阶段构建打包前端和 Go 服务，包含 ffmpeg / ffprobe、HTTPS 根证书与时区数据。运行时使用 **UID/GID `10001:10001` 的非 root 用户**，由 Go 同源提供网页、`/api` 与 `/mcp`，无需另起 Node.js 服务或数据库容器。前端构建会一并包含内置节点源码、插件 SDK 与根目录 `VERSION`；QuickJS WASM 随 Go 二进制嵌入。
+
+| 文件 / 配置 | 作用 |
+| --- | --- |
+| [`Dockerfile`](Dockerfile) | npm / Go 分阶段构建、非 root 运行、媒体工具与 `/api/health` 健康探测；镜像作者署名 qgming，原项目和第三方许可随镜像保留。 |
+| [`.dockerignore`](.dockerignore) | 仅纳入必要源码，排除本机数据、环境文件、密钥、日志、依赖与旧构建产物。 |
+| [`compose.yaml`](compose.yaml) | 单服务 HTTP 部署、持久数据卷与容器退出后自动重启；默认仅绑定宿主机 `127.0.0.1:8080`。 |
+| [`compose.https.yaml`](compose.https.yaml) / [`deploy/Caddyfile`](deploy/Caddyfile) | 可选 Caddy HTTPS 入口、自动证书与流式代理。 |
+| [`.env.example`](.env.example) | 项目名、HTTP 绑定地址 / 端口、时区及 HTTPS 域名示例；不配置管理员密码或供应商 KEY。 |
+
+`.env` 中的 `DREAM_CANVAS_PORT` 可修改宿主机 HTTP 端口，`DREAM_CANVAS_BIND` 默认仅允许本机访问；远程使用请配置下方 HTTPS。`TZ` 默认 `UTC`，可设为 `Asia/Shanghai`。`COMPOSE_PROJECT_NAME` 决定数据卷归属，首次部署后保持不变；多实例应分别设置项目名和端口，且不共享数据卷。
+
+**持久数据**全部写入 `/data`，默认由名为 `dream-canvas_data` 的 Docker 数据卷保存，包含数据库、`credentials.key`、原件、待处理响应和应用日志。重建镜像、重建容器及 `docker compose down` 不删除该卷；**不要执行 `docker compose down -v` 或删除数据卷**。不要将同一 SQLite 数据卷同时挂给多个运行中的应用实例，也不要把整个源码目录挂载到 `/app` 遮住静态产物。
+
+#### HTTPS 与域名
+
+将实际域名解析到服务器，在 `.env` 填写 `DOMAIN=canvas.example.com`（不带协议和路径），并确保宿主机 TCP 80 / 443 可达且未被占用；配置同时发布 UDP 443 供 HTTP/3 使用。然后执行：
+
+```bash
+# 从 HTTP 模式切换时先停止原容器，数据卷保留
+docker compose down
+docker compose -f compose.yaml -f compose.https.yaml up -d
+docker compose -f compose.yaml -f compose.https.yaml logs -f caddy
+```
+
+通过 `https://你的域名` 访问。Caddy 自动申请与续期证书，证书和状态保存在独立的 `caddy_data` / `caddy_config` 数据卷。后续 `up`、`down`、`stop`、日志及升级操作均使用相同的两个 `-f` 参数。
+
+HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器内 `127.0.0.1:8080`，同时移除宿主机 HTTP 端口映射。这样保留后端只信任回环代理的现有规则，由 Caddy 保留原始 `Host`、设置 `X-Forwarded-Proto`，并即时转发 SSE / MCP 响应。不要直接将普通桥接网络中的其他反向代理当成可信回环来源；如使用自己的代理，需在同一网络命名空间内连接应用的回环地址，并正确设置上述头部。示例不会开放 Docker 网段信任或改写鉴权规则。
+
+#### 日常管理与升级
+
+以下为基础 HTTP 模式命令；HTTPS 模式在 `docker compose` 后追加 `-f compose.yaml -f compose.https.yaml`。
+
+```bash
+docker compose logs -f --tail=100 dream-canvas
+docker compose ps
+docker compose stop
+docker compose up -d
+```
+
+健康探测只检查 `/api/health` 是否响应，不表示供应商、对象存储或全部任务链路通过验收，也不会单凭 `unhealthy` 状态自动重启。应用自己的文件日志开关与 Docker 收集的终端输出分别管理，后者沿用宿主机 Docker 日志配置。
+
+更新源码后，先按下方方式备份数据，再构建并替换容器：
+
+```bash
+git pull --ff-only
+docker compose build --pull
+docker compose up -d --force-recreate
+```
+
+HTTPS 模式的 `--force-recreate` 会一并重建共享网络的 Caddy。保留 `.env` 和原数据卷，升级前后查看 `ps` 与日志；不要重新执行管理员初始化。数据库结构可能随版本更新，仅回退镜像不保证能回退数据，应配合升级前的完整备份恢复。此配置不设置内存 / CPU 硬限制，不把未实测的 1 核 / 1 GiB 目标写成运行保证。
+
+#### Docker 数据备份与恢复
+
+在仓库根目录执行，先停止应用，避免 SQLite 与原件在备份期间变化。下面将完整 `/data` 打包到宿主机 `backups/`；为每次备份选择不重复的文件名。
+
+```bash
+mkdir -p backups
+docker compose stop
+docker compose run --rm --no-deps --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup" dream-canvas -czpf /backup/dream-canvas-data.tar.gz -C /data .
+docker compose up -d
+```
+
+PowerShell 将建目录命令替换为 `New-Item -ItemType Directory -Force backups`。备份命令仅临时以 root 运行 `tar` 读取数据，正常应用继续使用非 root 用户；保留文件属主和权限，并妥善保护包含解密密钥与私有媒体的归档。HTTPS 模式的备份 / 恢复命令同样追加两个 `-f` 参数，Caddy 证书卷独立于应用数据备份。
+
+恢复时使用**全新、空的数据卷**，并保持所有应用实例停止；将备份放入当前目录的 `backups/`，再执行：
+
+```bash
+docker compose stop
+docker compose run --rm --no-deps --user 0:0 --entrypoint tar --volume "${PWD}/backups:/backup:ro" dream-canvas -xzpf /backup/dream-canvas-data.tar.gz -C /data
+docker compose up -d
+```
+
+如果目标已有数据，先单独备份，并选择新的 Compose 项目名创建独立数据卷后再恢复，不向运行中或已有内容的卷直接覆盖解压。不自动导入本机 `server/data/`；确需转移时，先停原服务，按完整数据目录备份 / 恢复，并确保恢复后的文件归容器 UID/GID `10001:10001` 所有。自定义宿主机目录挂载也必须提前准备可由该用户读写的目录，遇到权限问题不要长期改用 root 运行服务。
+
+Docker 部署使用前端静态产物，改动源码后需要重建镜像；日常前端开发继续使用上方 `npm run dev` 的 Vite 热更新流程。
+
+### 源码部署
+
+以 Linux 为例，在仓库根目录构建前端与后端：
+
+```bash
+cd web
+npm ci
+npm run build
+
+cd ../server
+go build -o dream-canvas-server ./cmd/server
+```
+
+继续在 `server/` 目录执行。全新部署先初始化管理员，已有账号时跳过第一条命令：
+
+```bash
+./dream-canvas-server -data ./data -init-admin admin
+./dream-canvas-server -data ./data -web ../web/dist -listen 127.0.0.1:8080
+```
+
+Go 服务可直接提供 `web/dist` 中的静态页面，无需单独运行 Node.js 前端服务。运行目录变化时，显式指定数据与静态目录路径；升级时使用同一份持久数据目录，并同步更新前后端。
+
+| 参数 | 默认值 | 用途 |
+| --- | --- | --- |
+| `-data` | `data` | 数据库、密钥、媒体及待处理文件的持久目录 |
+| `-listen` | `127.0.0.1:8080` | HTTP 监听地址 |
+| `-web` | `../web/dist` | 前端静态产物目录 |
+| `-init-admin` | 不启用 | 初始化管理员用户名，完成后退出 |
+
+对外访问时通过反向代理提供 HTTPS，保留原始 `Host`，由本机代理正确设置 `X-Forwarded-Proto`，并关闭 SSE 响应缓冲。单独托管静态文件时，同源转发 `/api` 与 `/mcp`，并为前端路由提供 `index.html` 回退。
+
+### 数据与备份
+
+项目采用单进程 SQLite 部署，不依赖 PostgreSQL 或 Redis。**服务端是业务数据的权威来源**；浏览器仅保留界面偏好、缓存及工作台创作草稿，不能代替服务端备份。
+
+- 将 `-data` 指向持久目录，不要放入前端静态目录或在升级时覆盖。
+- 停止服务后备份整个数据目录，包含 SQLite 数据库、媒体原件、待处理响应和 **`credentials.key`**；密钥丢失会导致已有渠道、存储及任务快照中的凭据无法解密。
+- 「设置 → 数据备份」只导出 / 导入**当前账号的资产库**，不包含整站数据库、账号或系统配置。对象存储同步同样不等于整站备份。
+- 工作台生成记录中的成品需要主动「加入资产库」以保留；删除记录会清理未保留且未被其他记录或项目引用的专属文件，正在使用的素材会等待任务释放。
+
+本项目不提供公开注册、支付、对外分享或实时协同。安全边界与反馈方式见 [SECURITY.md](SECURITY.md)，剩余实施及验收事项见 [CHANGELOG](CHANGELOG.md#unreleased)。
 
 ## 开源协议
 
-使用 [MIT License](LICENSE)，保留原始版权声明 `Copyright (c) 2026 basketikun`；QuickJS WASM 绑定的局部修改与来源见 [第三方说明](server/third_party/qjs/NOTICE.md)。安全问题反馈见 [SECURITY.md](SECURITY.md)。
+梦想画布由 **qgming** 设计、开发与维护，项目原创及新增内容署名 qgming。
+
+梦想画布项目部分理念和实现方式参考 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 和 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat)两个开源项目
+
+项目采用 [MIT License](LICENSE)，版权署名为 `Copyright (c) 2026 qgming`，同时保留上游原始版权声明。第三方组件遵循各自许可证：QuickJS WASM 绑定的来源与局部修改见 [第三方说明](server/third_party/qjs/NOTICE.md)；首页 Glyph 背景所附的 **MIT + Commons Clause** 条款见 [Animate UI 许可证](web/src/components/animate-ui/LICENSE.md)。

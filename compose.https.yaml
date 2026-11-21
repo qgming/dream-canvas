@@ -1,0 +1,26 @@
+# Use together with compose.yaml. Caddy reaches the app over shared loopback.
+services:
+  dream-canvas:
+    command: ["-data", "/data", "-web", "/app/web", "-listen", "127.0.0.1:8080"]
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: service:dream-canvas
+    depends_on:
+      dream-canvas:
+        condition: service_healthy
+        restart: true
+    environment:
+      DOMAIN: ${DOMAIN:?请在 .env 中设置 DOMAIN 为已解析到此服务器的域名}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
