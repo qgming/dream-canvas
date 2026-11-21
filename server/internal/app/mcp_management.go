@@ -55,6 +55,7 @@ func managementTools() []toolDefinition {
 		tool("admin_site_save", "管理员按版本保存站点及并发设置；关闭须 confirmed=true，普通用户退出且不能登录，管理员保留入口，已提交生成继续处理", "admin", map[string]any{"version": numberField("读取版本"), "open": map[string]any{"type": "boolean"}, "assistantSlots": map[string]any{"type": "integer", "minimum": 1}, "generationSlots": map[string]any{"type": "integer", "minimum": 1}, "userSlots": map[string]any{"type": "integer", "minimum": 1}, "confirmed": map[string]any{"type": "boolean"}}, "version", "open", "assistantSlots", "generationSlots", "userSlots"),
 		tool("admin_storages_list", "读取五类存储配置，不返回 AccessKey 或 Secret", "admin", map[string]any{}),
 		tool("admin_storage_save", "创建或按版本修改存储；最多启用一个，历史资产保持原归属", "admin", map[string]any{"storageId": stringField("修改时填写，新建留空"), "config": objectField("name/provider/endpoint/bucket/region/pathStyle/default/version/accessKeyId/accessKeySecret")}, "config"),
+		tool("admin_storage_test", "仅由管理员主动按读取版本测试已保存的存储；真实写入独立测试对象、通过签名地址读回校验并删除，可能产生请求及少量存储费用，不保存或启用配置，不接受或返回凭据", "admin", map[string]any{"storageId": stringField("已保存的存储 ID"), "version": numberField("读取到的配置版本")}, "storageId", "version"),
 		tool("admin_storage_delete", "移除无文件引用的存储配置，不删除资产", "admin", map[string]any{"storageId": stringField("存储 ID")}, "storageId"),
 		tool("admin_script_check", "不调用供应商地编译脚本包，检查输入及请求映射", "admin", map[string]any{"files": objectField("完整文件映射"), "input": objectField("可选标准样例输入"), "baseUrl": stringField("预览地址"), "parameterOverrides": objectField("可选模型参数覆盖，与正式调用共用合并及校验")}, "files"),
         tool("admin_models_remote", "通过已保存渠道的标准 models 接口拉取模型 ID，不创建模型", "admin", map[string]any{"channelId": stringField("渠道 ID")}, "channelId"),
@@ -129,6 +130,9 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "admin_site_save": var request siteSettingsInput; if err = decode(input, &request); err == nil { value, err = a.SaveSiteSettings(p.User.ID, request) }
 	case "admin_storages_list": value, err = a.ListStorages()
 	case "admin_storage_save": var request storageInput; if err = decode(input["config"], &request); err == nil { value, err = a.SaveStorage(read("storageId"), request) }
+	case "admin_storage_test":
+		var request struct { Version uint64 `json:"version"` }; if err = decode(input, &request); err != nil { break }
+		var storage ObjectStorage; if err = a.db.First(&storage, "id = ?", read("storageId")).Error; err == nil { value, err = a.TestStorage(ctx, p.User, storage.ID, storageInput{Name: storage.Name, Provider: storage.Provider, Region: storage.Region, PathStyle: storage.PathStyle, Endpoint: storage.Endpoint, Bucket: storage.Bucket, Default: storage.Default, Version: request.Version}) }
 	case "admin_storage_delete": err = a.DeleteStorage(read("storageId"))
 	case "admin_script_check": var request scriptCheckInput; if err = decode(input, &request); err == nil { value, err = a.CheckModelScript(ctx, p.User.ID, request) }
     case "admin_models_remote": value, err = a.DiscoverChannelModels(ctx, read("channelId"))

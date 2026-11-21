@@ -39,13 +39,18 @@ func (a *App) saveStorage(c *gin.Context) {
 	var input storageInput; if !bind(c, &input) { return }; value, err := a.SaveStorage(c.Param("id"), input); if err != nil { respondError(c, err); return }; c.JSON(200, value)
 }
 
-func (a *App) SaveStorage(id string, input storageInput) (gin.H, error) {
+func validateStorageInput(input storageInput) (*url.URL, error) {
 	if !includes([]string{"r2", "aliyun", "tencent", "qiniu", "s3"}, input.Provider) || input.Region == "" { return nil, problem(400, "invalid_storage", "请选择存储类型并填写区域") }
 	u, err := url.Parse(strings.TrimSpace(input.Endpoint))
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" { return nil, problem(400, "invalid_storage", "OSS Endpoint 需要 HTTPS 服务地址，不包含路径、查询或凭据") }
 	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Bucket) == "" || strings.ContainsAny(input.Bucket, "/\\ ?#") { return nil, problem(400, "invalid_storage", "请填写存储名称和有效 Bucket") }
 	if input.Provider == "r2" && input.Region != "auto" { return nil, problem(400, "invalid_region", "Cloudflare R2 的区域需要填写 auto") }
 	if (input.Provider == "aliyun" || input.Provider == "tencent") && input.PathStyle { return nil, problem(400, "invalid_addressing", "阿里云 OSS 与腾讯云 COS 模板使用原生虚拟主机寻址，请关闭 Path Style") }
+	return u, nil
+}
+
+func (a *App) SaveStorage(id string, input storageInput) (gin.H, error) {
+	u, err := validateStorageInput(input); if err != nil { return nil, err }
 	row := ObjectStorage{}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		if id != "" { if err := tx.First(&row, "id = ?", id).Error; err != nil { return err }; if row.Version != input.Version { return problem(409, "version_conflict", "存储配置已更新，请重新读取") }
@@ -79,6 +84,10 @@ func (a *App) DeleteStorage(id string) error {
 func (a *App) storageBucket(id string, policy executionPolicy) (*oss.Bucket, error) {
 	var storage ObjectStorage
 	if err := a.db.First(&storage, "id = ?", id).Error; err != nil { return nil, err }
+	return a.ossBucket(storage, policy)
+}
+
+func (a *App) ossBucket(storage ObjectStorage, policy executionPolicy) (*oss.Bucket, error) {
 	key, err := a.decryptSecret(storage.AccessKeyID); if err != nil { return nil, err }
 	secret, err := a.decryptSecret(storage.Secret); if err != nil { return nil, err }
 	client, err := oss.New(storage.Endpoint, key, secret, oss.HTTPClient(providerHTTP(policy)), oss.Timeout(int64(policy.ConnectSeconds), int64(policy.TransferSeconds)))
@@ -110,10 +119,14 @@ func (a *App) cosClient(storage ObjectStorage, policy executionPolicy) (*cos.Cli
 func (a *App) signAsset(asset Asset, policy executionPolicy) (string, error) {
 	var storage ObjectStorage
 	if err := a.db.First(&storage, "id = ?", asset.StorageID).Error; err != nil { return "", err }
-	if storage.Provider == "aliyun" { bucket, err := a.storageBucket(storage.ID, policy); if err != nil { return "", err }; return bucket.SignURL(storageKey(asset), oss.HTTPGet, int64(policy.SignedURLSeconds)) }
-	if storage.Provider == "tencent" { client, err := a.cosClient(storage, policy); if err != nil { return "", err }; address, err := client.Object.GetPresignedURL2(a.ctx, http.MethodGet, storageKey(asset), seconds(policy.SignedURLSeconds), nil); if err != nil { return "", err }; return address.String(), nil }
+	return a.signStorageObject(a.ctx, storage, storageKey(asset), policy)
+}
+
+func (a *App) signStorageObject(ctx context.Context, storage ObjectStorage, key string, policy executionPolicy) (string, error) {
+	if storage.Provider == "aliyun" { bucket, err := a.ossBucket(storage, policy); if err != nil { return "", err }; return bucket.SignURL(key, oss.HTTPGet, int64(policy.SignedURLSeconds)) }
+	if storage.Provider == "tencent" { client, err := a.cosClient(storage, policy); if err != nil { return "", err }; address, err := client.Object.GetPresignedURL2(ctx, http.MethodGet, key, seconds(policy.SignedURLSeconds), nil); if err != nil { return "", err }; return address.String(), nil }
 	client, err := a.s3Client(storage, policy); if err != nil { return "", err }
-	result, err := s3.NewPresignClient(client).PresignGetObject(a.ctx, &s3.GetObjectInput{Bucket: aws.String(storage.Bucket), Key: aws.String(storageKey(asset))}, s3.WithPresignExpires(seconds(policy.SignedURLSeconds)))
+	result, err := s3.NewPresignClient(client).PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(storage.Bucket), Key: aws.String(key)}, s3.WithPresignExpires(seconds(policy.SignedURLSeconds)))
 	if err != nil { return "", err }; return result.URL, nil
 }
 

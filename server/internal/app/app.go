@@ -229,6 +229,7 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	admin.DELETE("/logging/entries", a.clearLogs)
 	admin.GET("/storages", a.listStorages)
 	admin.POST("/storages", a.saveStorage)
+	admin.POST("/storages/test", a.testStorage)
 	admin.PUT("/storages/:id", a.saveStorage)
 	admin.DELETE("/storages/:id", a.deleteStorage)
 	admin.GET("/usage", a.listUsage)

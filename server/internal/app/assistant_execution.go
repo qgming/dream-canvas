@@ -107,7 +107,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 
 func assistantToolAllowed(name string) bool {
 	if name == "task_resolve" || name == "task_delete" { return false }
-	if includes([]string{"admin_canvas_plugin_publish", "admin_canvas_plugin_enabled", "admin_canvas_plugin_delete"}, name) { return false }
+	if includes([]string{"admin_canvas_plugin_publish", "admin_canvas_plugin_enabled", "admin_canvas_plugin_delete", "admin_storage_test"}, name) { return false }
 	return !includes([]string{"asset_content", "token_create", "password_change", "admin_user_create", "admin_user_password", "admin_channel_install", "admin_channel_delete", "admin_site_save", "admin_script_test", "admin_script_publish", "admin_script_delete", "admin_task_recover_query", "assistant_turn_start", "assistant_turn_cancel", "assistant_thread_delete", "assistant_skill_draft_create"}, name)
 }
 

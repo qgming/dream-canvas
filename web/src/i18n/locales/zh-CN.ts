@@ -323,7 +323,17 @@ export default {
     },
     storage: {
         retrySync: "重新同步", syncQueued: "已检查云同步队列；未配置存储时保留本地原件",
-        title: "对象存储", description: "从模板配置私有对象存储，当前仅启用一个供新文件使用。", add: "添加存储配置", edit: "编辑存储", template: "配置模板", singleActive: "最多启用一个配置；启用其他配置时自动关闭上一项，历史资产保留原存储归属。", privateHint: "请使用私有 Bucket 与对象。素材按任务签发受限访问地址，凭据加密保存在服务端。", active: "已启用", inactive: "未启用", remove: "移除配置", removeHint: "仍有历史文件或待删除副本引用的配置不能移除。", endpointHint: "填写服务端点，不包含 Bucket、文件路径或签名参数。R2 需替换账户 ID。", endpointRequired: "请填写完整 HTTPS 端点并替换占位符", region: "区域", bucketHint: "腾讯云填写完整 Bucket-APPID；七牛填写控制台中的 S3 空间名。", pathStyle: "使用 Path Style 寻址", enable: "启用此配置", saved: "存储配置已保存", providers: { r2: "Cloudflare R2", aliyun: "阿里云 OSS", tencent: "腾讯云 COS", qiniu: "七牛云 Kodo（S3）", s3: "通用 S3" },
+        test: "测试连接", testHint: "使用当前表单真实写入、通过签名地址读回并删除独立测试对象，可能产生请求和少量存储费用；不保存或启用配置。", testSuccess: "对象存储测试通过", testFailed: "对象存储测试失败：{{stage}}", testSnapshot: "本次配置的写入、签名读取、内容校验和清理均已通过；修改配置后请重新测试。", testHttpError: "存储服务返回 HTTP {{status}}，请检查服务端点、存储桶、区域及访问密钥的读写和删除权限。", testCleanupRequired: "测试对象清理未确认，请在存储控制台检查并移除：{{key}}", testVersion: "测试对象版本：{{version}}", testBackendRequired: "当前后端尚未提供对象存储测试接口，请更新并重启后端。",
+        testStages: { write: "写入测试对象", read: "签名读取", verify: "内容校验", delete: "清理测试对象", completed: "完成" },
+        testErrors: { timeout: "请求超过现有查询时限，请检查网络和存储服务状态。", cancelled: "测试请求已中断，请检查测试对象的清理状态。", private_address: "服务端点必须指向公网 HTTPS 地址。", content_mismatch: "读回内容与写入内容不一致，请检查服务端点及代理配置。", write_uncertain: "写入响应未确认，已发送清理请求；若存储桶开启版本控制，请同时检查该对象的历史版本。", request_failed: "连接或响应读取失败，请检查网络、HTTPS 证书、区域及访问密钥。" },
+        title: "对象存储", description: "从模板配置私有对象存储，当前仅启用一个供新文件使用。", add: "添加存储配置", edit: "编辑存储", addProvider: "添加 {{provider}}", editProvider: "编辑 {{provider}}", template: "配置模板", templateHint: "选择服务商后显示对应配置，已有配置不能更换服务商。", singleActive: "最多启用一个配置；启用其他配置时自动关闭上一项，历史资产保留原存储归属。", privateHint: "请使用私有 Bucket 与对象。素材按任务签发受限访问地址，凭据加密保存在服务端。", active: "已启用", inactive: "未启用", remove: "移除配置", removeHint: "仍有历史文件或待删除副本引用的配置不能移除。", endpoint: "服务端点", endpointHint: "填写 HTTPS 服务端点，不包含存储桶、文件路径或签名参数。", endpointRequired: "请填写完整 HTTPS 端点并替换占位符", region: "区域", regionHint: "填写存储桶所在区域的标识，例如 {{region}}，需与服务端点一致。", r2RegionHint: "R2 的区域自动使用 auto，无需填写。", bucket: "存储桶", tencentBucket: "存储桶（含 APPID）", qiniuBucket: "S3 空间名", pathStyle: "使用 Path Style 寻址", pathStyleHint: "开启后以「服务端点/存储桶/对象」寻址，关闭后以「存储桶.服务端点/对象」寻址，请按服务商要求选择。", enable: "启用此配置", saved: "存储配置已保存", providers: { r2: "Cloudflare R2", aliyun: "阿里云 OSS", tencent: "腾讯云 COS", qiniu: "七牛云 Kodo（S3）", s3: "通用 S3" },
+        providerHints: {
+            r2: { endpoint: "使用 R2 控制台提供的 S3 API 地址，将示例中的 <ACCOUNT_ID> 替换为账户 ID；有管辖区域限制的存储桶使用控制台对应地址。", bucket: "填写 R2 存储桶名称，不是 r2.dev 公共地址或自定义域名。", credentials: "填写创建 R2 API 令牌时生成的 Access Key ID 与 Secret Access Key，不是令牌本身。" },
+            aliyun: { endpoint: "使用存储桶所在区域的 OSS 服务端点，例如 https://oss-cn-hangzhou.aliyuncs.com。", bucket: "填写 OSS 控制台中的 Bucket 名称，不包含 Endpoint 或路径。", credentials: "填写有权访问此 Bucket 的阿里云 AccessKey ID 与 AccessKey Secret。" },
+            tencent: { endpoint: "使用区域级 COS 服务端点，例如 https://cos.ap-guangzhou.myqcloud.com，不要添加存储桶前缀。", bucket: "填写完整的 BucketName-APPID，例如 dream-canvas-1250000000。", credentials: "填写腾讯云 API 密钥中的 SecretId 与 SecretKey。" },
+            qiniu: { endpoint: "使用存储区域对应的 S3 服务域名，例如 https://s3.cn-east-1.qiniucs.com，不是上传域名或 CDN 地址。", bucket: "填写空间概览中的 S3 空间名，它可能与普通空间名称不同。", credentials: "填写七牛云密钥管理中的 AccessKey 与 SecretKey。" },
+            s3: { endpoint: "填写服务商提供的 S3 兼容 API 地址，例如 https://s3.us-east-1.amazonaws.com。", bucket: "填写私有 Bucket 名称，不包含文件夹路径。", credentials: "填写此 S3 服务的 Access Key ID 与 Secret Access Key。" },
+        },
     },
     usage: {
         title: "用量统计",
