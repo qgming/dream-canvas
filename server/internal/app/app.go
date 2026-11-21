@@ -110,10 +110,10 @@ func bind(c *gin.Context, target any) bool {
 
 func currentUser(c *gin.Context) User { return c.MustGet("user").(User) }
 
-func (a *App) Router(web string) *gin.Engine {
+func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	if err := r.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil { panic(err) }
+	if err := configureTrustedProxies(r, trustedProxies); err != nil { panic(err) }
 	r.Use(a.requestLogger(), gin.CustomRecoveryWithWriter(nil, a.recoverRequest), func(c *gin.Context) {
 		if policy, err := a.executionPolicy(); err == nil && policy.JSONBytes > 0 && strings.Contains(c.GetHeader("Content-Type"), "application/json") { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.JSONBytes) }
 		c.Header("X-Content-Type-Options", "nosniff")

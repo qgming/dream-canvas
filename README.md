@@ -187,7 +187,11 @@ docker compose -f compose.yaml -f compose.https.yaml logs -f caddy
 
 通过 `https://你的域名` 访问。Caddy 自动申请与续期证书，证书和状态保存在独立的 `caddy_data` / `caddy_config` 数据卷。后续 `up`、`down`、`stop`、日志及升级操作均使用相同的两个 `-f` 参数。
 
-HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器内 `127.0.0.1:8080`，同时移除宿主机 HTTP 端口映射。这样保留后端只信任回环代理的现有规则，由 Caddy 保留原始 `Host`、设置 `X-Forwarded-Proto`，并即时转发 SSE / MCP 响应。不要直接将普通桥接网络中的其他反向代理当成可信回环来源；如使用自己的代理，需在同一网络命名空间内连接应用的回环地址，并正确设置上述头部。示例不会开放 Docker 网段信任或改写鉴权规则。
+HTTPS 模式让 Caddy 与应用共享网络命名空间，应用仅监听容器内 `127.0.0.1:8080`，同时移除宿主机 HTTP 端口映射。默认仍只信任回环代理，由 Caddy 保留原始 `Host`、覆盖 `X-Forwarded-Proto`，并即时转发 SSE / MCP 响应，无需额外可信代理配置。
+
+如果使用**宿主机上的 Caddy / Nginx + Docker 端口映射**，应用看到的对端通常是 Docker 桥接网关。先通过 `docker inspect "$(docker compose ps -q dream-canvas)" --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{println}}{{end}}'` 核对实际网关；若有多个网络，确认代理实际使用的那个来源。在 `.env` 设置 `DREAM_CANVAS_TRUSTED_PROXIES=实际网关IP/32`（IPv6 用 `/128`，多个来源逗号分隔），再执行 `docker compose up -d --force-recreate`。原生启动可使用 `-trusted-proxies`，会覆盖同名环境变量。不要照抄示例 IP、信任整个 Docker 网段或设置 `0.0.0.0/0`；保持 HTTP 端口仅绑定 `127.0.0.1`，可信代理必须覆盖客户端传来的转发头，并保留原始 `Host`。
+
+仅当请求直接使用 TLS，或实际连接对端属于可信来源且 `X-Forwarded-Proto` 恰为 `https` 时，会话 Cookie 才带 `Secure`；缺失、`http` 或不可信来源均不会因转发头获得 `Secure`。未配置宿主机网关时，宿主机反代登录的 Cookie 不会自动带 `Secure`。网关地址变化后需同步更新配置。
 
 #### 日常管理与升级
 
@@ -268,6 +272,7 @@ Go 服务可直接提供 `web/dist` 中的静态页面，无需单独运行 Node
 | `-data` | `data` | 数据库、密钥、媒体及待处理文件的持久目录 |
 | `-listen` | `127.0.0.1:8080` | HTTP 监听地址 |
 | `-web` | `../web/dist` | 前端静态产物目录 |
+| `-trusted-proxies` | `DREAM_CANVAS_TRUSTED_PROXIES`，未设置时仅信任回环来源 | 额外可信反代 IP/CIDR，逗号分隔；用于客户端 IP 和 HTTPS Cookie 判定 |
 | `-init-admin` | 不启用 | 初始化管理员用户名，完成后退出 |
 
 对外访问时通过反向代理提供 HTTPS，保留原始 `Host`，由本机代理正确设置 `X-Forwarded-Proto`，并关闭 SSE 响应缓冲。单独托管静态文件时，同源转发 `/api` 与 `/mcp`，并为前端路由提供 `index.html` 回退。

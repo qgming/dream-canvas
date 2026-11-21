@@ -2,7 +2,6 @@ package app
 
 import (
 	"crypto/subtle"
-	"net"
 	"net/http"
 	"strings"
 
@@ -26,9 +25,7 @@ func (a *App) missingSession(c *gin.Context) {
 
 func secureCookie(c *gin.Context) bool {
 	if c.Request.TLS != nil { return true }
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	ip := net.ParseIP(host)
-	return err == nil && ip != nil && ip.IsLoopback() && c.GetHeader("X-Forwarded-Proto") == "https"
+	return c.GetBool("trustedProxy") && c.GetHeader("X-Forwarded-Proto") == "https"
 }
 
 func passwordHash(password string) (string, error) {

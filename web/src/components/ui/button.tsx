@@ -6,7 +6,8 @@ import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./popover";
 
-export type ButtonProps = HTMLMotionProps<"button"> & {
+export type ButtonProps = Omit<HTMLMotionProps<"button">, "children"> & {
+    children?: ReactNode;
     variant?: "default" | "outline" | "ghost" | "destructive" | "link";
     size?: "default" | "sm" | "lg" | "icon";
     loading?: boolean;
