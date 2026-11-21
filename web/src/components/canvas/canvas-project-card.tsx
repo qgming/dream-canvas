@@ -16,7 +16,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const startEditing = useCanvasUiStore((state) => state.startEditingProject);
-    const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
+    const setDeleteId = useCanvasUiStore((state) => state.setDeleteProjectId);
     const open = () => {
         navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
     };
@@ -33,7 +33,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                     <Menu placement="bottomRight" items={[
                         { key: "rename", label: t("canvas.project.rename"), icon: <Pencil />, onClick: () => startEditing(project.id) },
                         { key: "export", label: t("canvas.project.export"), icon: <Download />, onClick: () => void exportCanvasProjects([project], project.title || t("canvas.title")).catch((error: unknown) => notify.error(error instanceof Error ? error.message : appI18n.t("workspace.exportProjectFailed"))) },
-                        { key: "delete", label: t("canvas.project.delete"), icon: <Trash2 />, danger: true, onClick: () => setDeleteIds([project.id]) },
+                        { key: "delete", label: t("canvas.project.delete"), icon: <Trash2 />, danger: true, onClick: () => setDeleteId(project.id) },
                     ]}><Button variant="ghost" size="icon" className="size-7" title={t("ui.moreActions")} aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>
                 </div>
             </div>

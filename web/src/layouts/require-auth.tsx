@@ -53,7 +53,7 @@ export default function RequireAuth() {
         useCanvasStore.getState().reset();
         useAssetStore.getState().reset();
         useConfigStore.getState().reset();
-        useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, deleteProjectIds: [] });
+        useCanvasUiStore.setState({ activeProjectId: null, editingProjectId: null, deleteProjectId: null });
         useWorkbenchAgentStore.setState({ imageCommand: null, videoCommand: null, tasks: [] });
         useWorkbenchDraftStore.getState().reset();
         useAgentStore.getState().disconnectAgent({ messages: [], attachments: [], canvasReferences: [], threads: [], activeThreadId: "", activeTurnId: "", prompt: "", modelParameters: {} });

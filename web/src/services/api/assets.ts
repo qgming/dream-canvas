@@ -4,8 +4,13 @@ import { apiRequest, captureSession, jsonRequest } from "./client";
 export type ServerAsset = {
     id: string; kind: "text" | "image" | "video" | "audio"; title: string; mimeType: string; bytes: number; width: number; height: number;
     saveState: string; syncState: string; deleteState: string; cleanupTaskId?: string; error?: string; storageId?: string; metadata: Record<string, unknown>; durationMs: number; probeError?: string; previewError?: string;
+    storageName?: string; migration?: AssetMigration;
     workbenchRecordId?: string; createdAt: string; updatedAt: string;
 };
+export type AssetMigration = { storageId: string; storageName: string; state: string; error?: string };
+export type AssetStorageOption = { id: string; name: string; default: boolean };
+export const listAssetStorages = () => apiRequest<AssetStorageOption[]>("/asset-storages");
+export const migrateAsset = (id: string, storageId: string, expectedUpdatedAt: string) => apiRequest<{ queued: boolean }>(`/assets/${encodeURIComponent(id)}/migrate`, jsonRequest("POST", { storageId, expectedUpdatedAt }));
 export const assetUrl = (id: string) => `/api/assets/${encodeURIComponent(id)}/file`;
 export const assetId = (key = "") => key.startsWith("asset:") ? key.slice(6) : /^\/api\/assets\/([^/]+)\/(?:file|preview)$/.exec(key)?.[1];
 export const listAssets = () => apiRequest<ServerAsset[]>("/assets");

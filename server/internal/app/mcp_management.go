@@ -51,7 +51,7 @@ func managementTools() []toolDefinition {
 		tool("admin_logging_get", "读取全站后台日志开关；需要管理员及不限项目的 admin 授权", "admin", map[string]any{}),
 		tool("admin_logs_read", "读取应用日志占用、总条数及技术日志；支持数字页码或 nextCursor，默认最新 100 条，不返回服务器路径", "admin", map[string]any{"cursor": stringField("上次返回的 nextCursor，与 page / pageSize 分开使用"), "page": map[string]any{"type": "integer", "minimum": 1}, "pageSize": map[string]any{"type": "integer", "enum": []int{20, 50, 100}}}),
 		tool("admin_logs_clear", "明确确认后清空应用管理的当前及历史日志文件；不改业务数据或日志开关，服务继续记录新日志", "admin", map[string]any{"confirmed": map[string]any{"type": "boolean"}}, "confirmed"),
-		tool("admin_logging_save", "按版本保存后台运行日志与开发诊断开关，立即应用；不返回日志正文或凭据", "admin", map[string]any{"version": numberField("读取到的日志设置版本"), "enabled": map[string]any{"type": "boolean"}, "development": map[string]any{"type": "boolean"}}, "version", "enabled", "development"),
+		tool("admin_logging_save", "按版本保存重要事件与错误日志及详细错误诊断开关，立即应用；详细诊断仅补充错误分类与脚本位置，不记录正常请求或轮询", "admin", map[string]any{"version": numberField("读取到的日志设置版本"), "enabled": map[string]any{"type": "boolean"}, "development": map[string]any{"type": "boolean", "description": "仅增加错误的安全诊断细节"}}, "version", "enabled", "development"),
 		tool("admin_site_save", "管理员按版本保存站点及并发设置；关闭须 confirmed=true，普通用户退出且不能登录，管理员保留入口，已提交生成继续处理", "admin", map[string]any{"version": numberField("读取版本"), "open": map[string]any{"type": "boolean"}, "assistantSlots": map[string]any{"type": "integer", "minimum": 1}, "generationSlots": map[string]any{"type": "integer", "minimum": 1}, "userSlots": map[string]any{"type": "integer", "minimum": 1}, "confirmed": map[string]any{"type": "boolean"}}, "version", "open", "assistantSlots", "generationSlots", "userSlots"),
 		tool("admin_storages_list", "读取五类存储配置，不返回 AccessKey 或 Secret", "admin", map[string]any{}),
 		tool("admin_storage_save", "创建或按版本修改存储；最多启用一个，历史资产保持原归属", "admin", map[string]any{"storageId": stringField("修改时填写，新建留空"), "config": objectField("name/provider/endpoint/bucket/region/pathStyle/default/version/accessKeyId/accessKeySecret")}, "config"),
@@ -126,7 +126,7 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 			if err = decode(input, &request); err == nil { value, err = a.ReadLogPage(request.Page, request.PageSize) }
 		} else { value, err = a.ReadLogs(read("cursor")) }
 	case "admin_logs_clear": value, err = a.ClearLogs(input["confirmed"] == true)
-	case "admin_logging_save": var request logSettingsInput; if err = decode(input, &request); err == nil { if request.Enabled == nil || request.Development == nil { return nil, true, problem(400, "invalid_logging", "请明确日志和开发诊断开关") }; value, err = a.SaveLogSettings(p.User.ID, request.Version, *request.Enabled, *request.Development) }
+	case "admin_logging_save": var request logSettingsInput; if err = decode(input, &request); err == nil { if request.Enabled == nil || request.Development == nil { return nil, true, problem(400, "invalid_logging", "请明确日志和错误诊断开关") }; value, err = a.SaveLogSettings(p.User.ID, request.Version, *request.Enabled, *request.Development) }
 	case "admin_site_save": var request siteSettingsInput; if err = decode(input, &request); err == nil { value, err = a.SaveSiteSettings(p.User.ID, request) }
 	case "admin_storages_list": value, err = a.ListStorages()
 	case "admin_storage_save": var request storageInput; if err = decode(input["config"], &request); err == nil { value, err = a.SaveStorage(read("storageId"), request) }

@@ -48,7 +48,9 @@ func businessTools() []toolDefinition {
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_update", "修改资产名称与说明，并将工作台文件保留到资产库，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
 		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content 文本正文、note 备注、source 来源、coverUrl 封面地址"}}, "title", "metadata")},
-		{"asset_sync", "重新排队同步已有资产，保留其原存储归属", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
+		{"asset_sync", "重新排队同步已有资产或重试其当前迁移；不改变既定目标，重试迁移需要不限项目的授权", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
+		{"asset_storages", "读取可选对象存储的 ID、名称及默认标记，不提供端点或凭据；需要不限项目的授权", "read", toolSchema(map[string]any{})},
+		{"asset_migrate", "迁移本人媒体到其他已配置存储，先复制再等待任务释放并切换、清理旧副本；需要不限项目的编辑授权，返回排队不代表完成", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "storageId": stringField("asset_storages 返回的目标存储 ID"), "expectedUpdatedAt": stringField("读取资产的 updatedAt")}, "assetId", "storageId", "expectedUpdatedAt")},
 		{"asset_voices", "读取音频资产在各渠道已注册的音色编号", "read", toolSchema(map[string]any{"assetId": stringField("音频资产 ID")}, "assetId")},
 		{"asset_voice_save", "关联已注册音色编号；不会调用供应商克隆或注册音色", "edit", toolSchema(map[string]any{"assetId": stringField("音频资产 ID"), "channelId": stringField("渠道 ID"), "voiceId": stringField("已注册编号"), "version": numberField("现有版本，新建为 0")}, "assetId", "channelId", "voiceId", "version")},
 		{"catalog_list", "读取按管理员排序返回的可用渠道模型目录；parameters 包含管理员及脚本默认值，不含真实凭据、积分或价格", "read", toolSchema(map[string]any{})},
@@ -81,7 +83,7 @@ func (a *App) mcpHandler() http.Handler {
 		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		principal, err := a.tokenPrincipal(raw)
 		if err != nil { return nil }
-		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.0"}, nil)
+		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.1"}, nil)
 		for _, tool := range businessTools() {
 			if !principal.allows(tool.Scope, "") { continue }
 			mcp.AddTool(server, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}, func(ctx context.Context, request *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {
@@ -110,12 +112,16 @@ func toolResult(value any, err error) *mcp.CallToolResult {
 func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input map[string]any) (output any, failure error) {
 	started := time.Now()
 	defer func() {
-		if name == "admin_logs_read" || name == "admin_logs_clear" { return }
+		if failure == nil && (name == "admin_logs_read" || name == "admin_logs_clear") { return }
 		if !a.logEnabled(slog.LevelInfo) { return }
 		known := false; for _, tool := range businessTools() { if tool.Name == name { known = true; break } }
 		fields := []slog.Attr{slog.String("user_id", p.User.ID), slog.Bool("assistant", p.FixedProject), slog.Int64("duration_ms", time.Since(started).Milliseconds())}
 		if known { fields = append(fields, slog.String("tool", name)) }
-		if failure != nil { a.logFailure(ctx, "business.tool_failed", failure, fields...) } else { a.logEvent(ctx, slog.LevelDebug, "business.tool_completed", fields...) }
+		if failure != nil { a.logFailure(ctx, "business.tool_failed", failure, fields...) } else {
+			level := slog.LevelDebug
+			if known && strings.HasPrefix(name, "admin_") && name != "admin_logging_save" { for _, action := range []string{"_save", "_delete", "_publish", "_enabled", "_create", "_disable", "_password", "_install", "_recover_query"} { if strings.HasSuffix(name, action) { level = slog.LevelInfo; break } } }
+			a.logEvent(ctx, level, "business.tool_completed", fields...)
+		}
 	}()
 	if err := ctx.Err(); err != nil { return nil, err }
 	if err := a.db.First(&p.User, "id = ? AND disabled = ?", p.User.ID, false).Error; err != nil { return nil, problem(403, "account_disabled", "账号已停用或不存在") }
@@ -173,13 +179,20 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		query := a.db.Where("user_id = ? AND delete_state = ?", p.User.ID, "")
 		if len(p.Projects) > 0 { query = query.Where("id IN (?)", a.db.Model(&AssetReference{}).Select("asset_id").Where("project_id IN ?", p.Projects)) } else { query = query.Where("workbench_record_id = ?", "") }
 		err := query.Order("created_at DESC").Find(&assets).Error
+		if err == nil { err = a.fillAssetStorage(assets) }
 		return assets, err
 	case "asset_get":
 		if err := a.checkTokenAsset(p, text("assetId")); err != nil { return nil, err }
 		var asset Asset
 		err := a.db.First(&asset, "id = ? AND user_id = ?", text("assetId"), p.User.ID).Error
 		if err == nil && len(p.Projects) == 0 { err = assetCleanupBlocker(a.db, &asset) }
+		if err == nil { rows := []Asset{asset}; err = a.fillAssetStorage(rows); asset = rows[0] }
 		return asset, err
+	case "asset_storages", "asset_migrate":
+		if len(p.Projects) > 0 { return nil, problem(403, "asset_scope", "资产存储与迁移需要不限项目的授权") }
+		if name == "asset_storages" { return a.AssetStorageOptions() }
+		var request assetMigrationInput; if err := json.Unmarshal(encode(input), &request); err != nil { return nil, problem(400, "invalid_migration", "请提供有效的存储配置与资产读取时间") }
+		err := a.MigrateAsset(p.User.ID, text("assetId"), request); return map[string]any{"queued": err == nil}, err
 	case "asset_content", "asset_voices", "asset_voice_save", "asset_sync", "asset_update":
 		id := text("assetId")
 		if err := a.checkTokenAsset(p, id); err != nil { return nil, err }
@@ -191,8 +204,9 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		case "asset_voices": rows := []AssetVoice{}; err := a.db.Where("asset_id = ? AND user_id = ?", id, p.User.ID).Find(&rows).Error; return rows, err
 		case "asset_voice_save": return a.SaveAssetVoice(p.User.ID, id, text("channelId"), text("voiceId"), version)
 		case "asset_sync":
-			if asset.SaveState != "saved" { return nil, problem(409, "asset_not_saved", "原件尚未可靠保存") }
-			if err := a.queueAssetSync(id); err != nil { return nil, err }; if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", id, "sync").Update("next_run_at", nil).Error; err != nil { return nil, err }; a.signalWork(); return map[string]any{"queued": true}, nil
+			a.workMu.Lock(); defer a.workMu.Unlock()
+			var migrating int64; if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", id, "migrate").Count(&migrating).Error; err != nil { return nil, err }; if migrating > 0 && len(p.Projects) > 0 { return nil, problem(403, "asset_scope", "重试资产迁移需要不限项目的授权") }
+			err := a.RetryAssetSync(p.User.ID, id); return map[string]any{"queued": err == nil}, err
 		case "asset_content":
 			policy, err := a.executionPolicy(); if err != nil { return nil, err }
 			if asset.Kind == "text" { return assetMetadata(asset.Metadata) }

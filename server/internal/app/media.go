@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,8 +19,8 @@ func (b *limitedBuffer) Write(data []byte) (int, error) { if int64(b.Len())+int6
 func (a *App) probeMedia(ctx context.Context, asset *Asset, policy executionPolicy) bool {
 	if asset.Kind != "video" && asset.Kind != "audio" { return false }
 	if asset.MimeType == "audio/pcm" { asset.ProbeError = "无头 PCM 的采样率与声道信息未核实，原件保留，请下载后按接口格式读取"; return false }
-	probe, err := exec.LookPath("ffprobe"); if err != nil { asset.ProbeError = "服务器未安装 ffprobe，时长与编码信息尚未核实"; return false }
-	name, err := a.assetOriginalPath(*asset); if err != nil { asset.ProbeError = "原件路径无法读取"; return false }
+	probe, err := exec.LookPath("ffprobe"); if err != nil { a.logFailure(ctx, "asset.probe_failed", err, slog.String("asset_id", asset.ID)); asset.ProbeError = "服务器未安装 ffprobe，时长与编码信息尚未核实"; return false }
+	name, err := a.assetOriginalPath(*asset); if err != nil { a.logFailure(ctx, "asset.probe_failed", err, slog.String("asset_id", asset.ID)); asset.ProbeError = "原件路径无法读取"; return false }
 	// Upload/result writers already hold their transfer slot and file lease. Do not
 	// acquire a second file gate while holding that lease (cleanup uses the same gates).
 	a.previewMu.Lock(); defer a.previewMu.Unlock()
@@ -28,7 +29,8 @@ func (a *App) probeMedia(ctx context.Context, asset *Asset, policy executionPoli
 	command := exec.CommandContext(ctx, probe, "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", name)
 	command.Stdout, command.Stderr = output, io.Discard
 	var info struct { Format struct { Duration string `json:"duration"` } `json:"format"`; Streams []struct { Type string `json:"codec_type"`; Codec string `json:"codec_name"`; Width int `json:"width"`; Height int `json:"height"`; Rate string `json:"avg_frame_rate"` } `json:"streams"` }
-	if command.Run() != nil || json.Unmarshal(output.Bytes(), &info) != nil { asset.ProbeError = "媒体信息读取失败或超出运行边界，原件仍保留"; return false }
+	err = command.Run(); if err == nil { err = json.Unmarshal(output.Bytes(), &info) }
+	if err != nil { a.logFailure(ctx, "asset.probe_failed", err, slog.String("asset_id", asset.ID)); asset.ProbeError = "媒体信息读取失败或超出运行边界，原件仍保留"; return false }
 	if duration, ok := decimalValue(info.Format.Duration); ok { if value := scaledInteger(duration, 1000); value != nil { asset.DurationMS = *value } }
 	hasAudio, hasVideo := false, false
 	for _, stream := range info.Streams { hasAudio = hasAudio || stream.Type == "audio"; hasVideo = hasVideo || stream.Type == "video" }

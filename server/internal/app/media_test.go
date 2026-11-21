@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -16,7 +15,7 @@ func TestVoiceSampleFormatRequiresRealAllowedAudio(test *testing.T) {
 			asset := Asset{ID: identifier(), UserID: "owner", Kind: "audio", Title: "recording.wav", MimeType: mimeType, SaveState: "saved", Metadata: JSON(`{}`)}
 			if err := application.db.Create(&asset).Error; err != nil { test.Fatal(err) }
 			input := generationInput{Parameters: encode(map[string]any{"voice_sample": asset.ID}), References: []assetInput{{AssetID: asset.ID, Role: "audio"}}}
-			err := application.validateReferenceMedia(context.Background(), snapshot, input, "owner")
+			err := application.validateReferenceMedia(snapshot, input, "owner")
 			if mimeType == "audio/wav" { if err != nil { test.Fatal(err) }; return }
 			var failure *Problem
 			if !errors.As(err, &failure) || failure.Code != "invalid_reference_media" { test.Fatalf("WebM voice sample was not rejected: %v", err) }

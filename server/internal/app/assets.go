@@ -26,6 +26,7 @@ func (a *App) listAssets(c *gin.Context) {
 	if c.Query("deleting") == "true" { query = query.Where("delete_state = ?", "pending") } else { query = query.Where("delete_state = ? AND workbench_record_id = ?", "", "") }
 	if err := query.Order("created_at DESC").Find(&assets).Error; err != nil { respondError(c, err); return }
 	for index := range assets { if err := assetCleanupBlocker(a.db, &assets[index]); err != nil { respondError(c, err); return } }
+	if err := a.fillAssetStorage(assets); err != nil { respondError(c, err); return }
 	c.JSON(200, assets)
 }
 
@@ -33,6 +34,7 @@ func (a *App) getAsset(c *gin.Context) {
 	var asset Asset
 	if err := a.db.First(&asset, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { respondError(c, err); return }
 	if err := assetCleanupBlocker(a.db, &asset); err != nil { respondError(c, err); return }
+	rows := []Asset{asset}; if err := a.fillAssetStorage(rows); err != nil { respondError(c, err); return }; asset = rows[0]
 	c.JSON(200, asset)
 }
 
@@ -108,11 +110,7 @@ func (a *App) uploadAsset(c *gin.Context) {
 }
 
 func (a *App) retryAssetSync(c *gin.Context) {
-	var asset Asset
-	if err := a.db.First(&asset, "id = ? AND user_id = ? AND delete_state = ? AND save_state = ?", c.Param("id"), currentUser(c).ID, "", "saved").Error; err != nil { respondError(c, err); return }
-	if err := a.queueAssetSync(asset.ID); err != nil { respondError(c, err); return }
-	if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "sync").Update("next_run_at", nil).Error; err != nil { respondError(c, err); return }
-	a.signalWork(); a.notify(asset.UserID); c.Status(204)
+	if err := a.RetryAssetSync(currentUser(c).ID, c.Param("id")); err != nil { respondError(c, err); return }; c.Status(204)
 }
 
 func (a *App) assetFile(c *gin.Context) {

@@ -7,7 +7,7 @@ import { previewUrlFor } from "@/services/image-storage";
 import { captureSession } from "@/services/api/client";
 
 export type AssetKind = "text" | "image" | "video" | "audio";
-type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; error?: string };
+type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; storageId?: string; storageName?: string; migration?: api.AssetMigration; error?: string };
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
 export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
 export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string; durationMs?: number } };
@@ -27,7 +27,7 @@ type AssetStore = {
 function fromServer(record: api.ServerAsset): Asset {
     const meta = { ...record.metadata };
     delete meta.tags;
-    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
+    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, storageId: record.storageId, storageName: record.storageName, migration: record.migration, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
     if (record.kind === "text") return { ...base, kind: "text", data: { content: typeof meta.content === "string" ? meta.content : "" } };
     const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType, durationMs: record.durationMs };
     if (record.kind === "image") return { ...base, kind: "image", data: { ...data, dataUrl: api.assetUrl(record.id) } };

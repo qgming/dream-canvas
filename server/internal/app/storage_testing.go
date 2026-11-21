@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,6 +37,10 @@ func (a *App) testStorage(c *gin.Context) {
 }
 
 func (a *App) TestStorage(parent context.Context, user User, id string, input storageInput) (result storageTestResult, err error) {
+	defer func() {
+		if err != nil { a.logFailure(parent, "storage.test_failed", err, slog.String("user_id", user.ID)); return }
+		if !result.Success { a.logEvent(parent, slog.LevelError, "storage.test_failed", slog.String("user_id", user.ID), slog.String("stage", result.Stage), slog.String("code", result.Code), slog.Int("http_status", result.HTTPStatus), slog.Bool("cleanup_required", result.CleanupRequired), slog.String("cleanup_code", result.CleanupCode), slog.Int("cleanup_http_status", result.CleanupHTTPStatus)) }
+	}()
 	if user.Role != "admin" { return result, problem(403, "forbidden", "需要管理员权限") }
 	u, err := validateStorageInput(input); if err != nil { return result, err }
 	storage := ObjectStorage{}
@@ -127,6 +132,8 @@ func (a *App) deleteStorageTestObject(ctx context.Context, storage ObjectStorage
 		_, err = client.Object.Delete(ctx, key, options); return err
 	}
 	client, err := a.s3Client(storage, policy); if err != nil { return err }
-	input := &s3.DeleteObjectInput{Bucket: aws.String(storage.Bucket), Key: aws.String(key)}; if versionID != "" { input.VersionId = aws.String(versionID) }
+	input := &s3.DeleteObjectInput{Bucket: aws.String(storage.Bucket), Key: aws.String(key)}
+	// R2 returns an upload version marker but does not support S3 versioned deletion.
+	if versionID != "" && storage.Provider != "r2" { input.VersionId = aws.String(versionID) }
 	_, err = client.DeleteObject(ctx, input); return err
 }

@@ -79,10 +79,10 @@ export default function LoggingPage() {
         {saveError && !query.error ? <Notice type={conflict ? "warning" : "error"} title={conflict ? t("logging.conflict") : t("logging.saveFailed")} description={conflict ? undefined : logError(saveError)} action={<Button disabled={busy} onClick={() => { if (conflict || !draft) void reload(); else void save(draft); }}>{t(conflict ? "workspace.reload" : "workspace.retry")}</Button>} /> : null}
         {settings ? <section aria-busy={busy}>
             <h2 className="mb-2 text-base font-medium">{t("logging.output")}</h2>
-            <Field layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t("logging.enabled")}>
+            <Field layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t("logging.enabled")} help={t("logging.enabledHint")}>
                 <Switch checked={settings.enabled} disabled={busy || clearing || query.isError || conflict} onChange={(enabled) => void save({ ...settings, enabled, development: enabled && settings.development })} />
             </Field>
-            <Field layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t("logging.development")}>
+            <Field layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t("logging.development")} help={t("logging.developmentHint")}>
                 <Switch checked={settings.development} disabled={busy || clearing || query.isError || conflict || !settings.enabled} onChange={(development) => void save({ ...settings, development })} />
             </Field>
         </section> : null}

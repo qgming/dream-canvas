@@ -210,7 +210,7 @@ function InfiniteCanvasPage() {
     const createProject = useCanvasStore((state) => state.createProject);
     const updateProject = useCanvasStore((state) => state.updateProject);
     const startEditingProject = useCanvasUiStore((state) => state.startEditingProject);
-    const deleteProjects = useCanvasStore((state) => state.deleteProjects);
+    const deleteProject = useCanvasStore((state) => state.deleteProject);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const projectError = useCanvasStore((state) => state.error);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -1143,10 +1143,10 @@ function InfiniteCanvasPage() {
 
     const deleteCurrentProject = useCallback(() => {
         confirm({ title: appI18n.t("workspace.deleteCurrentProject"), content: appI18n.t("workspace.deleteNodesKeepAssets"), confirmText: appI18n.t("workspace.deleteProject"), cancelText: appI18n.t("workspace.cancel"), destructive: true, onConfirm: async () => {
-            try { await deleteProjects([projectId]); cleanupAssetImages(); navigate("/canvas"); }
+            try { await deleteProject(projectId); cleanupAssetImages(); navigate("/canvas"); }
             catch (error) { notify.error(error instanceof Error ? error.message : appI18n.t("workspace.deleteFailed")); throw error; }
         } });
-    }, [cleanupAssetImages, deleteProjects, notify, confirm, navigate, projectId]);
+    }, [cleanupAssetImages, deleteProject, notify, confirm, navigate, projectId]);
 
     const exportCurrentProject = useCallback(async () => {
         const project = useCanvasStore.getState().projects.find((item) => item.id === projectId);

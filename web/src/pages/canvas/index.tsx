@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Notice as Alert } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
-import { FileUp, Plus, Trash2 } from "lucide-react";
+import { FileUp, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { readZip } from "@/lib/zip";
@@ -15,11 +15,10 @@ import { uploadAsset, type ServerAsset } from "@/services/api/assets";
 import { replacePackageAssets } from "@/lib/canvas/asset-package";
 import { canvasExportSchema } from "@/lib/canvas/project-schema";
 import { captureSession } from "@/services/api/client";
-import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
+import { CanvasDeleteProjectDialog } from "@/components/canvas/canvas-delete-project-dialog";
 import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
 import { CanvasProjectRenameDialog } from "@/components/canvas/canvas-project-rename-dialog";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 
 export default function CanvasPage() {
     const { notify } = useFeedback();
@@ -36,7 +35,6 @@ export default function CanvasPage() {
     const loadError = useCanvasStore((state) => state.error);
     const createProject = useCanvasStore((state) => state.createProject);
     const importProject = useCanvasStore((state) => state.importProject);
-    const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const filtered = projects.filter((project) => project.title.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()));
 
     const mode = searchParams.get("mode");
@@ -96,11 +94,6 @@ export default function CanvasPage() {
                 {loadError ? <Alert type="error" title={loadError} action={<Button onClick={() => void useCanvasStore.getState().loadProjects()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
                 <PageHeader title={t("canvas.title")} actions={<>
                         <SearchInput value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label={t("ui.searchProjects")} placeholder={t("ui.searchProjects")} className="w-full sm:w-72" />
-                        {projects.length ? (
-                            <Button variant="outline" data-destructive icon={<Trash2 />} disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
-                                {t("canvas.deleteAll")}
-                            </Button>
-                        ) : null}
                         <Button variant="outline" disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
                             {t("canvas.import")}
                         </Button>
@@ -129,7 +122,7 @@ export default function CanvasPage() {
             </div>
 
             <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
-            <CanvasDeleteProjectsDialog />
+            <CanvasDeleteProjectDialog />
             <CanvasProjectRenameDialog />
         </main>
     );

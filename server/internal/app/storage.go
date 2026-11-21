@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -54,7 +55,7 @@ func (a *App) SaveStorage(id string, input storageInput) (gin.H, error) {
 	row := ObjectStorage{}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		if id != "" { if err := tx.First(&row, "id = ?", id).Error; err != nil { return err }; if row.Version != input.Version { return problem(409, "version_conflict", "存储配置已更新，请重新读取") }
-			if row.Endpoint != u.String() || row.Bucket != input.Bucket || row.Provider != input.Provider || row.Region != input.Region || row.PathStyle != input.PathStyle { var count int64; if err := tx.Model(&Asset{}).Where("storage_id = ? AND delete_state <> ?", row.ID, "deleted").Count(&count).Error; err != nil { return err }; if count > 0 { return problem(409, "storage_in_use", "历史资产仍引用此存储；请新建配置再切换默认值") } }
+			if row.Endpoint != u.String() || row.Bucket != input.Bucket || row.Provider != input.Provider || row.Region != input.Region || row.PathStyle != input.PathStyle { used, err := storageInUse(tx, row.ID); if err != nil { return err }; if used { return problem(409, "storage_in_use", "资产或待处理迁移仍引用此存储；请新建配置再迁移") } }
 		} else { row.ID = identifier() }
 		row.Name, row.Endpoint, row.Bucket, row.Default, row.Version = strings.TrimSpace(input.Name), u.String(), input.Bucket, input.Default, input.Version+1
 		row.Provider, row.Region, row.PathStyle = input.Provider, input.Region, input.PathStyle
@@ -65,7 +66,7 @@ func (a *App) SaveStorage(id string, input storageInput) (gin.H, error) {
 		return tx.Save(&row).Error
 	})
 	if err != nil { return nil, err }
-	a.signalWork(); return gin.H{"storage": row, "hasCredential": true}, nil
+	a.signalWork(); a.notifyCatalog(); return gin.H{"storage": row, "hasCredential": true}, nil
 }
 
 func (a *App) deleteStorage(c *gin.Context) {
@@ -74,9 +75,8 @@ func (a *App) deleteStorage(c *gin.Context) {
 
 func (a *App) DeleteStorage(id string) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&Asset{}).Where("storage_id = ? AND delete_state <> ?", id, "deleted").Count(&count).Error; err != nil { return err }
-		if count > 0 { return problem(409, "storage_in_use", "仍有资产或待删除文件引用此存储，不能移除") }
+		used, err := storageInUse(tx, id); if err != nil { return err }
+		if used { return problem(409, "storage_in_use", "仍有资产、迁移或待删除文件引用此存储，不能移除") }
 		return tx.Delete(&ObjectStorage{}, "id = ?", id).Error
 	})
 }
@@ -157,7 +157,7 @@ func (a *App) queueAssetSync(id string) error {
 		if err := tx.First(&asset, "id = ?", id).Error; err != nil { return err }
 		if asset.Kind == "text" || asset.SaveState != "saved" || asset.SyncState == "synced" { return nil }
 		if asset.DeleteState != "" { var active int64; if err := tx.Model(&TaskAsset{}).Where("asset_id = ? AND released = ?", id, false).Count(&active).Error; err != nil { return err }; if active == 0 { return nil } }
-		var pending int64; if err := tx.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", id, "sync").Count(&pending).Error; err != nil { return err }; if pending > 0 { return nil }
+		var pending int64; if err := tx.Model(&FileOperation{}).Where("asset_id = ? AND kind IN ?", id, []string{"sync", "migrate"}).Count(&pending).Error; err != nil { return err }; if pending > 0 { return nil }
 		if asset.StorageID == "" {
 			var storage ObjectStorage
 			err := tx.First(&storage, "`default` = ?", true).Error
@@ -194,7 +194,7 @@ func (a *App) prepareCloudInputs(userID string, snapshot executionSnapshot, inpu
 		if asset.SyncState == "synced" { continue }
 		if err := a.queueAssetSync(asset.ID); err != nil { return false, err }
 		if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { return false, err }
-		if asset.StorageID == "" { return false, problem(409, "storage_required", "此模型参考素材需要私有 OSS，请先配置存储") }
+		if asset.StorageID == "" { var migrating int64; if err := a.db.Model(&FileOperation{}).Where("asset_id = ? AND kind = ?", asset.ID, "migrate").Count(&migrating).Error; err != nil { return false, err }; if migrating == 0 { return false, problem(409, "storage_required", "此模型参考素材需要私有 OSS，请先配置存储") } }
 		ready = false
 	}
 	return ready, nil
@@ -209,19 +209,24 @@ func (a *App) prepareTaskAssets(task GenerationTask, snapshot executionSnapshot,
 func (a *App) dispatchFiles() {
 	policy, err := a.executionPolicy(); if err != nil { return }
 	var rows []FileOperation
-	if a.db.Where("kind IN ? AND (next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?))", []string{"sync", "delete"}, time.Now(), "delete", false).Order("created_at").Find(&rows).Error != nil { return }
+	if a.db.Where("kind IN ? AND (next_run_at IS NULL OR next_run_at <= ?) AND (kind <> ? OR NOT EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = file_operations.asset_id AND released = ?)) AND (kind <> ? OR EXISTS (SELECT 1 FROM assets WHERE assets.id = file_operations.asset_id AND (assets.delete_state = ? OR (assets.delete_state = ? AND assets.sync_state <> ? AND EXISTS (SELECT 1 FROM task_assets WHERE task_assets.asset_id = assets.id AND released = ?)))))", []string{"sync", "delete", "migrate"}, time.Now(), "delete", false, "migrate", "", "pending", "synced", false).Order("created_at").Find(&rows).Error != nil { return }
 	active := 0; a.workMu.Lock(); for key := range a.active { if strings.HasPrefix(key, "file:") { active++ } }; a.workMu.Unlock()
 	for _, row := range rows { if active >= policy.TransferSlots { break }; if a.launch("file:"+row.AssetID, func(ctx context.Context) { a.runFileOperation(ctx, row) }) { active++ } }
 }
 
 func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
+	if err := a.db.First(&operation, "id = ?", operation.ID).Error; err != nil { return }
 	ctx = withLogContext(ctx, slog.String("operation_id", operation.ID), slog.String("asset_id", operation.AssetID), slog.String("operation", operation.Kind))
 	a.logEvent(ctx, slog.LevelDebug, "asset.operation_started", slog.Int("attempt", operation.Attempts+1))
 	policy, err := a.executionPolicy(); if err != nil { return }
 	ctx, cancel := context.WithTimeout(ctx, seconds(policy.TransferSeconds)); defer cancel()
 	var asset Asset
 	if err := a.db.First(&asset, "id = ?", operation.AssetID).Error; err != nil { if errors.Is(err, gorm.ErrRecordNotFound) { if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() } }; return }
-	if operation.Kind == "delete" { err = a.cleanAsset(asset.ID)
+	if operation.Kind == "migrate" {
+		var complete bool
+		complete, err = a.runAssetMigration(ctx, operation, policy)
+		if err == nil && !complete { return }
+	} else if operation.Kind == "delete" { err = a.cleanAsset(asset.ID)
 	} else if asset.DeleteState == "deleted" { err = nil
 	} else {
 		{
@@ -236,15 +241,16 @@ func (a *App) runFileOperation(ctx context.Context, operation FileOperation) {
 			if err == nil { err = a.db.Model(&Asset{}).Where("id = ? AND delete_state <> ?", asset.ID, "deleted").Updates(map[string]any{"sync_state": "synced", "error": ""}).Error }
 		}
 	}
-	if err == nil { a.logEvent(ctx, slog.LevelInfo, "asset.operation_completed"); if a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error == nil { a.signalWork() }
+	if err == nil {
+		if removeErr := a.db.Delete(&FileOperation{}, "id = ?", operation.ID).Error; removeErr != nil { a.logFailure(ctx, "asset.operation_save_failed", removeErr) } else { a.logEvent(ctx, slog.LevelInfo, "asset.operation_completed"); a.signalWork() }
 	} else {
 		a.logFailure(ctx, "asset.operation_failed", err, slog.Int("attempt", operation.Attempts+1))
 		index := operation.Attempts
 		if index >= len(policy.StorageRetrySeconds) { index = len(policy.StorageRetrySeconds)-1 }
 		next := time.Now().Add(seconds(policy.StorageRetrySeconds[index]))
 		message := "云同步失败，本地原件仍保留，后台将按配置继续处理"
-		if operation.Kind == "delete" { message = "文件仍待删除，后台将按配置继续清理" } else { a.db.Model(&asset).Update("sync_state", "failed") }
-		a.db.Model(&asset).Update("error", message)
+		if operation.Kind == "delete" { message = "文件仍待删除，后台将按配置继续清理" } else if operation.Kind == "migrate" { message = "存储迁移未完成，现有原件仍保留，后台将继续重试复制或清理旧副本"; if code, status := storageTestFailure(err); status > 0 { message += "（存储服务返回 HTTP "+fmt.Sprint(status)+"）" } else if code == "timeout" { message += "（请求超时）" } else if code == "asset_size_changed" { message = "服务器原件大小与资产记录不符，未切换存储；请检查文件完整性后重试" } } else { a.db.Model(&asset).Update("sync_state", "failed") }
+		if operation.Kind != "migrate" { a.db.Model(&asset).Update("error", message) }
 		if a.db.Model(&operation).Updates(map[string]any{"attempts": operation.Attempts+1, "next_run_at": next, "error": message}).Error == nil { a.signalWork() }
 	}
 	a.refreshTaskSync(asset.ID); a.notify(asset.UserID)

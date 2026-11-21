@@ -61,6 +61,8 @@ type Asset struct {
 	CleanupTaskID string `json:"cleanupTaskId,omitempty" gorm:"-"`
 	Error string `json:"error,omitempty"`
 	StorageID string `json:"storageId,omitempty"`
+	StorageName string `json:"storageName,omitempty" gorm:"-"`
+	Migration *AssetMigration `json:"migration,omitempty" gorm:"-"`
 	Metadata JSON `json:"metadata" gorm:"type:blob"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -320,6 +322,9 @@ type FileOperation struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	AssetID string `json:"assetId" gorm:"uniqueIndex:file_operation"`
 	Kind string `json:"kind" gorm:"uniqueIndex:file_operation"`
+	SourceStorageID string `json:"-" gorm:"index"`
+	TargetStorageID string `json:"-" gorm:"index"`
+	Stage string `json:"stage,omitempty"`
 	Attempts int `json:"attempts"`
 	NextRunAt *time.Time `json:"nextRunAt,omitempty" gorm:"index"`
 	Error string `json:"error,omitempty"`

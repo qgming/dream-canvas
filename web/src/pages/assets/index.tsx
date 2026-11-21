@@ -27,8 +27,9 @@ import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
-import { retryAssetCleanup, retryAssetSync } from "@/services/api/assets";
+import { retryAssetCleanup } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
+import { AssetStorageDialog } from "./components/asset-storage-dialog";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -401,14 +402,12 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
 
 function AssetStorageStatus({ asset }: { asset: Asset }) {
     const { t } = useTranslation();
-    const { notify } = useFeedback();
-    const [submitting, setSubmitting] = useState(false);
-    const submittingRef = useRef(false);
+    const [open, setOpen] = useState(false);
     const saved = asset.saveState === "saved";
     const saving = asset.saveState === "saving";
     const SaveIcon = saved ? asset.kind === "text" ? Database : HardDrive : saving ? LoaderCircle : CircleAlert;
     const saveLabel = t(`assets.storageStatus.${saved ? asset.kind === "text" ? "textSaved" : "serverSaved" : saving ? "serverSaving" : asset.saveState === "failed" ? "serverSaveFailed" : "serverSaveUnknown"}`);
-    const cloudState = asset.kind === "text" ? "notApplicable" : !saved ? "needsSave" : submitting ? "submitting" : asset.syncState || "local";
+    const cloudState = asset.kind === "text" ? "notApplicable" : !saved ? "needsSave" : asset.migration ? asset.migration.state === "failed" ? "failed" : ["pending", "switch"].includes(asset.migration.state) ? "pending" : "syncing" : asset.syncState || "local";
     const cloudStatuses = {
         notApplicable: { Icon: CloudOff, label: "cloudNotApplicable", className: "text-muted-foreground" },
         needsSave: { Icon: CloudOff, label: "cloudNeedsSave", className: "text-muted-foreground" },
@@ -420,27 +419,12 @@ function AssetStorageStatus({ asset }: { asset: Asset }) {
         failed: { Icon: CloudAlert, label: "cloudFailed", className: "text-destructive hover:text-destructive" },
     };
     const cloudStatus = cloudStatuses[cloudState as keyof typeof cloudStatuses] || { Icon: CloudOff, label: "cloudUnknown", className: "text-muted-foreground" };
-    const cloudLabel = t(`assets.storageStatus.${cloudStatus.label}`);
-    const canSync = cloudState === "local" || cloudState === "failed";
-    const sync = async () => {
-        if (!canSync || submittingRef.current) return;
-        const assertSession = captureSession();
-        submittingRef.current = true; setSubmitting(true);
-        try {
-            await retryAssetSync(asset.id); assertSession();
-            await useAssetStore.getState().loadAssets(); assertSession();
-            const state = useAssetStore.getState();
-            if (state.error) throw new Error(state.error);
-            const current = state.assets.find((item) => item.id === asset.id);
-            if (current?.syncState === "local") notify.warning(t("assets.storageStatus.cloudUnavailable"));
-            else if (current?.syncState === "synced") notify.success(t("assets.storageStatus.cloudSynced"));
-            else if (current?.syncState === "failed") notify.error(t("assets.storageStatus.cloudFailed"));
-        } catch (error) { notify.error(error instanceof Error ? error.message : t("workspace.operationFailed")); }
-        finally { submittingRef.current = false; setSubmitting(false); }
-    };
-    return <div className="flex items-center gap-1">
+    const cloudLabel = asset.migration ? `${t(`assets.storageMigration.states.${asset.migration.state}`)} · ${t("assets.storageMigration.targetName", { name: asset.migration.storageName })}` : t(`assets.storageStatus.${cloudStatus.label}`);
+    const storageName = asset.kind === "text" ? t("assets.storageMigration.database") : asset.storageName || t(asset.storageId ? "assets.storageMigration.unknownStorage" : "assets.storageMigration.local");
+    return <div className="flex min-w-0 flex-wrap items-center gap-1">
         <Tooltip title={saveLabel} clickable><Button variant="ghost" size="icon" aria-label={saveLabel} aria-busy={saving || undefined} className={saved ? "text-success hover:text-success" : saving ? "text-info hover:text-info [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" : "text-destructive hover:text-destructive"}><SaveIcon /></Button></Tooltip>
-        <Button variant="ghost" size="icon" title={cloudLabel} aria-label={cloudLabel} aria-disabled={!canSync || undefined} aria-busy={submitting || cloudState === "syncing" || undefined} className={cloudStatus.className} onClick={() => void sync()}><cloudStatus.Icon /></Button>
+        <Button variant="ghost" title={cloudLabel} aria-label={`${storageName} · ${cloudLabel}`} aria-busy={cloudState === "syncing" || undefined} disabled={asset.kind !== "text" && !saved} className={cloudStatus.className} onClick={() => setOpen(true)}><cloudStatus.Icon /><span>{storageName}</span></Button>
+        <AssetStorageDialog asset={asset} open={open} onClose={() => setOpen(false)} />
     </div>;
 }
 

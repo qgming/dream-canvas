@@ -150,7 +150,8 @@ func (a *App) saveTaskResults(ctx context.Context, task GenerationTask, snapshot
 		if terminalTask(status) { return tx.Model(&TaskAsset{}).Where("task_id = ?", task.ID).Update("released", true).Error }; return nil
 	})
 	if err != nil { return }
-	a.logEvent(ctx, slog.LevelInfo, "task.finished", slog.String("task_id", task.ID), slog.String("status", status), slog.Int("assets", len(ids)), slog.String("usage_state", usageState))
+	level := slog.LevelInfo; if status == "failed" || status == "confirmation_required" { level = slog.LevelWarn }
+	a.logEvent(ctx, level, "task.finished", slog.String("task_id", task.ID), slog.String("status", status), slog.Int("assets", len(ids)), slog.String("usage_state", usageState))
 	if len(ids) > 0 { a.refreshTaskSync(ids[0]) }
 	a.notify(task.UserID); a.signalWork()
 }

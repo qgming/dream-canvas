@@ -5,7 +5,7 @@ import { Reorder, useDragControls } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ChevronDown, GripVertical, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ChevronDown, GripVertical, Pencil, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -127,10 +127,8 @@ function ChannelModels({ entry, orderIDs, scripts, orderDisabled, onOrderPreview
     </div>;
 }
 
-function ChannelCard({ entry, index, count, expanded, modelOrder, scripts, orderDisabled, onToggleExpanded, onEditChannel, onAddModel, onEditModel, onToggleChannel, onOrderStart, onOrderEnd, onMove, onModelOrderPreview, onModelOrderEnd, onModelReorder, onRefresh }: {
+function ChannelCard({ entry, expanded, modelOrder, scripts, orderDisabled, onToggleExpanded, onEditChannel, onAddModel, onEditModel, onToggleChannel, onModelOrderPreview, onModelOrderEnd, onModelReorder, onRefresh }: {
     entry: ChannelEntry;
-    index: number;
-    count: number;
     expanded: boolean;
     modelOrder: string[];
     scripts?: ModelScript[];
@@ -140,18 +138,12 @@ function ChannelCard({ entry, index, count, expanded, modelOrder, scripts, order
     onAddModel: () => void;
     onEditModel: (model: ServerModel) => void;
     onToggleChannel: (enabled: boolean) => Promise<void>;
-    onOrderStart: () => void;
-    onOrderEnd: () => void;
-    onMove: (index: number) => void;
     onModelOrderPreview: (ids: string[]) => void;
     onModelOrderEnd: () => void;
     onModelReorder: (ids: string[]) => void;
     onRefresh: () => Promise<void>;
 }) {
     const { t } = useTranslation();
-    const controls = useDragControls();
-    const tokens = useMotionTokens();
-    const reducedMotion = useShouldReduceMotion();
     const [enabled, setEnabled] = useState(entry.channel.enabled);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -170,31 +162,28 @@ function ChannelCard({ entry, index, count, expanded, modelOrder, scripts, order
             setBusy(false);
         }
     };
-    const dragLabel = t("modelOrdering.dragChannel", { name: entry.channel.name });
-    return <Reorder.Item value={entry.channel.id} tabIndex={-1} drag={orderDisabled ? false : "y"} dragListener={false} dragControls={controls} transition={reducedMotion ? tokens.transition.instant : tokens.spring.reflow} onKeyDown={(event) => { if (event.target === event.currentTarget) event.preventDefault(); }} onDragStart={orderDisabled ? undefined : onOrderStart} onDragEnd={orderDisabled ? undefined : onOrderEnd} className="overflow-hidden rounded-lg border border-border bg-card">
+    return <article className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground">
         <Collapsible.Root open={expanded} onOpenChange={(open) => { if (open !== expanded) onToggleExpanded(); }}>
-            <div className="flex min-w-0 items-start gap-2 p-3">
-                <Button type="button" tabIndex={-1} variant="ghost" size="icon" className="mt-0.5 size-7 touch-none enabled:cursor-grab enabled:active:cursor-grabbing" disabled={orderDisabled} aria-label={dragLabel} onPointerDown={(event) => { if (!orderDisabled) controls.start(event); }}>
-                    <GripVertical />
-                </Button>
-                <OrderButtons label={dragLabel} index={index} count={count} disabled={orderDisabled} onMove={onMove} />
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3 p-4">
                 <Collapsible.Trigger asChild>
-                    <button type="button" className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <span className="flex min-w-0 items-start gap-2"><span className="break-words text-sm font-medium">{entry.channel.name}</span><ChevronDown className={`mt-0.5 size-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} /></span>
-                        <span className="mt-1 block break-all text-xs leading-5 text-muted-foreground">{entry.channel.baseUrl}</span>
-                        <span className="mt-2 flex flex-wrap items-center gap-2"><Badge color={entry.hasCredential ? "success" : "error"}>{t(entry.hasCredential ? "workspace.credentialConfigured" : "workspace.credentialMissing")}</Badge><Badge>{t("workspace.modelCount", { count: entry.models.length })}</Badge><Badge color={enabled ? "success" : undefined}>{t(enabled ? "workspace.enabled" : "workspace.disabled")}</Badge></span>
+                    <button type="button" className="flex min-w-0 flex-1 basis-64 items-start gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <ChevronDown className={`mt-0.5 size-4 shrink-0 transition-transform motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
+                        <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2"><span className="break-words text-sm font-medium">{entry.channel.name}</span><Badge>{t("workspace.modelCount", { count: entry.models.length })}</Badge><Badge color={entry.hasCredential ? undefined : "error"}>{t(entry.hasCredential ? "workspace.credentialConfigured" : "workspace.credentialMissing")}</Badge></span>
+                            <span className="mt-1 block break-all text-sm leading-5 text-muted-foreground">{entry.channel.baseUrl}</span>
+                        </span>
                     </button>
                 </Collapsible.Trigger>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                    <Switch size="small" checked={enabled} loading={busy} disabled={busy} aria-label={t("workspace.enableChannel")} onChange={(value) => void toggle(value)} />
-                    <Button size="sm" variant="outline" onClick={onEditChannel}>{t("workspace.editChannel")}</Button>
-                    <Button size="sm" variant="outline" icon={<Plus />} onClick={onAddModel}>{t("workspace.addModel")}</Button>
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    <Switch className="mr-1" checked={enabled} loading={busy} disabled={busy} aria-label={`${t("workspace.enableChannel")} · ${entry.channel.name}`} onChange={(value) => void toggle(value)} />
+                    <Button variant="outline" icon={<Pencil />} onClick={onEditChannel}>{t("workspace.editChannel")}</Button>
+                    <Button variant="outline" icon={<Plus />} onClick={onAddModel}>{t("workspace.addModel")}</Button>
                 </div>
             </div>
-            {error ? <p role="alert" className="border-t border-border px-3 py-2 text-xs text-destructive">{error}</p> : null}
-            <Collapsible.Content><div className="px-3 pb-3"><ChannelModels entry={entry} orderIDs={modelOrder} scripts={scripts} orderDisabled={orderDisabled} onOrderPreview={onModelOrderPreview} onOrderEnd={onModelOrderEnd} onReorder={onModelReorder} onRefresh={onRefresh} onEdit={onEditModel} /></div></Collapsible.Content>
+            {error ? <p role="alert" className="px-4 pb-3 text-sm text-destructive">{error}</p> : null}
+            <Collapsible.Content><div className="px-4 pb-4"><ChannelModels entry={entry} orderIDs={modelOrder} scripts={scripts} orderDisabled={orderDisabled} onOrderPreview={onModelOrderPreview} onOrderEnd={onModelOrderEnd} onReorder={onModelReorder} onRefresh={onRefresh} onEdit={onEditModel} /></div></Collapsible.Content>
         </Collapsible.Root>
-    </Reorder.Item>;
+    </article>;
 }
 
 export default function ChannelsPage() {
@@ -263,10 +252,10 @@ export default function ChannelsPage() {
         {query.data ? <ModelOrderingSettings channels={query.data} orders={ordering.orders} loading={ordering.loading} queryError={ordering.queryError} busy={ordering.busy} error={ordering.error} conflict={ordering.conflict} onPreview={ordering.preview} onCommit={ordering.commit} onReorder={ordering.reorder} onRetry={() => void ordering.retry()} onReload={() => void ordering.reload()} /> : null}
         {query.isLoading ? <div role="status" className="flex min-h-48 items-center justify-center gap-3 text-sm text-muted-foreground"><Spinner size="small" />{t("workspace.channelLoading")}</div> : null}
         {!query.error && query.data?.length === 0 ? <EmptyState description={t("workspace.channelEmpty")}><Button variant="default" icon={<Plus />} onClick={() => edit()}>{t("workspace.addChannel")}</Button></EmptyState> : null}
-        {channels.length ? <Reorder.Group axis="y" values={channels.map((entry) => entry.channel.id)} onReorder={(ids) => ordering.preview("channels", ids)} className="space-y-3">
-            {channels.map((entry, index) => <ChannelCard key={entry.channel.id} entry={entry} index={index} count={channels.length} expanded={expanded.has(entry.channel.id)} modelOrder={ordering.orders[`channel:${entry.channel.id}`]} scripts={scripts.data} orderDisabled={orderDisabled} onToggleExpanded={() => toggleExpanded(entry.channel.id)} onEditChannel={() => edit(entry)} onAddModel={() => setModelEditor({ entry })} onEditModel={(model) => setModelEditor({ entry, model })} onToggleChannel={(enabled) => toggleChannel(entry, enabled)} onOrderStart={() => ordering.preview("channels", channels.map((item) => item.channel.id))} onOrderEnd={() => ordering.commit("channels")} onMove={(nextIndex) => ordering.reorder("channels", moveBy(channels.map((item) => item.channel.id), index, nextIndex))} onModelOrderPreview={(ids) => ordering.preview(`channel:${entry.channel.id}`, ids)} onModelOrderEnd={() => ordering.commit(`channel:${entry.channel.id}`)} onModelReorder={(ids) => ordering.reorder(`channel:${entry.channel.id}`, ids)} onRefresh={refresh} />)}
-        </Reorder.Group> : null}
-        <Dialog title={t(editor?.entry ? "workspace.editChannel" : "workspace.addChannel")} open={Boolean(editor)} busy={busy} onClose={closeEditor} bodyClassName="@container/settings" footer={<><Button variant="outline" icon={<Trash2 />} className="text-destructive hover:text-destructive" disabled={!editor?.entry || busy || credentialLoading} onClick={remove}>{t("workspace.removeChannel")}</Button><Button variant="default" icon={<Save />} type="submit" form="channel-editor" loading={busy} disabled={credentialLoading || Boolean(credentialError)}>{t("common.save")}</Button></>}>
+        {channels.length ? <div className="space-y-3">
+            {channels.map((entry) => <ChannelCard key={entry.channel.id} entry={entry} expanded={expanded.has(entry.channel.id)} modelOrder={ordering.orders[`channel:${entry.channel.id}`]} scripts={scripts.data} orderDisabled={orderDisabled} onToggleExpanded={() => toggleExpanded(entry.channel.id)} onEditChannel={() => edit(entry)} onAddModel={() => setModelEditor({ entry })} onEditModel={(model) => setModelEditor({ entry, model })} onToggleChannel={(enabled) => toggleChannel(entry, enabled)} onModelOrderPreview={(ids) => ordering.preview(`channel:${entry.channel.id}`, ids)} onModelOrderEnd={() => ordering.commit(`channel:${entry.channel.id}`)} onModelReorder={(ids) => ordering.reorder(`channel:${entry.channel.id}`, ids)} onRefresh={refresh} />)}
+        </div> : null}
+        <Dialog title={t(editor?.entry ? "workspace.editChannel" : "workspace.addChannel")} open={Boolean(editor)} busy={busy} onClose={closeEditor} bodyClassName="@container/settings" secondaryAction={null} footer={<><Button variant="outline" icon={<Trash2 />} className="text-destructive hover:text-destructive" disabled={!editor?.entry || busy || credentialLoading} onClick={remove}>{t("workspace.removeChannel")}</Button><Button variant="default" icon={<Save />} type="submit" form="channel-editor" loading={busy} disabled={credentialLoading || Boolean(credentialError)}>{t("common.save")}</Button></>}>
             {credentialLoading ? <div role="status" className="flex items-center gap-2 py-3 text-sm text-muted-foreground"><Spinner size="small" />{t("workspace.channelLoading")}</div> : null}
             {credentialError ? <Notice type="error" title={credentialError} action={<Button onClick={() => setCredentialRetry((value) => value + 1)}>{t("workspace.retry")}</Button>} /> : null}
             <EditorForm id="channel-editor" form={form} disabled={credentialLoading || Boolean(credentialError)} className="space-y-0" onSubmit={async (values) => {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+
+	"gorm.io/gorm"
 )
 
 func (a *App) cleanAsset(id string) error {
@@ -32,6 +34,17 @@ func (a *App) cleanAsset(id string) error {
 		err = a.deleteCloudAsset(ctx, asset, policy); cancel()
 		if err != nil { a.db.Model(&asset).Update("error", "云端副本删除失败，仍在处理中，本地原件暂时保留"); return err }
 	}
+	var migrations []FileOperation
+	if err := a.db.Where("asset_id = ? AND kind = ?", asset.ID, "migrate").Find(&migrations).Error; err != nil { return err }
+	for _, migration := range migrations {
+		policy, err := a.executionPolicy(); if err != nil { return err }
+		for _, storageID := range []string{migration.SourceStorageID, migration.TargetStorageID} {
+			if storageID == "" || storageID == asset.StorageID { continue }
+			copy := asset; copy.StorageID = storageID
+			ctx, cancel := context.WithTimeout(a.ctx, seconds(policy.TransferSeconds)); err := a.deleteCloudAsset(ctx, copy, policy); cancel()
+			if err != nil { a.db.Model(&asset).Update("error", "迁移副本仍待删除，本地原件暂时保留"); return err }
+		}
+	}
 	if asset.Kind == "image" || asset.Kind == "video" {
 		preview, err := a.previewPath(asset.ID)
 		if err == nil { err = os.Remove(preview) }
@@ -44,5 +57,8 @@ func (a *App) cleanAsset(id string) error {
 		a.db.Model(&asset).Update("error", "文件清理失败，请检查目录权限和磁盘状态后重试")
 		return err
 	}
-	return a.db.Model(&asset).Updates(map[string]any{"delete_state": "deleted", "error": ""}).Error
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&FileOperation{}, "asset_id = ? AND kind IN ?", asset.ID, []string{"sync", "migrate"}).Error; err != nil { return err }
+		return tx.Model(&asset).Updates(map[string]any{"delete_state": "deleted", "error": ""}).Error
+	})
 }

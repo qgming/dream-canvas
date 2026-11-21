@@ -25,8 +25,8 @@ export default function SettingsLayout() {
             { path: "/channels", label: "channels", icon: Cpu },
             { path: "/model-scripts", label: "modelScripts", icon: Code2 },
             { path: "/canvas-plugins", label: "nodePlugins", icon: Puzzle },
-            { path: "/logging", label: "logging", icon: Logs },
             { path: "/storage", label: "storage", icon: Database },
+            { path: "/logging", label: "logging", icon: Logs },
         ] }] : []),
     ];
 

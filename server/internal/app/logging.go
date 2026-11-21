@@ -60,15 +60,21 @@ func (a *App) openLogger() error {
 func (a *App) logEnabled(level slog.Level) bool {
 	if a.logs == nil { return false }
 	settings := a.logs.settings.Load()
-	return settings != nil && settings.Enabled && (level >= slog.LevelInfo || settings.Development)
+	return settings != nil && settings.Enabled && level >= slog.LevelInfo
 }
 
 func (a *App) logEvent(ctx context.Context, level slog.Level, event string, fields ...slog.Attr) {
 	if !a.logEnabled(level) { return }
+	settings := a.logs.settings.Load()
 	shared, _ := ctx.Value(logContextKey{}).([]slog.Attr)
 	attributes := make([]slog.Attr, 0, len(shared)+len(fields))
 	positions := map[string]int{}
 	for _, field := range append(append([]slog.Attr{}, shared...), fields...) {
+		if field.Key == "failure" && field.Value.Kind() == slog.KindGroup && !settings.Development {
+			compact := []slog.Attr{}
+			for _, detail := range field.Value.Group() { if includes([]string{"kind", "code", "status", "http_status"}, detail.Key) { compact = append(compact, detail) } }
+			field.Value = slog.GroupValue(compact...)
+		}
 		if index, exists := positions[field.Key]; exists { attributes[index] = field } else { positions[field.Key] = len(attributes); attributes = append(attributes, field) }
 	}
 	a.logs.logger.LogAttrs(ctx, level, event, attributes...)
@@ -99,6 +105,7 @@ func diagnosticError(err error) slog.Attr {
 	case strings.Contains(message, "invalid stream json"), strings.Contains(message, "valid json"), strings.Contains(message, "需要 json 对象"): kind = "invalid_json"
 	}
 	var request *openai.Error; if errors.As(err, &request) { kind = "provider_http"; fields = append(fields, slog.Int("http_status", request.StatusCode)) }
+	if code, status := storageTestFailure(err); code == "provider_http" { kind = code; fields = append(fields, slog.Int("http_status", status)) }
 	var dns *net.DNSError; if errors.As(err, &dns) { kind = "dns_error" }
 	var network *net.OpError; if errors.As(err, &network) && kind == "execution_error" { kind = "network_error" }
 	var timeout net.Error; if errors.As(err, &timeout) && timeout.Timeout() { kind = "timeout" }
@@ -123,15 +130,16 @@ func (a *App) requestLogger() gin.HandlerFunc {
 		c.Header("X-Request-ID", requestID)
 		c.Request = c.Request.WithContext(withLogContext(c.Request.Context(), slog.String("request_id", requestID)))
 		c.Next()
-		if c.FullPath() == "/api/admin/logging/entries" { return }
 		if !strings.HasPrefix(c.Request.URL.Path, "/api/") && c.Request.URL.Path != "/mcp" { return }
-		if !a.logEnabled(slog.LevelInfo) { return }
 		route := c.FullPath(); if route == "" { route = "unmatched" }
+		important := strings.HasPrefix(route, "/api/admin/") && !includes([]string{"GET", "HEAD", "OPTIONS"}, c.Request.Method) && !includes([]string{"/api/admin/logging", "/api/admin/logging/entries", "/api/admin/storages/test", "/api/admin/model-scripts/check", "/api/admin/model-scripts/:adapterId/test", "/api/admin/channels/:channelId/models/remote"}, route)
+		if (c.Writer.Status() < 400 && !important) || !a.logEnabled(slog.LevelInfo) { return }
 		fields := []slog.Attr{slog.String("method", c.Request.Method), slog.String("route", route), slog.Int("status", c.Writer.Status()), slog.Int64("duration_ms", time.Since(started).Milliseconds()), slog.Int("response_bytes", c.Writer.Size())}
 		if user, ok := c.Get("user"); ok { fields = append(fields, slog.String("user_id", user.(User).ID)) }
 		if err, exists := c.Get("request_error"); exists { if failure, ok := err.(error); ok { fields = append(fields, diagnosticError(failure)) } }
-		level := slog.LevelInfo; if c.Writer.Status() >= 500 { level = slog.LevelError } else if c.Writer.Status() >= 400 { level = slog.LevelWarn }
-		a.logEvent(c.Request.Context(), level, "http.request", fields...)
+		level, event := slog.LevelInfo, "admin.configuration_changed"
+		if c.Writer.Status() >= 500 { level, event = slog.LevelError, "http.request" } else if c.Writer.Status() >= 400 { level, event = slog.LevelWarn, "http.request" }
+		a.logEvent(c.Request.Context(), level, event, fields...)
 	}
 }
 
@@ -146,7 +154,7 @@ func (a *App) getLogSettings(c *gin.Context) {
 
 func (a *App) saveLogSettings(c *gin.Context) {
 	var input logSettingsInput; if !bind(c, &input) { return }
-	if input.Enabled == nil || input.Development == nil { respondError(c, problem(400, "invalid_logging", "请明确日志和开发诊断开关")); return }
+	if input.Enabled == nil || input.Development == nil { respondError(c, problem(400, "invalid_logging", "请明确日志和错误诊断开关")); return }
 	settings, err := a.SaveLogSettings(currentUser(c).ID, input.Version, *input.Enabled, *input.Development)
 	if err != nil { respondError(c, err); return }; c.JSON(200, settings)
 }
@@ -159,7 +167,7 @@ func (a *App) GetLogSettings() (LogSettings, error) {
 }
 
 func (a *App) SaveLogSettings(userID string, version uint64, enabled, development bool) (LogSettings, error) {
-	if development && !enabled { return LogSettings{}, problem(400, "logging_disabled", "请先启用后台运行日志，再开启开发诊断日志") }
+	if development && !enabled { return LogSettings{}, problem(400, "logging_disabled", "请先启用重要事件与错误日志，再开启详细错误诊断") }
 	a.logs.mu.Lock(); defer a.logs.mu.Unlock()
 	settings := LogSettings{ID: 1, Version: version+1, Enabled: enabled, Development: development, UpdatedBy: userID, UpdatedAt: time.Now()}
 	err := a.db.Transaction(func(tx *gorm.DB) error {

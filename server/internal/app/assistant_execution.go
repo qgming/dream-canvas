@@ -248,7 +248,7 @@ func (a *App) executeAssistant(ctx context.Context, id string) {
 		update := a.db.Model(&AssistantTurn{}).Where("id = ? AND status = ? AND cancel_requested = ?", turn.ID, "running", false).Updates(map[string]any{"snapshot": encode(snapshot), "step": turn.Step, "status": nextStatus})
 		if update.Error != nil { a.finishAssistant(turn, "interrupted", "轮次状态保存失败，未重复执行"); return }; if update.RowsAffected != 1 { a.stopAssistant(turn); return }
 		a.notify(turn.UserID)
-		if nextStatus != "running" { a.logEvent(ctx, slog.LevelInfo, "assistant.waiting", slog.String("status", nextStatus), slog.Int("step", turn.Step)); return }
+		if nextStatus != "running" { a.logEvent(ctx, slog.LevelDebug, "assistant.waiting", slog.String("status", nextStatus), slog.Int("step", turn.Step)); return }
 		if len(result.ToolCalls) == 0 { a.finishAssistant(turn, "succeeded", result.Error); return }
 	}
 }

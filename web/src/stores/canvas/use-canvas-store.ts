@@ -27,7 +27,7 @@ type CanvasStore = {
     reset: () => void; loadProjects: () => Promise<void>; refreshProjects: () => Promise<void>;
     createProject: (title?: string) => Promise<string>; importProject: (project: Partial<CanvasProject>) => Promise<string>;
     openProject: (id: string) => CanvasProject | null; renameProject: (id: string, title: string) => Promise<void>;
-    deleteProjects: (ids: string[]) => Promise<void>;
+    deleteProject: (id: string) => Promise<void>;
     updateProject: (id: string, patch: Partial<CanvasProject>) => void;
     beginOperation: (id: string) => void; endOperation: (id: string) => void;
     retrySave: (id: string) => Promise<void>; ensureSaved: (id: string) => Promise<CanvasProject>;
@@ -242,14 +242,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const cleanup = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => { await drafts.removeItem(key); }); writes.set(key, cleanup); await cleanup;
     },
     saveCopy: async (id) => { const project = get().openProject(id); if (!project) throw new Error(i18n.t("errors.projectMissing")); return get().importProject({ ...project, title: i18n.t("errors.projectCopy", { title: project.title }) }); },
-    deleteProjects: async (ids) => {
+    deleteProject: async (id) => {
         const assertSession = captureSession(), owner = useAuthStore.getState().user?.id; if (!owner) return;
-        for (const id of ids) {
-            const project = await get().ensureSaved(id); assertSession();
-            await api.deleteProject(id, project.version); assertSession();
-            const key = draftKey(owner, id), cleanup = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => { await drafts.removeItem(key); }); writes.set(key, cleanup); await cleanup; assertSession();
-            set((state) => ({ projects: state.projects.filter((project) => project.id !== id) }));
-        }
+        const project = await get().ensureSaved(id); assertSession();
+        await api.deleteProject(id, project.version); assertSession();
+        const key = draftKey(owner, id), cleanup = (writes.get(key) || Promise.resolve()).catch(() => undefined).then(async () => { await drafts.removeItem(key); }); writes.set(key, cleanup); await cleanup; assertSession();
+        set((state) => ({ projects: state.projects.filter((project) => project.id !== id) }));
     },
     acceptTaskVersion: async (_taskId, projectId, _nodeId) => get().syncProject(projectId),
     loadHistory: async (id) => {
