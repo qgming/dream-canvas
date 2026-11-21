@@ -143,7 +143,7 @@ PowerShell 将复制命令替换为 `Copy-Item .env.example .env`。已有 `.env
 | [`compose.build.yaml`](compose.build.yaml) | 显式启用本地源码构建，与生产镜像拉取分开。 |
 | [`compose.https.yaml`](compose.https.yaml) / [`deploy/Caddyfile`](deploy/Caddyfile) | 可选 Caddy HTTPS 入口、自动证书与流式代理。 |
 | [`.github/workflows/docker.yml`](.github/workflows/docker.yml) | 原生 amd64 / arm64 构建、媒体与启动检查、GHCR 发布及匿名拉取验证；不登录或部署用户服务器。 |
-| [`.env.example`](.env.example) | 镜像标签、项目名、HTTP 绑定地址 / 端口、时区及 HTTPS 域名示例；不配置管理员密码或供应商 KEY。 |
+| [`.env.example`](.env.example) | 镜像标签、项目名、HTTP 绑定地址 / 端口、可信代理、时区及 HTTPS 域名示例；不配置管理员密码或供应商 KEY。 |
 
 镜像地址为 `ghcr.io/qgming/dream-canvas`，支持 `linux/amd64` 和 `linux/arm64`，Docker 自动选择宿主机架构。标签规则如下：
 
