@@ -7,6 +7,7 @@ import { Menu, Tooltip } from "@/components/ui/popover";
 import { AssetPickerModal } from "@/components/canvas/asset-picker-modal";
 import { useFeedback } from "@/hooks/use-feedback";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useAssetStore, type AssetKind } from "@/stores/use-asset-store";
 import type { AgentChatAttachment } from "./agent-chat-message";
@@ -15,7 +16,9 @@ import { AgentCanvasPicker, AgentSkillPicker } from "./agent-composer-pickers";
 
 const attachmentKinds: readonly AssetKind[] = ["image", "text"];
 
-export function AgentChatComposer({ prompt, attachments = [], disabled, sending, stopping, uploading, placeholder, theme, onPromptChange, onSubmit, onStop, onAddFiles, onRemoveAttachment, model, reasoning, targetProjectId }: {
+export function AgentChatComposer({ wide, visible, prompt, attachments = [], disabled, sending, stopping, uploading, placeholder, theme, onPromptChange, onSubmit, onStop, onAddFiles, onRemoveAttachment, model, reasoning, targetProjectId }: {
+    wide?: boolean;
+    visible: boolean;
     prompt: string;
     attachments?: AgentChatAttachment[];
     disabled?: boolean;
@@ -36,22 +39,21 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
     const { t } = useTranslation();
     const { notify } = useFeedback();
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const panelOpen = useAgentStore((state) => state.panelOpen);
     const [picker, setPicker] = useState<"canvas" | "library" | null>(null);
-    useEffect(() => { if (!panelOpen) setPicker(null); }, [panelOpen]);
+    useEffect(() => { if (!visible) setPicker(null); }, [visible]);
     const locked = Boolean(disabled || sending || uploading || picker);
     const canSubmit = !locked && Boolean(prompt.trim() || attachments.length);
     const stoppingTurn = Boolean(sending && onStop);
     const sendLabel = t(stoppingTurn ? "agent.composer.stop" : "agent.composer.send");
-    return <div className="shrink-0 p-3 pt-2" data-base-ui-swipe-ignore>
-        <div className="rounded-2xl border border-border bg-background p-3 focus-within:border-ring/40">
+    return <div className={cn("p-3 pt-2", wide && "px-4 pb-4")} data-base-ui-swipe-ignore>
+        <div className={cn("rounded-2xl border border-border p-3 focus-within:border-ring/40", wide ? "bg-card" : "bg-background")}>
             {attachments.length ? <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
                 {attachments.map((item) => <Tooltip key={item.id} title={item.name}><div className="group relative size-14 shrink-0 overflow-hidden rounded-lg border border-border">
                     <img src={item.url} alt={item.name} loading="lazy" className="size-full object-cover" />
                     {onRemoveAttachment ? <Button variant="ghost" size="icon" disabled={locked} className="absolute right-1 top-1 size-5 rounded-md opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100 [&_svg]:size-3" onClick={() => onRemoveAttachment(item.id)} aria-label={t("agent.composer.removeImage")} icon={<X />} /> : null}
                 </div></Tooltip>)}
             </div> : null}
-            <AgentChatPromptInput value={prompt} disabled={locked} placeholder={placeholder} theme={theme} targetProjectId={targetProjectId} onChange={onPromptChange} onSubmit={() => { if (canSubmit) onSubmit(); }} onAddFiles={locked ? undefined : onAddFiles} />
+            <AgentChatPromptInput compact={wide} value={prompt} disabled={locked} placeholder={placeholder} theme={theme} targetProjectId={targetProjectId} onChange={onPromptChange} onSubmit={() => { if (canSubmit) onSubmit(); }} onAddFiles={locked ? undefined : onAddFiles} />
             <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
                 <div className="flex shrink-0 items-center gap-1">
                     <Menu placement="topLeft" disabled={locked} items={[
@@ -71,8 +73,8 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
                 event.target.value = "";
             }} />
         </div>
-        <AgentCanvasPicker open={panelOpen && picker === "canvas"} onClose={() => setPicker(null)} targetProjectId={targetProjectId} disabled={disabled || sending || uploading} />
-        <AssetPickerModal open={panelOpen && picker === "library"} title={t("agent.drawer.addLibrary")} kinds={attachmentKinds} onClose={() => setPicker(null)} onInsert={(payload) => {
+        <AgentCanvasPicker open={visible && picker === "canvas"} onClose={() => setPicker(null)} targetProjectId={targetProjectId} disabled={disabled || sending || uploading} />
+        <AssetPickerModal open={visible && picker === "library"} title={t("agent.drawer.addLibrary")} kinds={attachmentKinds} onClose={() => setPicker(null)} onInsert={(payload) => {
             if (disabled || sending || uploading) return;
             const agent = useAgentStore.getState();
             if (payload.kind === "text") useAgentStore.setState({ prompt: `${agent.prompt}${agent.prompt ? "\n" : ""}${payload.content}` });

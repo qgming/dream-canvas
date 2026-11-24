@@ -24,6 +24,7 @@ const StoragePage = lazy(() => import("@/pages/settings/storage"));
 import AssetsPage from "@/pages/assets";
 import CanvasPage from "@/pages/canvas";
 import CanvasProjectPage from "@/pages/canvas/project";
+import ConversationsPage from "@/pages/conversations";
 import ImagePage from "@/pages/image";
 import NotFound from "@/pages/not-found";
 import PageError from "@/pages/error";
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
             {
                 element: <UserLayout><Outlet /></UserLayout>,
                 children: [
+                    { path: "/conversations", element: <ConversationsPage /> },
                     { path: "/image", element: <ImagePage /> },
                     { path: "/video", element: <VideoPage /> },
                     { path: "/assets", element: <AssetsPage /> },

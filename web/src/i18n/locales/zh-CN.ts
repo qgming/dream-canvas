@@ -1245,6 +1245,7 @@ export default {
         },
     },
     navigation: {
+        conversations: "会话",
         canvas: "我的画布",
         image: "生图工作台",
         video: "视频创作台",
@@ -1556,7 +1557,7 @@ export default {
             addCanvas: "从画布添加",
             addLibrary: "从资产库添加",
             searchCanvas: "搜索画布素材",
-            canvasUnavailable: "请打开目标画布后再添加素材。",
+            canvasUnavailable: "请先选择可用的目标项目。",
             skillSearch: "搜索技能",
             noSkills: "没有匹配的已启用技能",
         },
@@ -1598,6 +1599,10 @@ export default {
         siteTools: { canvasList: "画布列表", generationStatus: "生成任务状态", imageConfig: "生图配置", imageGenerate: "生图工作台生成", videoConfig: "视频配置", videoGenerate: "视频创作台生成", promptSearch: "搜索提示词", assetList: "资产列表", assetAdd: "添加资产", unknownTool: "未知工具：{{name}}", canvasLoading: "画布还在加载中，请稍后重试", canvasHint: "用 site_navigate 跳转 /canvas/{id} 打开对应画布", assetsLoading: "资产还在加载中，请稍后重试", assetTitleRequired: "请提供资产标题 title", textContentRequired: "kind=text 时需要提供 content 文本内容", imageUrlRequired: "kind=image 时需要提供 imageUrl（图片地址或 dataURL）", imageReadFailed: "无法读取该图片地址，请改用 dataURL 或可跨域访问的图片链接", assetKindUnsupported: "assets_add 仅支持 kind=text 或 kind=image", imageGenerationStarted: "已跳转生图工作台并触发生成，可用 generation_get_status 查询任务", imageConfigApplied: "已跳转生图工作台并填入参数，未触发生成", videoGenerationStarted: "已跳转视频创作台并触发生成，可用 generation_get_status 查询任务", videoConfigApplied: "已跳转视频创作台并填入参数，未触发生成" },
         connect: { pluginTitle: "方式一：在 Codex 中使用插件", pluginText: "先按仓库插件说明构建并链接本地 Agent，再安装梦想画布插件；通过插件启动画布时会自动带上连接信息。", directTitle: "方式二：直接运行 Agent", directText: "先在 canvas-agent 目录安装依赖，再从项目根目录运行下面命令，回到网页连接或填入 Local URL 和 Connect token。", commandCopied: "命令已复制", pluginReminder: "Codex 插件提醒", pluginReminderText: "只有安装 Codex 插件或手动添加 MCP 后，工具列表才会进入 Codex 上下文并增加 token 消耗；仅运行 npm --prefix canvas-agent run dev 启动本地 Agent 不会安装 MCP。", removePlugin: "移除插件", removeMcp: "移除手动 MCP", copyCommand: "复制命令", title: "连接本地 Agent", description: "按使用场景选择一种连接方式。", webConnection: "网页连接", autoDiscover: "默认自动读取 Local URL 和 Connect token，失败时再手动填写。", disconnect: "断开", connect: "连接", localAddress: "本地地址", urlPlaceholder: "例如 http://127.0.0.1:17371", token: "连接 Token", tokenPlaceholder: "自动发现，或手动填入 Connect token" },
         history: {
+            title: "历史对话",
+            groups: { today: "今天", yesterday: "昨天", days7: "7天内", days30: "30天内" },
+            expand: "展开历史对话",
+            collapse: "收起历史对话",
             newThread: "新对话",
             noWorkspaceThreads: "此账号还没有对话记录",
             moreActions: "对话「{{name}}」的更多操作",

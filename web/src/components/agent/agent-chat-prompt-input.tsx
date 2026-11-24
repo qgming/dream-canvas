@@ -6,17 +6,20 @@ import { useTranslation } from "react-i18next";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { buildCanvasResourceReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
+import { cn } from "@/lib/utils";
 import type { AgentSkillSummary } from "@/services/api/assistant-skills";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentCanvasReference, type AgentSkillReference } from "@/stores/use-agent-store";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenMediaClass, agentReferenceMarker, agentSkillMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
+import { useAgentReferenceNodes } from "./use-agent-reference-nodes";
 
 type ComposerCommand = { type: "skill" | "resource"; query: string; length: number };
 type ComposerCandidate = { type: "skill"; skill: AgentSkillSummary } | { type: "resource"; reference: CanvasResourceReference };
 type ReferenceHover = { reference: AgentCanvasReference; left: number; top: number; width: number; height: number };
 
-export function AgentChatPromptInput({ value, disabled, placeholder, theme, targetProjectId, onChange, onSubmit, onAddFiles }: {
+export function AgentChatPromptInput({ compact, value, disabled, placeholder, theme, targetProjectId, onChange, onSubmit, onAddFiles }: {
+    compact?: boolean;
     value: string;
     disabled?: boolean;
     placeholder: string;
@@ -36,7 +39,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, targ
     const canvasReferences = useAgentStore((state) => state.canvasReferences);
     const [command, setCommand] = useState<ComposerCommand | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
-    const canvasSnapshot = useAgentStore((state) => command?.type === "resource" ? state.canvasContext?.snapshot : undefined);
+    const { nodes, selectedNodeIds } = useAgentReferenceNodes(targetProjectId, command?.type === "resource" && !disabled);
     const [referenceHover, setReferenceHover] = useState<ReferenceHover | null>(null);
 
     const messageSkill = useMemo<AgentSkillReference | undefined>(() => selectedSkill ? {
@@ -54,13 +57,13 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, targ
                 .filter((skill) => skill.enabled && (!query || [skill.name, skill.description, skill.interface?.displayName, skill.interface?.shortDescription, skill.shortDescription].some((item) => item?.toLowerCase().includes(query))))
                 .map((skill) => ({ type: "skill", skill }));
         }
-        if (canvasSnapshot?.projectId !== targetProjectId || canvasReferences.some((item) => item.projectId !== targetProjectId)) return [];
-        const references = buildCanvasResourceReferences(canvasSnapshot.nodes);
-        const selectedIds = new Set(canvasSnapshot.selectedNodeIds);
+        if (!nodes || canvasReferences.some((item) => item.projectId !== targetProjectId)) return [];
+        const references = buildCanvasResourceReferences(nodes);
+        const selectedIds = new Set(selectedNodeIds);
         return [...references.filter((item) => selectedIds.has(item.nodeId)), ...references.filter((item) => !selectedIds.has(item.nodeId))]
             .filter((reference) => !selectedReferenceIds.has(reference.nodeId) && (!query || `${reference.label} ${reference.title} ${reference.kind} ${reference.text || ""}`.toLowerCase().includes(query)))
             .map((reference) => ({ type: "resource", reference }));
-    }, [canvasReferences, canvasSnapshot, command, disabled, selectedReferenceIds, skills, targetProjectId]);
+    }, [canvasReferences, nodes, selectedNodeIds, command, disabled, selectedReferenceIds, skills, targetProjectId]);
 
     useEffect(() => {
         const editor = editorRef.current;
@@ -114,6 +117,8 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, targ
     const insertCandidate = (candidate: ComposerCandidate) => {
         const editor = editorRef.current;
         if (!editor || !command || disabled) return;
+        const state = useAgentStore.getState();
+        if (candidate.type === "resource" && (!nodes || state.canvasReferences.some((item) => item.nodeId === candidate.reference.nodeId || item.projectId !== targetProjectId))) return closeCommand();
         if (candidate.type === "skill") editor.querySelector<HTMLElement>("[data-agent-token-kind='skill']")?.remove();
         removeTextBeforeCaret(command.length);
 
@@ -123,8 +128,6 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, targ
             emit(next);
             useAgentSkillStore.getState().selectSkill(candidate.skill, next);
         } else {
-            const state = useAgentStore.getState();
-            if (state.canvasContext?.snapshot.projectId !== targetProjectId || state.canvasReferences.some((item) => item.nodeId === candidate.reference.nodeId || item.projectId !== targetProjectId)) return closeCommand();
             state.setAgentState({ canvasReferences: [...state.canvasReferences, { ...candidate.reference, projectId: targetProjectId }] });
             insertTokenAtCaret(editor, createReferenceToken(candidate.reference, theme));
             emit(serializeEditor(editor));
@@ -174,7 +177,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, targ
                 aria-multiline="true"
                 aria-readonly={disabled || undefined}
                 aria-label={placeholder}
-                className="thin-scrollbar max-h-[min(28dvh,14rem)] min-h-[min(6rem,22dvh)] w-full overflow-x-hidden overflow-y-auto overscroll-contain whitespace-pre-wrap break-words bg-transparent px-1 py-1 text-sm leading-6 outline-none"
+                className={cn("thin-scrollbar max-h-[min(28dvh,14rem)] w-full overflow-x-hidden overflow-y-auto overscroll-contain whitespace-pre-wrap break-words bg-transparent px-1 py-1 text-sm leading-6 outline-none", compact ? "min-h-[min(3.5rem,22dvh)]" : "min-h-[min(6rem,22dvh)]")}
                 style={{ color: theme.node.text, cursor: disabled ? "default" : "text" }}
                 onInput={() => {
                     if (!composingRef.current) syncFromEditor();

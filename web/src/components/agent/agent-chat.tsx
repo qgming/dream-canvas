@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Clock } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { cn } from "@/lib/utils";
 import { useAgentStore, type AgentChatItem, type AgentTokenUsage } from "@/stores/use-agent-store";
 import { AgentChatMessage, AgentWorkingMessage } from "./agent-chat-message";
 import { AgentToolSteps, isRunningAgentTool } from "./agent-chat-steps";
@@ -16,6 +17,7 @@ const historyMessageStyle = { contentVisibility: "auto", containIntrinsicSize: "
 
 export function AgentChatTimeline({
     visible = true,
+    contentClassName,
     theme,
     sending,
     turnStatus,
@@ -23,6 +25,7 @@ export function AgentChatTimeline({
     empty,
 }: {
     visible?: boolean;
+    contentClassName?: string;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     sending: boolean;
     turnStatus?: string;
@@ -87,7 +90,7 @@ export function AgentChatTimeline({
     return (
         <div className="relative min-h-0 flex-1">
             <div ref={listRef} className="thin-scrollbar h-full select-text overflow-y-auto overscroll-contain" onScroll={updateScrollState}>
-                <div ref={contentRef} className={showEmpty ? "grid min-h-full place-items-center px-6 py-8" : "space-y-4 p-4"}>
+                <div ref={contentRef} className={cn(showEmpty ? "grid min-h-full place-items-center px-6 py-8" : "space-y-4 p-4", contentClassName)}>
                     {showEmpty ? empty : <>
                         {timeline.map((entry) => {
                             const item = entry.type === "tools" ? entry.items[0] : entry.item;

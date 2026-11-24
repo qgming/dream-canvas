@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Bot, CircleAlert, LoaderCircle } from "lucide-react";
+import { Bot, ChevronDown, CircleAlert, LoaderCircle, MessageSquarePlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Drawer } from "@animate-ui/react/primitives/base-ui/drawer";
-import { AssistantPanelContent } from "./assistant-panel-content";
 import { Button } from "@/components/ui/button";
+import { Popover } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/use-agent-store";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { AgentHistoryView } from "./agent-history-view";
+import { AssistantChatView } from "./assistant-chat-view";
+import { useAssistantSession } from "./assistant-session";
 
 export function AgentPanel() {
     const { t } = useTranslation();
-    const owner = useAuthStore((state) => state.user?.id);
     const width = useAgentStore((state) => state.width);
     const open = useAgentStore((state) => state.panelOpen);
     const sending = useAgentStore((state) => state.sending);
@@ -70,9 +71,31 @@ export function AgentPanel() {
                         useAgentStore.setState({ width: next });
                         localStorage.setItem("canvas-agent-panel-width", String(next));
                     }} />
-                    <Drawer.Content className="flex min-h-0 flex-1 flex-col overflow-hidden sm:rounded-l-2xl">{owner ? <AssistantPanelContent key={owner} /> : null}</Drawer.Content>
+                    <Drawer.Content className="flex min-h-0 flex-1 flex-col overflow-hidden sm:rounded-l-2xl">
+                        <AgentPanelHeader open={open} />
+                        <AssistantChatView visible={open} />
+                    </Drawer.Content>
                 </Drawer.Popup>
             </Drawer.Viewport>
         </Drawer.Portal>
     </Drawer.Root>;
+}
+
+function AgentPanelHeader({ open }: { open: boolean }) {
+    const { t } = useTranslation();
+    const { title, loading, busy, uploading, newThread, refreshHistory } = useAssistantSession();
+    const historyOpen = useAgentStore((state) => state.activeTab === "history");
+    const closeHistory = () => useAgentStore.setState({ activeTab: "chat" });
+    return <header className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3" data-base-ui-swipe-ignore>
+        <Popover trigger="click" placement="bottomLeft" open={open && historyOpen} onOpenChange={(next) => {
+            useAgentStore.setState({ activeTab: next ? "history" : "chat" });
+            if (next) refreshHistory();
+        }} className="w-[min(22rem,calc(100vw-32px))] p-0" content={<AgentHistoryView onAction={closeHistory} />}>
+            <Button variant="ghost" className="min-w-0 px-2 text-base" aria-label={t("agent.drawer.conversations", { title })}><span className="min-w-0 truncate">{title}</span><ChevronDown className="size-4 text-muted-foreground" /></Button>
+        </Popover>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="icon" icon={<MessageSquarePlus />} title={t("workspace.newConversation")} aria-label={t("workspace.newConversation")} disabled={loading || busy || uploading} onClick={() => void newThread()} />
+            <Drawer.Close render={<Button variant="ghost" size="icon" icon={<X />} title={t("ui.close")} aria-label={t("ui.close")} />} />
+        </div>
+    </header>;
 }

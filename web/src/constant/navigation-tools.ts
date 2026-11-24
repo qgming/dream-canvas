@@ -1,6 +1,10 @@
-import { ImagePlus, Images, Lightbulb, Maximize2, Video } from "lucide-react";
+import { ImagePlus, Images, Lightbulb, Maximize2, MessagesSquare, Video } from "lucide-react";
 
 export const navigationTools = [
+    {
+        slug: "conversations",
+        icon: MessagesSquare,
+    },
     {
         slug: "canvas",
         icon: Maximize2,

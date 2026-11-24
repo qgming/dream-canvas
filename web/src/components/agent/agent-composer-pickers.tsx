@@ -12,6 +12,7 @@ import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { canvasReferenceIcon } from "./agent-canvas-reference-preview";
 import { agentReferenceMarker } from "./agent-chat-inline-tokens";
+import { useAgentReferenceNodes } from "./use-agent-reference-nodes";
 
 export function AgentSkillPicker({ disabled }: { disabled?: boolean }) {
     const { t } = useTranslation();
@@ -45,10 +46,9 @@ export function AgentSkillPicker({ disabled }: { disabled?: boolean }) {
 
 export function AgentCanvasPicker({ open, onClose, targetProjectId, disabled }: { open: boolean; onClose: () => void; targetProjectId: string; disabled?: boolean }) {
     const { t } = useTranslation();
-    const snapshot = useAgentStore((state) => open ? state.canvasContext?.snapshot : undefined);
+    const { nodes } = useAgentReferenceNodes(targetProjectId, open);
     const selected = useAgentStore((state) => state.canvasReferences);
     const [query, setQuery] = useState("");
-    const nodes = snapshot?.projectId === targetProjectId ? snapshot.nodes : undefined;
     const otherProject = selected.some((item) => item.projectId !== targetProjectId);
     const references = useMemo(() => open && nodes ? buildCanvasResourceReferences(nodes) : [], [nodes, open]);
     const filtered = references.filter((reference) => !query.trim() || `${reference.title} ${reference.label} ${reference.text || ""}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -61,7 +61,7 @@ export function AgentCanvasPicker({ open, onClose, targetProjectId, disabled }: 
                 const added = selected.some((item) => item.nodeId === reference.nodeId);
                 return <button key={reference.nodeId} type="button" disabled={disabled || added} className="flex w-full items-center gap-3 rounded-lg p-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" onClick={() => {
                     const state = useAgentStore.getState();
-                    if (disabled || state.canvasContext?.snapshot.projectId !== targetProjectId || state.canvasReferences.some((item) => item.nodeId === reference.nodeId || item.projectId !== targetProjectId)) return;
+                    if (disabled || !open || state.canvasReferences.some((item) => item.nodeId === reference.nodeId || item.projectId !== targetProjectId)) return;
                     const marker = agentReferenceMarker(reference);
                     useAgentStore.setState({ canvasReferences: [...state.canvasReferences, { ...reference, projectId: targetProjectId }], prompt: `${state.prompt}${state.prompt && !/\s$/.test(state.prompt) ? " " : ""}${marker} ` });
                     onClose();

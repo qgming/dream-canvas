@@ -83,7 +83,7 @@ func (a *App) mcpHandler() http.Handler {
 		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		principal, err := a.tokenPrincipal(raw)
 		if err != nil { return nil }
-		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.2"}, nil)
+		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.3"}, nil)
 		for _, tool := range businessTools() {
 			if !principal.allows(tool.Scope, "") { continue }
 			mcp.AddTool(server, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}, func(ctx context.Context, request *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {

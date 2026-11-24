@@ -1243,6 +1243,7 @@ export default {
         },
     },
     navigation: {
+        conversations: "Conversations",
         canvas: "My Canvases",
         image: "Image Studio",
         video: "Video Studio",
@@ -1554,7 +1555,7 @@ export default {
             addCanvas: "Add from canvas",
             addLibrary: "Add from asset library",
             searchCanvas: "Search canvas assets",
-            canvasUnavailable: "Open the target canvas before adding assets.",
+            canvasUnavailable: "Select an available target project before adding canvas assets.",
             skillSearch: "Search Skills",
             noSkills: "No matching enabled Skills",
         },
@@ -1601,6 +1602,10 @@ export default {
         siteTools: { canvasList: "Canvas list", generationStatus: "Generation task status", imageConfig: "Image configuration", imageGenerate: "Generate in Image Studio", videoConfig: "Video configuration", videoGenerate: "Generate in Video Studio", promptSearch: "Search prompts", assetList: "Asset list", assetAdd: "Add asset", unknownTool: "Unknown tool: {{name}}", canvasLoading: "The canvas is still loading. Try again shortly.", canvasHint: "Use site_navigate to open /canvas/{id}", assetsLoading: "Assets are still loading. Try again shortly.", assetTitleRequired: "Provide the asset title", textContentRequired: "content is required when kind=text", imageUrlRequired: "imageUrl is required when kind=image", imageReadFailed: "Could not read the image. Use a data URL or a cross-origin accessible image URL.", assetKindUnsupported: "assets_add supports only kind=text or kind=image", imageGenerationStarted: "Opened Image Studio and started generation. Use generation_get_status to query the task.", imageConfigApplied: "Opened Image Studio and applied the parameters without starting generation.", videoGenerationStarted: "Opened Video Studio and started generation. Use generation_get_status to query the task.", videoConfigApplied: "Opened Video Studio and applied the parameters without starting generation." },
         connect: { pluginTitle: "Option 1: Use the Codex plugin", pluginText: "Build and link the local Agent as described in the repository, then install the Dream Canvas plugin. Launching through the plugin supplies the connection details automatically.", directTitle: "Option 2: Run the Agent directly", directText: "Install dependencies in canvas-agent first, then run this command from the repository root and return here to connect or enter the Local URL and Connect token manually.", commandCopied: "Command copied", pluginReminder: "Codex plugin note", pluginReminderText: "The tool list enters the Codex context and consumes additional tokens only after installing the Codex plugin or adding MCP manually. Running npm --prefix canvas-agent run dev alone does not install MCP.", removePlugin: "Remove plugin", removeMcp: "Remove manual MCP", copyCommand: "Copy command", title: "Connect local Agent", description: "Choose the connection method that fits your workflow.", webConnection: "Web connection", autoDiscover: "The Local URL and Connect token are discovered automatically by default. Enter them manually only if discovery fails.", disconnect: "Disconnect", connect: "Connect", localAddress: "Local address", urlPlaceholder: "For example http://127.0.0.1:17371", token: "Connection token", tokenPlaceholder: "Discover automatically or enter the Connect token" },
         history: {
+            title: "Conversation history",
+            groups: { today: "Today", yesterday: "Yesterday", days7: "Last 7 days", days30: "Last 30 days" },
+            expand: "Show conversation history",
+            collapse: "Hide conversation history",
             newThread: "New conversation",
             noWorkspaceThreads: "No conversations for this account yet",
             moreActions: "More actions for “{{name}}”",
