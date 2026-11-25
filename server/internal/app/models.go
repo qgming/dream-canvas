@@ -36,9 +36,20 @@ type Project struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type AssetProject struct {
+	ID string `json:"id" gorm:"primaryKey"`
+	UserID string `json:"-" gorm:"index;not null"`
+	Title string `json:"title"`
+	Version uint64 `json:"version"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	IsDefault bool `json:"isDefault" gorm:"-"`
+}
+
 type Asset struct {
 	ID string `json:"id" gorm:"primaryKey"`
 	UserID string `json:"-" gorm:"index;not null"`
+	AssetProjectID string `json:"assetProjectId,omitempty" gorm:"index;not null;default:default"`
 	Kind string `json:"kind"`
 	Title string `json:"title"`
 	MimeType string `json:"mimeType"`
@@ -298,6 +309,8 @@ type RuntimeSettings struct {
 	ID uint `json:"-" gorm:"primaryKey"`
 	Version uint64 `json:"version"`
 	SiteClosed bool `json:"-"`
+	ImageWorkbenchClosed bool `json:"-" gorm:"not null;default:false"`
+	VideoWorkbenchClosed bool `json:"-" gorm:"not null;default:false"`
 	Policy JSON `json:"policy" gorm:"type:blob"`
 	UpdatedBy string `json:"updatedBy"`
 	UpdatedAt time.Time `json:"updatedAt"`

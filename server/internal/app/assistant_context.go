@@ -194,11 +194,8 @@ func (a *App) prepareAssistantContext(ctx context.Context, turn AssistantTurn, s
 		if index != request { materialMessages = append(materialMessages, snapshot.Messages[index]) }
 	}
 	material := assistantContextMaterial(materialMessages, redact)
-	parameters := object(redact(snapshot.Parameters))
-	delete(parameters, "systemPrompt")
-	var controls []parameterControl
-	if err := json.Unmarshal(snapshot.Execution.Model.Parameters, &controls); err != nil { return err }
-	for _, control := range controls { if control.Type == "asset" { delete(parameters, control.Key) } }
+	parameters, err := assistantTextOnlyParameters(*snapshot, redact)
+	if err != nil { return err }
 	segment := 0
 	for material != "" {
 		width := assistantContextWindowEnd(material, byteBudget/4)

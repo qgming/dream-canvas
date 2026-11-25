@@ -1,9 +1,10 @@
 import { apiRequest, jsonRequest } from "./client";
+import type { SiteAvailability } from "./auth";
 
 export const scriptRuntimeFields = ["initSeconds", "submitSeconds", "resultSeconds", "streamEventSeconds", "firstResponseSeconds", "idleSeconds", "memoryMiB", "jsonLimitMiB"] as const;
 type ScriptRuntimeField = typeof scriptRuntimeFields[number];
 type ExecutionRange = { min: number; max: number; default: number };
-type SiteSettingsInput = { version: number; open: boolean; assistantSlots: number; generationSlots: number; userSlots: number; scriptRuntime: Record<ScriptRuntimeField, number> };
+type SiteSettingsInput = SiteAvailability & { version: number; assistantSlots: number; generationSlots: number; userSlots: number; scriptRuntime: Record<ScriptRuntimeField, number> };
 export type SiteSettings = SiteSettingsInput & { scriptRuntimeBounds: Record<ScriptRuntimeField, ExecutionRange> };
 export const getSiteSettings = () => apiRequest<SiteSettings>("/admin/site");
 export const saveSiteSettings = ({ scriptRuntimeBounds: _, ...settings }: SiteSettings, confirmed = false) => apiRequest<SiteSettings>("/admin/site", jsonRequest("PUT", { ...settings, confirmed }));

@@ -45,7 +45,7 @@ func TestAssistantLoadsOnlyTheSelectedPermittedGroup(test *testing.T) {
 		test.Fatalf("fallback group choices are incorrect: %v", available)
 	}
 	groupID, names, err := loadAssistantToolGroup(tools, map[string]any{"group": "assets"})
-	if err != nil || groupID != "assets" || !slices.Equal(names, []string{"assets_list", "asset_get", "asset_voices"}) {
+	if err != nil || groupID != "assets" || !slices.Equal(names, []string{"asset_projects_list", "assets_list", "asset_get", "asset_voices"}) {
 		test.Fatalf("unexpected permitted asset group: %s %v %v", groupID, names, err)
 	}
 	use := func(group string) []string {

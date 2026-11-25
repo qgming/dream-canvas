@@ -82,42 +82,121 @@ func TestAssistantTimelineShowsPartialReasoningAndSafeToolDetails(t *testing.T) 
 	}
 }
 
-func TestAssistantThreadTitlesFollowFirstAcceptedMessageAndRespectRename(t *testing.T) {
-	a := assetFileTestApp(t)
-	if err := a.db.AutoMigrate(&Channel{}, &ChannelModel{}, &ScriptVersion{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}); err != nil { t.Fatal(err) }
-	var err error
-	if a.credentials, err = openKey(a.root); err != nil { t.Fatal(err) }
-	secret, err := a.encryptSecret("saved-provider-credential")
-	if err != nil { t.Fatal(err) }
-	for _, row := range []any{
-		&Channel{ID: "channel", Secret: secret, Enabled: true},
-		&ChannelModel{ID: "model", ChannelID: "channel", AdapterID: "adapter", AdapterVersionID: "version", Capability: "text", Enabled: true},
-		&ScriptVersion{ID: "version", AdapterID: "adapter", Features: JSON(`{"tools":true}`), Parameters: JSON(`[]`), Scripts: JSON(`{}`)},
-	} { if err := a.db.Create(row).Error; err != nil { t.Fatal(err) } }
-	user := User{ID: "owner"}
-	thread, err := a.CreateAssistantThread(user.ID, "")
-	if err != nil || thread.Title != "" { t.Fatalf("expected a new placeholder: %+v, %v", thread, err) }
-	input := assistantTurnInput{ChannelID: "channel", ModelID: "missing", Version: thread.Version, Prompt: "你好！请帮我整理城市夜景的分镜。\n第二句是补充要求。"}
-	if _, err := a.StartAssistantTurn(user, thread.ID, input); err == nil { t.Fatal("invalid model accepted") }
-	read := func() AssistantThread {
-		t.Helper()
-		var value AssistantThread
-		if err := a.db.First(&value, "id = ?", thread.ID).Error; err != nil { t.Fatal(err) }
-		return value
+func TestAssistantTitlesFirstSuccessfulTurn(t *testing.T) {
+	const reply = "正文已保存。"
+	const prompt = "请整理城市夜景分镜。saved-provider-credential\nhttps://example.test/private?signature=private"
+	const safePrompt = "请整理城市夜景分镜。[REDACTED]\n[REDACTED URL]"
+	const modelTitle = "  城市夜景分镜创作建议草案\n不保留第二行  "
+	const shortTitle = "城市夜景分镜创作建议"
+	for _, fixture := range []struct {
+		name, previous string
+		failTitle, rename bool
+	}{
+		{name: "model title"},
+		{name: "failed reply does not consume naming", previous: "failed"},
+		{name: "cancelled reply does not consume naming", previous: "cancelled"},
+		{name: "failed title is not retried", failTitle: true},
+		{name: "concurrent manual title wins", rename: true},
+	} {
+		t.Run(fixture.name, func(test *testing.T) {
+			app := assetFileTestApp(test)
+			if err := app.db.AutoMigrate(&Channel{}, &ChannelModel{}, &ScriptVersion{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &UsageEntry{}); err != nil { test.Fatal(err) }
+			var err error
+			if app.credentials, err = openKey(app.root); err != nil { test.Fatal(err) }
+			secret, err := app.encryptSecret("saved-provider-credential")
+			if err != nil { test.Fatal(err) }
+			user := User{ID: "owner"}
+			for _, row := range []any{
+				&Channel{ID: "channel", Secret: secret, Enabled: true},
+				&ChannelModel{ID: "model", ChannelID: "channel", Model: "selected-model", AdapterID: "adapter", AdapterVersionID: "version", Capability: "text", Enabled: true},
+				&ScriptVersion{ID: "version", AdapterID: "adapter", Features: JSON(`{"tools":true}`), Parameters: JSON(`[{"key":"systemPrompt","label":"Instructions","type":"text"},{"key":"reference","label":"Image","type":"asset","role":"image","transport":"data"}]`), Scripts: JSON(`{}`)},
+				&Asset{ID: "reference-image", UserID: user.ID, Kind: "image", SaveState: "saved", Metadata: JSON(`{}`)},
+			} { if err := app.db.Create(row).Error; err != nil { test.Fatal(err) } }
+			thread, err := app.CreateAssistantThread(user.ID, "")
+			if err != nil || thread.Title != "" { test.Fatalf("expected a new placeholder: %+v, %v", thread, err) }
+			read := func() AssistantThread {
+				test.Helper()
+				var value AssistantThread
+				if err := app.db.First(&value, "id = ?", thread.ID).Error; err != nil { test.Fatal(err) }
+				return value
+			}
+			assertStatus := func(id, status string) {
+				test.Helper()
+				var turn AssistantTurn
+				if err := app.db.First(&turn, "id = ?", id).Error; err != nil || turn.Status != status { test.Fatalf("turn status = %s, want %s (%v)", turn.Status, status, err) }
+			}
+			start := func(message string) AssistantTurn {
+				test.Helper()
+				turn, err := app.StartAssistantTurn(user, thread.ID, assistantTurnInput{ChannelID: "channel", ModelID: "model", Version: read().Version, Prompt: message,
+					Attachments: []string{"reference-image"}, Parameters: map[string]any{"systemPrompt": "conversation-only instruction", "reference": "reference-image"}})
+				if err != nil { test.Fatal(err) }
+				return turn
+			}
+			ctx := context.Background()
+			if fixture.previous != "" {
+				previous := start("不能把这条未完成请求当作标题。")
+				if fixture.previous == "cancelled" {
+					if err := app.CancelAssistantTurn(user.ID, previous.ID); err != nil { test.Fatal(err) }
+				}
+				app.executeAssistantWithText(ctx, previous.ID, func(_ context.Context, _ AssistantTurn, _ executionSnapshot, _ []map[string]any, _ map[string]any, _ []assetInput, tools []map[string]any, _ func(string, string) error) (providerResult, error) {
+					if fixture.previous == "cancelled" || len(tools) == 0 { test.Fatal("an unsuccessful conversation attempted to generate a title") }
+					return providerResult{Status: "failed", Error: "reply rejected"}, nil
+				})
+				assertStatus(previous.ID, fixture.previous)
+			}
+			before := read()
+			turn := start(prompt)
+			accepted := read()
+			if accepted.Title != "" || accepted.Version != before.Version + 1 { test.Fatal("enqueue must leave the conversation unnamed", accepted) }
+			if _, err := app.RenameAssistantThread("other", thread.ID, assistantRenameInput{Title: "不应修改", Version: accepted.Version}); !errors.Is(err, gorm.ErrRecordNotFound) { test.Fatalf("rename was not owner scoped: %v", err) }
+			if _, err := app.RenameAssistantThread(user.ID, thread.ID, assistantRenameInput{Title: "旧版本", Version: before.Version}); err == nil { test.Fatal("stale rename was accepted") }
+			calls := 0
+			execution := ""
+			expected := accepted
+			expected.Title = shortTitle
+			app.executeAssistantWithText(ctx, turn.ID, func(_ context.Context, running AssistantTurn, snapshot executionSnapshot, messages []map[string]any, parameters map[string]any, references []assetInput, tools []map[string]any, _ func(string, string) error) (providerResult, error) {
+				calls++
+				if running.ID != turn.ID { test.Fatal("naming created another turn") }
+				if calls == 1 {
+					if len(tools) == 0 || len(references) != 1 { test.Fatal("first call was not the normal conversation request") }
+					execution = string(encode(snapshot))
+					return providerResult{Status: "completed", Text: reply}, nil
+				}
+				if calls != 2 || string(encode(snapshot)) != execution || len(tools) != 0 || len(references) != 0 || parameters["reference"] != nil || parameters["systemPrompt"] != nil {
+					test.Fatal("title request did not reuse the execution snapshot with isolated input")
+				}
+				if len(messages) != 2 || messages[0]["role"] != "system" || messages[1]["role"] != "user" || messages[1]["content"] != safePrompt { test.Fatal("title request included material other than the redacted initial request") }
+				assertStatus(turn.ID, "succeeded")
+				var saved AssistantItem
+				if err := app.db.First(&saved, "turn_id = ? AND role = ?", turn.ID, "assistant").Error; err != nil || saved.Text != reply { test.Fatal("naming started before the reply was saved", err) }
+				if fixture.rename {
+					expected, err = app.RenameAssistantThread(user.ID, thread.ID, assistantRenameInput{Title: "手动定稿", Version: accepted.Version})
+					if err != nil { test.Fatal(err) }
+				}
+				if fixture.failTitle {
+					expected.Title = ""
+					return providerResult{Text: modelTitle}, errors.New("title provider failed")
+				}
+				return providerResult{Status: "completed", Text: modelTitle, Usage: map[string]any{"output_tokens": 12}}, nil
+			})
+			assertStatus(turn.ID, "succeeded")
+			if current := read(); calls != 2 || current.Title != expected.Title || current.Version != expected.Version || !current.UpdatedAt.Equal(expected.UpdatedAt) { test.Fatalf("title = %q after %d requests; version/timestamp or title did not match", current.Title, calls) }
+			var entries []UsageEntry
+			if err := app.db.Where("turn_id = ?", turn.ID).Order("id").Find(&entries).Error; err != nil || len(entries) != 2 || entries[1].ID != "turn:"+turn.ID+":title" || entries[1].ModelID != "model" || entries[1].ChannelID != "channel" { test.Fatal("naming was not counted separately for the same channel and model", err) }
+			wantState := "actual"
+			if fixture.failTitle { wantState = "unknown" }
+			if entries[1].State != wantState { test.Fatalf("title use was marked %s, want %s", entries[1].State, wantState) }
+			if fixture.failTitle {
+				followup := start("改写第二个镜头。")
+				app.executeAssistantWithText(ctx, followup.ID, func(_ context.Context, _ AssistantTurn, _ executionSnapshot, _ []map[string]any, _ map[string]any, _ []assetInput, tools []map[string]any, _ func(string, string) error) (providerResult, error) {
+					if len(tools) == 0 { test.Fatal("failed title was retried on a later turn") }
+					return providerResult{Status: "completed", Text: reply}, nil
+				})
+				assertStatus(followup.ID, "succeeded")
+				if current := read(); current.Title != "" { test.Fatal("failed title was replaced by a fallback", current.Title) }
+			}
+		})
 	}
-	if current := read(); current.Title != "" || current.Version != thread.Version { t.Fatal("a rejected request changed the title", current) }
-	input.ModelID = "model"
-	turn, err := a.StartAssistantTurn(user, thread.ID, input)
-	if err != nil { t.Fatal(err) }
-	if current := read(); current.Title != "整理城市夜景的分镜" || current.Version != thread.Version + 1 { t.Fatal("first accepted message did not set the summary", current) }
-	if err := a.CancelAssistantTurn(user.ID, turn.ID); err != nil { t.Fatal(err) }
-	if _, err := a.RenameAssistantThread("other", thread.ID, assistantRenameInput{Title: "不应修改", Version: read().Version}); !errors.Is(err, gorm.ErrRecordNotFound) { t.Fatalf("rename was not owner scoped: %v", err) }
-	if _, err := a.RenameAssistantThread(user.ID, thread.ID, assistantRenameInput{Title: "旧版本", Version: thread.Version}); err == nil { t.Fatal("stale rename was accepted") }
-	updated, err := a.RenameAssistantThread(user.ID, thread.ID, assistantRenameInput{Title: " 新对话 ", Version: read().Version})
-	if err != nil || updated.Title != "新对话" { t.Fatalf("explicit rename failed: %+v, %v", updated, err) }
-	input.Prompt, input.Version = "请改写第二个镜头", updated.Version
-	if _, err := a.StartAssistantTurn(user, thread.ID, input); err != nil { t.Fatal(err) }
-	if current := read(); current.Title != "新对话" { t.Fatal("later message overwrote the manually chosen title", current) }
 }
 
 func TestAssistantMaterialsKeepsFailedToolCallsReplayable(t *testing.T) {

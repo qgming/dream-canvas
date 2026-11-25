@@ -131,7 +131,7 @@ docker compose pull
 docker compose up -d
 ```
 
-默认使用 `latest`，只随正式版本发布更新。需要固定版本时，在 `.env` 设置 `DREAM_CANVAS_TAG=v0.1.3`；之后升级先改为目标版本，再执行上述命令。**更新时不需要重新初始化管理员**。
+默认使用 `latest`，只随正式版本发布更新。需要固定版本时，在 `.env` 将 `DREAM_CANVAS_TAG` 设为已发布的标签（例如 0.1.4 发布后可设置 `DREAM_CANVAS_TAG=v0.1.4`）；之后升级先改为目标版本，再执行上述命令。**更新时不需要重新初始化管理员**。
 
 常用管理命令：
 

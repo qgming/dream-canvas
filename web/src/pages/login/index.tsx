@@ -10,7 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/display";
 import { Field } from "@/components/ui/form";
 import { Input, PasswordInput } from "@/components/ui/input";
-import { getAuthStatus } from "@/services/api/auth";
+import { authStatusKey, getAuthStatus } from "@/services/api/auth";
 import { ApiError } from "@/services/api/client";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -62,7 +62,7 @@ export default function HomePage() {
     const [busy, setBusy] = useState(false);
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
-    const status = useQuery({ queryKey: ["auth-status"], queryFn: getAuthStatus, refetchOnWindowFocus: true });
+    const status = useQuery({ queryKey: authStatusKey, queryFn: getAuthStatus, refetchOnWindowFocus: true });
     const from = (location.state as { from?: string } | null)?.from;
     const target = from?.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login") && from !== "/" ? from : "/canvas";
     const closed = status.data?.open === false || siteClosed;

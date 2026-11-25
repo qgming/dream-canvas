@@ -6,16 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/display";
 import { Field } from "@/components/ui/form";
 import { useFeedback } from "@/hooks/use-feedback";
+import { exportAssets, importAssetPackage } from "@/lib/asset-transfer";
 import { captureSession } from "@/services/api/client";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { exportAssets, readAssetPackage } from "./asset-transfer";
 
 export default function BackupPage() {
     const { t } = useTranslation();
     const { notify } = useFeedback();
     const hydrated = useAssetStore((state) => state.hydrated);
     const assetError = useAssetStore((state) => state.error);
-    const addAsset = useAssetStore((state) => state.addAsset);
     const input = useRef<HTMLInputElement>(null);
     const running = useRef(false);
     const [busy, setBusy] = useState<"" | "export" | "import">("");
@@ -36,17 +35,9 @@ export default function BackupPage() {
                 if (!current.assets.length) { notify.warning(t("assets.noneToExport")); return; }
                 await exportAssets(current.assets, t("assets.packageName"));
             } else {
-                const imported = await readAssetPackage(file!);
-                for (const asset of imported) {
-                    assertSession();
-                    const payload = { ...asset } as Record<string, unknown>;
-                    delete payload.id;
-                    delete payload.createdAt;
-                    delete payload.updatedAt;
-                    await addAsset(payload as Parameters<typeof addAsset>[0]);
-                }
+                const count = await importAssetPackage(file!);
                 assertSession();
-                notify.success(t("assets.imported", { count: imported.length }));
+                notify.success(t("assets.imported", { count }));
             }
         } catch (failure) {
             const detail = failure instanceof Error ? failure.message : String(failure);

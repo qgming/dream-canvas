@@ -1,8 +1,8 @@
 import appI18n from "@/i18n";
-import { CircleAlert, Clapperboard, Clock3, CloudAlert, CloudCheck, CloudOff, CloudUpload, Copy, Database, Download, FileText, HardDrive, Image as ImageIcon, LayoutGrid, LoaderCircle, Music2, PencilLine, Plus, Trash2, Upload, Ellipsis } from "lucide-react";
+import { ArrowLeft, CircleAlert, Clapperboard, Clock3, CloudAlert, CloudCheck, CloudOff, CloudUpload, Copy, Database, Download, FileText, FolderInput, HardDrive, Image as ImageIcon, LayoutGrid, LoaderCircle, Music2, PencilLine, Plus, Trash2, Upload, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Tabs } from "@animate-ui/react/primitives/radix-ui";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Notice as Alert, Spinner } from "@/components/ui/display";
 import { useFeedback } from "@/hooks/use-feedback";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Pagination } from "@/components/ui/pagination";
 import { Choice } from "@/components/ui/choice";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge as Tag } from "@/components/ui/display";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
@@ -27,9 +28,10 @@ import { formatBytes, formatDuration, formatRatio } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, getImagePreviewRevision, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { assetCoverUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
-import { retryAssetCleanup, type ServerAsset } from "@/services/api/assets";
+import { moveAsset, retryAssetCleanup, type AssetProject, type ServerAsset } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
 import { AssetStorageDialog } from "./components/asset-storage-dialog";
+import { useAssetProjects } from "./use-asset-projects";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -48,7 +50,32 @@ const kindOptions = [
     { key: "audio", icon: Music2 },
 ] as const;
 
-export default function AssetsPage() {
+export default function AssetProjectPage() {
+    const { t } = useTranslation();
+    const { projectId } = useParams();
+    const projects = useAssetProjects();
+    const project = projects.data?.find((entry) => entry.id === projectId);
+    if (project && projects.data) return <AssetProjectContents key={project.id} project={project} projects={projects.data} />;
+
+    return <main className="h-full overflow-auto bg-background px-4 py-6 text-foreground sm:px-6 lg:py-8">
+        <div className="mx-auto max-w-7xl">
+            <PageHeader className="mb-4" title={<AssetProjectHeading title={t("assets.title")} />} />
+            {projects.isPending ? <div className="flex justify-center py-20"><Spinner /></div> : projects.error ? (
+                <Alert type="error" title={projects.error.message} action={<Button onClick={() => void projects.refetch()}>{t("common.retry")}</Button>} />
+            ) : <Empty description={t("assetProjects.notFound")} className="py-20" />}
+        </div>
+    </main>;
+}
+
+function AssetProjectHeading({ title }: { title: string }) {
+    const { t } = useTranslation();
+    return <span className="flex min-w-0 items-center gap-3">
+        <Button asChild variant="outline" size="icon" title={t("assetProjects.back")} aria-label={t("assetProjects.back")}><Link to="/assets"><ArrowLeft /></Link></Button>
+        <span className="min-w-0 break-words">{title}</span>
+    </span>;
+}
+
+function AssetProjectContents({ project, projects }: { project: AssetProject; projects: AssetProject[] }) {
     const { notify } = useFeedback();
     const { t } = useTranslation();
     const copyText = useCopyText();
@@ -68,6 +95,8 @@ export default function AssetsPage() {
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+    const [movingAsset, setMovingAsset] = useState<Asset | null>(null);
+    const [destination, setDestination] = useState("");
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [localCleanupAsset, setLocalCleanupAsset] = useState<ServerAsset | null>(null);
     const [cleanupId, setCleanupId] = useState("");
@@ -82,15 +111,17 @@ export default function AssetsPage() {
     const title = useWatch({ name: "title", control: form.control }) || "";
     const content = useWatch({ name: "content", control: form.control }) || "";
     const mediaPreview = mediaDraft || (editingAsset?.kind === "video" || editingAsset?.kind === "audio" ? editingAsset.data : null);
+    const destinations = projects.filter((entry) => entry.id !== project.id);
 
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets.filter((asset) => {
+            if (asset.assetProjectId !== project.id) return false;
             if (kindFilter !== "all" && asset.kind !== kindFilter) return false;
             if (!query) return true;
             return assetSearchText(asset).includes(query);
         });
-    }, [assets, keyword, kindFilter]);
+    }, [assets, keyword, kindFilter, project.id]);
 
     const visibleAssets = useMemo(() => {
         const start = (page - 1) * pageSize;
@@ -142,7 +173,7 @@ export default function AssetsPage() {
 
         if (values.kind === "text") {
             const asset = { ...base, kind: "text" as const, data: { content: (values.content || "").trim() } };
-            await (editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset));
+            await (editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset, project.id));
         } else if (editingAsset) {
             await updateAsset(editingAsset.id, base);
         } else if (values.kind === "image") {
@@ -151,12 +182,12 @@ export default function AssetsPage() {
                 return;
             }
             const asset = { ...base, kind: "image" as const, data: imageDraft };
-            await addAsset(asset);
+            await addAsset(asset, project.id);
         } else {
             if (!mediaDraft) { notify.error(appI18n.t("workspace.chooseOriginal")); return; }
             const data = { ...mediaDraft, width: mediaDraft.width || 0, height: mediaDraft.height || 0 };
-            if (values.kind === "video") await addAsset({ ...base, kind: "video", data });
-            else await addAsset({ ...base, kind: "audio", data });
+            if (values.kind === "video") await addAsset({ ...base, kind: "video", data }, project.id);
+            else await addAsset({ ...base, kind: "audio", data }, project.id);
         }
         assertSession();
         if (revision !== editorRevision.current) return;
@@ -171,7 +202,7 @@ export default function AssetsPage() {
         const revision = editorRevision.current;
         const kind = formKind;
         if (kind === "video" || kind === "audio") {
-            const media = await uploadMediaFile(file, kind);
+            const media = await uploadMediaFile(file, kind, undefined, project.id);
             assertSession();
             if (revision !== editorRevision.current || form.getValues("kind") !== kind) return;
             setMediaDraft(media);
@@ -179,7 +210,7 @@ export default function AssetsPage() {
             return;
         }
         if (!file.type.startsWith("image/")) return;
-        const image = await uploadImage(file);
+        const image = await uploadImage(file, { assetProjectId: project.id });
         assertSession();
         if (revision !== editorRevision.current || form.getValues("kind") !== kind) return;
         const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
@@ -214,6 +245,17 @@ export default function AssetsPage() {
         finally { deleteRef.current = false; }
     };
 
+    const confirmMove = async () => {
+        if (!movingAsset || !destination) return;
+        const assertSession = captureSession();
+        await moveAsset(movingAsset.id, destination, movingAsset.assetProjectId);
+        assertSession();
+        await useAssetStore.getState().loadAssets();
+        assertSession();
+        setMovingAsset(null);
+        notify.success(t("assetProjects.moved"));
+    };
+
     const retryCleanup = async (asset: ServerAsset, retainCloud = false) => {
         if (cleanupRef.current) return;
         cleanupRef.current = true;
@@ -231,7 +273,7 @@ export default function AssetsPage() {
 
     const assetContent = <div className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />)}
+            {visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onMove={destinations.length ? () => { setDestination(""); setMovingAsset(asset); } : undefined} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />)}
         </div>
         {!hydrated ? <div className="flex justify-center py-20"><Spinner /></div> : !visibleAssets.length && !assetError ? <Empty description={t("assets.empty")} className="py-20" /> : null}
     </div>;
@@ -241,7 +283,7 @@ export default function AssetsPage() {
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:py-8">
                 <div className="mx-auto max-w-7xl">
                     {assetError ? <Alert type="error" className="mb-4" title={assetError} action={<Button onClick={() => void useAssetStore.getState().loadAssets()}>{appI18n.t("workspace.retryRead")}</Button>} /> : null}
-                    {deleting.map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={<>
+                    {deleting.filter((asset) => asset.assetProjectId === project.id).map((asset) => <Alert key={asset.id} type="warning" className="mb-3" title={t("workspace.assetDeletionPending", { title: asset.title })} description={<>
                         {asset.error || t("workspace.originalCleanupPending")}
                         {asset.retainCloud ? <p className="mt-1">{t("assets.cloudRetained")}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -250,7 +292,7 @@ export default function AssetsPage() {
                             {!asset.retainCloud && (asset.storageId || asset.migration) ? <Button variant="outline" className="text-destructive hover:text-destructive" disabled={Boolean(cleanupId)} onClick={() => setLocalCleanupAsset(asset)}>{t("assets.localCleanup")}</Button> : null}
                         </div>
                     </>} />)}
-                    <PageHeader className="mb-4" title={t("assets.title")} actions={<>
+                    <PageHeader className="mb-4" title={<AssetProjectHeading title={project.isDefault ? t("assetProjects.defaultTitle") : project.title} />} actions={<>
                         <SearchInput className="w-full sm:w-72" value={keyword} aria-label={t("assets.search")} placeholder={t("assets.search")} onChange={(event) => { setPage(1); setKeyword(event.target.value); }} />
                         <Button variant="default" icon={<Plus />} disabled={!hydrated} onClick={openCreate}>{t("assets.add")}</Button>
                     </>} />
@@ -344,6 +386,17 @@ export default function AssetsPage() {
                 />
             </Dialog>
 
+            <Dialog title={t("assetProjects.move")} description={t("assetProjects.moveDescription", { title: movingAsset?.title })} open={Boolean(movingAsset)} width={440} onClose={() => setMovingAsset(null)} onConfirm={confirmMove} confirmText={t("assetProjects.moveConfirm")} confirmDisabled={!destinations.some((entry) => entry.id === destination)}>
+                <Field label={t("assetProjects.destination")}>
+                    <Select value={destination} onValueChange={setDestination}>
+                        <SelectTrigger aria-label={t("assetProjects.destination")}><SelectValue placeholder={t("assetProjects.selectDestination")} /></SelectTrigger>
+                        <SelectContent>
+                            {destinations.map((entry) => <SelectItem key={entry.id} value={entry.id}>{entry.isDefault ? t("assetProjects.defaultTitle") : entry.title}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </Field>
+            </Dialog>
+
             <AssetDrawer asset={previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || null : null} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
             <AlertDialog title={t("assets.deleteTitle")} description={t("workspace.deleteAssetDescription", { title: deletingAsset?.title })} open={Boolean(deletingAsset)} onClose={() => setDeletingAsset(null)} onConfirm={confirmDelete} confirmText={t("common.delete")} destructive />
@@ -359,7 +412,7 @@ function AssetTabPanel({ value, active, children }: { value: AssetKind | "all"; 
     return <Tabs.Content value={value} className="outline-none focus-visible:ring-2 focus-visible:ring-ring">{active ? children : content}</Tabs.Content>;
 }
 
-function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
+function AssetCard({ asset, onOpen, onEdit, onMove, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onMove?: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const cover = asset.kind === "audio" ? "" : assetCoverUrl(asset);
@@ -375,6 +428,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
             <AssetInfo asset={asset} onOpen={onOpen} action={<Menu placement="topRight" items={[
                 { key: "use", label: t(asset.kind === "text" ? "common.copy" : "common.download"), icon: asset.kind === "text" ? <Copy /> : <Download />, onClick: () => asset.kind === "text" ? onCopy(asset) : onDownload(asset) },
                 { key: "edit", label: t("common.edit"), icon: <PencilLine />, onClick: onEdit },
+                ...(onMove ? [{ key: "move", label: t("assetProjects.move"), icon: <FolderInput />, onClick: onMove }] : []),
                 { key: "delete", label: t("common.delete"), icon: <Trash2 />, danger: true, onClick: onDelete },
             ]}><Button variant="ghost" size="icon" className="size-7" title={t("ui.moreActions")} aria-label={t("ui.moreActions")}><Ellipsis /></Button></Menu>} />
         </article>

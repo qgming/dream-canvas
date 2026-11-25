@@ -5,8 +5,15 @@ export type ServerAsset = {
     id: string; kind: "text" | "image" | "video" | "audio"; title: string; mimeType: string; bytes: number; width: number; height: number;
     saveState: string; syncState: string; deleteState: string; retainCloud?: boolean; cleanupTaskId?: string; error?: string; storageId?: string; metadata: Record<string, unknown>; durationMs: number; probeError?: string; previewError?: string;
     storageName?: string; migration?: AssetMigration;
-    workbenchRecordId?: string; createdAt: string; updatedAt: string;
+    assetProjectId: string; workbenchRecordId?: string; createdAt: string; updatedAt: string;
 };
+export type AssetProject = { id: string; title: string; version: number; createdAt: string; updatedAt: string; isDefault: boolean };
+export const DEFAULT_ASSET_PROJECT_ID = "default";
+export const listAssetProjects = () => apiRequest<AssetProject[]>("/asset-projects");
+export const createAssetProject = (title: string) => apiRequest<AssetProject>("/asset-projects", jsonRequest("POST", { title }));
+export const renameAssetProject = (id: string, title: string, version: number) => apiRequest<AssetProject>(`/asset-projects/${encodeURIComponent(id)}`, jsonRequest("PATCH", { title, version }));
+export const deleteAssetProject = (id: string, version: number) => apiRequest<void>(`/asset-projects/${encodeURIComponent(id)}`, jsonRequest("DELETE", { version }));
+export const moveAsset = (id: string, assetProjectId: string, expectedAssetProjectId: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/project`, jsonRequest("PUT", { assetProjectId, expectedAssetProjectId }));
 export type AssetMigration = { storageId: string; storageName: string; state: string; error?: string };
 export type AssetStorageOption = { id: string; name: string; default: boolean };
 export const listAssetStorages = () => apiRequest<AssetStorageOption[]>("/asset-storages");
@@ -19,9 +26,12 @@ export const retryAssetCleanup = (id: string, options: { retainCloud?: boolean; 
 export const retryAssetSync = (id: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}/sync`, { method: "POST" });
 export const getAsset = (id: string) => apiRequest<ServerAsset>(`/assets/${encodeURIComponent(id)}`);
 export const deleteAsset = (id: string) => apiRequest<{ assetId: string; deleteState: string }>(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
-export const uploadAsset = (blob: Blob, title = i18n.t("errors.untitledAsset"), signal?: AbortSignal, workbenchRecordId?: string) => apiRequest<ServerAsset>("/assets", { method: "POST", body: blob, signal, headers: { "Content-Type": blob.type || "application/octet-stream", "X-File-Name": encodeURIComponent(title), ...(workbenchRecordId ? { "X-Workbench-Record": workbenchRecordId } : {}) } });
-export const updateAsset = (id: string, title: string, metadata: Record<string, unknown>) => apiRequest<void>(`/assets/${encodeURIComponent(id)}`, jsonRequest("PATCH", { title, metadata }));
-export const createTextAsset = (title: string, metadata: Record<string, unknown>) => apiRequest<ServerAsset>("/assets/text", jsonRequest("POST", { title, metadata }));
+export const uploadAsset = (blob: Blob, title = i18n.t("errors.untitledAsset"), options?: { signal?: AbortSignal; workbenchRecordId?: string; assetProjectId?: string }) => apiRequest<ServerAsset>("/assets", {
+    method: "POST", body: blob, signal: options?.signal,
+    headers: { "Content-Type": blob.type || "application/octet-stream", "X-File-Name": encodeURIComponent(title), ...(options?.workbenchRecordId ? { "X-Workbench-Record": options.workbenchRecordId } : {}), ...(options?.assetProjectId ? { "X-Asset-Project": options.assetProjectId } : {}) },
+});
+export const updateAsset = (id: string, title: string, metadata: Record<string, unknown>, expectedAssetProjectId?: string) => apiRequest<void>(`/assets/${encodeURIComponent(id)}`, jsonRequest("PATCH", { title, metadata, expectedAssetProjectId }));
+export const createTextAsset = (title: string, metadata: Record<string, unknown>, assetProjectId?: string) => apiRequest<ServerAsset>("/assets/text", jsonRequest("POST", { title, metadata, assetProjectId }));
 export type AssetVoice = { assetId: string; channelId: string; voiceId: string; version: number };
 export const listAssetVoices = (id: string) => apiRequest<AssetVoice[]>(`/assets/${encodeURIComponent(id)}/voices`);
 export const saveAssetVoice = (id: string, channelId: string, voiceId: string, version: number) => apiRequest<AssetVoice>(`/assets/${encodeURIComponent(id)}/voices/${encodeURIComponent(channelId)}`, jsonRequest("PUT", { voiceId, version }));

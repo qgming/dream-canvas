@@ -8,9 +8,15 @@ import (
 	"gorm.io/gorm"
 )
 
+type siteAvailability struct {
+	Open bool `json:"open"`
+	ImageWorkbenchOpen bool `json:"imageWorkbenchOpen"`
+	VideoWorkbenchOpen bool `json:"videoWorkbenchOpen"`
+}
+
 type siteSettings struct {
 	Version uint64 `json:"version"`
-	Open bool `json:"open"`
+	siteAvailability
 	AssistantSlots int `json:"assistantSlots"`
 	GenerationSlots int `json:"generationSlots"`
 	UserSlots int `json:"userSlots"`
@@ -21,6 +27,8 @@ type siteSettings struct {
 type siteSettingsInput struct {
 	Version uint64 `json:"version"`
 	Open *bool `json:"open"`
+	ImageWorkbenchOpen *bool `json:"imageWorkbenchOpen"`
+	VideoWorkbenchOpen *bool `json:"videoWorkbenchOpen"`
 	AssistantSlots int `json:"assistantSlots"`
 	GenerationSlots int `json:"generationSlots"`
 	UserSlots int `json:"userSlots"`
@@ -43,11 +51,30 @@ func validateScriptRuntime(settings scriptRuntimeSettings) error {
 	return nil
 }
 
-func (a *App) siteOpen() (bool, error) {
+func (record RuntimeSettings) siteAvailability() siteAvailability {
+	return siteAvailability{Open: !record.SiteClosed, ImageWorkbenchOpen: !record.ImageWorkbenchClosed, VideoWorkbenchOpen: !record.VideoWorkbenchClosed}
+}
+
+func (a *App) getSiteAvailability() (siteAvailability, error) {
 	var record RuntimeSettings
-	err := a.db.Select("id", "site_closed").First(&record, 1).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) { return true, nil }
-	return !record.SiteClosed, err
+	err := a.db.Select("id", "site_closed", "image_workbench_closed", "video_workbench_closed").First(&record, 1).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) { err = nil }
+	return record.siteAvailability(), err
+}
+
+func (a *App) siteOpen() (bool, error) {
+	availability, err := a.getSiteAvailability()
+	return availability.Open, err
+}
+
+func (a *App) authStatus(c *gin.Context) {
+	var count int64
+	if err := a.db.Model(&User{}).Count(&count).Error; err != nil { respondError(c, err); return }
+	availability, err := a.getSiteAvailability(); if err != nil { respondError(c, err); return }
+	c.JSON(200, struct {
+		Initialized bool `json:"initialized"`
+		siteAvailability
+	}{count > 0, availability})
 }
 
 func (a *App) siteAccess(user User) error {
@@ -66,7 +93,7 @@ func (a *App) GetSiteSettings() (siteSettings, error) {
 }
 
 func siteSettingsView(record RuntimeSettings, policy executionPolicy) siteSettings {
-	return siteSettings{record.Version, !record.SiteClosed, policy.AssistantSlots, policy.GenerationSlots, policy.UserSlots, policy.ScriptRuntime, scriptRuntimeRanges}
+	return siteSettings{Version: record.Version, siteAvailability: record.siteAvailability(), AssistantSlots: policy.AssistantSlots, GenerationSlots: policy.GenerationSlots, UserSlots: policy.UserSlots, ScriptRuntime: policy.ScriptRuntime, ScriptRuntimeBounds: scriptRuntimeRanges}
 }
 
 func (a *App) SaveSiteSettings(userID string, input siteSettingsInput) (siteSettings, error) {
@@ -99,11 +126,13 @@ func (a *App) updateSiteSettings(userID string, version uint64, runtime *scriptR
 			policy.AssistantSlots, policy.GenerationSlots, policy.UserSlots = site.AssistantSlots, site.GenerationSlots, site.UserSlots
 			closing = !*site.Open && !record.SiteClosed
 			record.SiteClosed = !*site.Open
+			if site.ImageWorkbenchOpen != nil { record.ImageWorkbenchClosed = !*site.ImageWorkbenchOpen }
+			if site.VideoWorkbenchOpen != nil { record.VideoWorkbenchClosed = !*site.VideoWorkbenchOpen }
 		}
 		if runtime != nil { for field, value := range *runtime { policy.ScriptRuntime[field] = value } }
 		record.ID, record.Version, record.Policy, record.UpdatedBy = 1, version+1, encode(policy), userID
 		if creating { err = tx.Create(&record).Error } else {
-			result := tx.Model(&RuntimeSettings{}).Where("id = ? AND version = ?", 1, version).Updates(map[string]any{"version": record.Version, "site_closed": record.SiteClosed, "policy": record.Policy, "updated_by": userID})
+			result := tx.Model(&RuntimeSettings{}).Where("id = ? AND version = ?", 1, version).Updates(map[string]any{"version": record.Version, "site_closed": record.SiteClosed, "image_workbench_closed": record.ImageWorkbenchClosed, "video_workbench_closed": record.VideoWorkbenchClosed, "policy": record.Policy, "updated_by": userID})
 			if result.Error != nil { return result.Error }
 			if result.RowsAffected != 1 { return problem(409, "version_conflict", "站点设置已更新，请重新读取") }
 		}

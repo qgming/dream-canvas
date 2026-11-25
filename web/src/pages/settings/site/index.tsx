@@ -9,10 +9,12 @@ import { Field } from "@/components/ui/form";
 import { NumberInput } from "@/components/ui/input";
 import { useEditGuard } from "@/hooks/use-edit-guard";
 import { useFeedback } from "@/hooks/use-feedback";
+import { authStatusKey, type AuthStatus, type SiteAvailability } from "@/services/api/auth";
 import { ApiError, captureSession } from "@/services/api/client";
 import { getSiteSettings, saveSiteSettings, scriptRuntimeFields, type SiteSettings } from "@/services/api/runtime";
 
 const slots = ["assistantSlots", "generationSlots", "userSlots"] as const;
+const availabilityFields = [["open", "site.open"], ["imageWorkbenchOpen", "navigation.image"], ["videoWorkbenchOpen", "navigation.video"]] as const;
 type RuntimeField = typeof scriptRuntimeFields[number];
 type Draft = Omit<SiteSettings, typeof slots[number] | "scriptRuntime"> & Record<typeof slots[number], number | null> & { scriptRuntime: Record<RuntimeField, number | null> };
 
@@ -28,7 +30,7 @@ export default function SitePage() {
     const changedDuringSave = useRef(false);
     const settings = draft ?? query.data;
     const conflict = error instanceof ApiError && error.code === "version_conflict";
-    const available = Boolean(query.data && scriptRuntimeFields.every((key) => Number.isSafeInteger(query.data?.scriptRuntime?.[key]) && query.data?.scriptRuntimeBounds?.[key]));
+    const available = Boolean(query.data && availabilityFields.every(([key]) => typeof query.data?.[key] === "boolean") && scriptRuntimeFields.every((key) => Number.isSafeInteger(query.data?.scriptRuntime?.[key]) && query.data?.scriptRuntimeBounds?.[key]));
     const valid = (value: Draft): value is SiteSettings => slots.every((key) => Number.isSafeInteger(value[key]) && Number(value[key]) > 0) && scriptRuntimeFields.every((key) => {
         const { min, max } = value.scriptRuntimeBounds[key];
         const number = value.scriptRuntime[key];
@@ -57,8 +59,10 @@ export default function SitePage() {
         try {
             await queryClient.cancelQueries({ queryKey: ["site-settings"] }); assertSession();
             const saved = await saveSiteSettings(next, confirmed); assertSession();
+            await queryClient.cancelQueries({ queryKey: authStatusKey }); assertSession();
             queryClient.setQueryData(["site-settings"], saved);
-            queryClient.setQueryData(["auth-status"], (current: { initialized: boolean } | undefined) => current ? { ...current, open: saved.open } : undefined);
+            queryClient.setQueryData<AuthStatus>(authStatusKey, (current) => current ? { ...current, open: saved.open, imageWorkbenchOpen: saved.imageWorkbenchOpen, videoWorkbenchOpen: saved.videoWorkbenchOpen } : undefined);
+            void queryClient.invalidateQueries({ queryKey: authStatusKey });
             setDraft(null);
         } catch (error) { setError(error); }
         finally {
@@ -77,10 +81,10 @@ export default function SitePage() {
             if (changedDuringSave.current) { changedDuringSave.current = false; void queryClient.invalidateQueries({ queryKey: ["site-settings"] }); }
         }
     };
-    const toggle = (open: boolean) => {
+    const toggle = (key: keyof SiteAvailability, open: boolean) => {
         if (!settings) return;
-        const next = { ...settings, open };
-        if (open) void save(next);
+        const next = { ...settings, [key]: open };
+        if (key !== "open" || open) void save(next);
         else confirm({ title: t("site.closeTitle"), content: t("site.closeDescription"), confirmText: t("site.close"), destructive: true, onConfirm: () => save(next, true) });
     };
 
@@ -91,7 +95,7 @@ export default function SitePage() {
         {error ? <Notice type={conflict ? "warning" : "error"} title={conflict ? t("site.conflict") : errorText(error)} action={<Button disabled={busy} onClick={() => { if (conflict || !draft) void reload(); else void save(draft); }}>{t(conflict ? "workspace.reload" : "workspace.retry")}</Button>} /> : null}
         {settings && !available ? <Notice type="warning" title={t("site.updateBackend")} action={<Button loading={busy} onClick={() => void reload()}>{t("workspace.reload")}</Button>} /> : null}
         {settings && available ? <div className="space-y-8" aria-busy={busy}>
-            <Field layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t("site.open")}><Switch checked={settings.open} disabled={busy || Boolean(draft) || query.isError || conflict} onChange={toggle} /></Field>
+            <div>{availabilityFields.map(([key, label]) => <Field key={key} layout="horizontal" className="grid-cols-[minmax(0,1fr)_auto] items-center" label={t(label)}><Switch checked={settings[key]} disabled={busy || Boolean(draft) || query.isError || conflict} onChange={(open) => toggle(key, open)} /></Field>)}</div>
             <section>
                 <h2 className="mb-2 text-base font-semibold">{t("site.concurrency")}</h2>
                 {slots.map((key) => <Field key={key} layout="horizontal" label={t(`site.${key}`)}>

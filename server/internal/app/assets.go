@@ -21,13 +21,29 @@ import (
 )
 
 func (a *App) listAssets(c *gin.Context) {
+	userID := currentUser(c).ID
+	if c.Query("deleting") != "true" {
+		assets, err := a.ListLibraryAssets(userID, c.Query("assetProjectId"))
+		if err != nil { respondError(c, err); return }
+		c.JSON(200, assets)
+		return
+	}
 	assets := []Asset{}
-	query := a.db.Where("user_id = ?", currentUser(c).ID)
-	if c.Query("deleting") == "true" { query = query.Where("delete_state = ?", "pending") } else { query = query.Where("delete_state = ? AND workbench_record_id = ?", "", "") }
-	if err := query.Order("created_at DESC").Find(&assets).Error; err != nil { respondError(c, err); return }
+	if err := a.db.Where("user_id = ? AND delete_state = ?", userID, "pending").Order("created_at DESC").Find(&assets).Error; err != nil { respondError(c, err); return }
 	for index := range assets { if err := assetCleanupBlocker(a.db, &assets[index]); err != nil { respondError(c, err); return } }
 	if err := a.fillAssetStorage(assets); err != nil { respondError(c, err); return }
 	c.JSON(200, assets)
+}
+
+func (a *App) ListLibraryAssets(userID, assetProjectID string) ([]Asset, error) {
+	assets := []Asset{}
+	query := a.db.Where("user_id = ? AND delete_state = ? AND workbench_record_id = ?", userID, "", "")
+	if assetProjectID != "" {
+		if err := ensureAssetProject(a.db, userID, assetProjectID); err != nil { return nil, err }
+		query = query.Where("asset_project_id = ?", assetProjectID)
+	}
+	if err := query.Order("created_at DESC").Find(&assets).Error; err != nil { return nil, err }
+	return assets, a.fillAssetStorage(assets)
 }
 
 func (a *App) getAsset(c *gin.Context) {
@@ -59,11 +75,14 @@ func (a *App) uploadAsset(c *gin.Context) {
 	if err != nil || (!strings.HasPrefix(actual, kind+"/") && !audioContainer) || detected.Extension() == "" { respondError(c, problem(400, "invalid_media", "文件内容与媒体类型不匹配或格式无法识别，请重新选择原件")); return }
 	id := identifier()
 	title, _ := url.QueryUnescape(c.GetHeader("X-File-Name"))
-	asset := Asset{ID: id, UserID: currentUser(c).ID, Kind: kind, Title: title, MimeType: actual, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id+detected.Extension(), SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
+	assetProjectID := c.GetHeader("X-Asset-Project")
+	if assetProjectID == "" { assetProjectID = defaultAssetProjectID }
+	asset := Asset{ID: id, UserID: currentUser(c).ID, AssetProjectID: assetProjectID, Kind: kind, Title: title, MimeType: actual, WorkbenchRecordID: strings.TrimSpace(c.GetHeader("X-Workbench-Record")), Path: id+detected.Extension(), SaveState: "saving", SyncState: "local", Metadata: JSON(`{}`)}
 	name, err := a.assetOriginalPath(asset)
 	if err != nil { respondError(c, err); return }
 	if asset.Title == "" { asset.Title = "未命名素材" }
 	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := ensureAssetProject(tx, asset.UserID, asset.AssetProjectID); err != nil { return err }
 		if asset.WorkbenchRecordID != "" { var removed int64; if err := tx.Model(&WorkbenchRecord{}).Where("user_id = ? AND id = ? AND removed = ?", asset.UserID, asset.WorkbenchRecordID, true).Count(&removed).Error; err != nil { return err }; if removed > 0 { return problem(409, "record_removed", "生成记录已删除，请新建后上传") } }
 		return tx.Create(&asset).Error
 	}); err != nil { respondError(c, err); return }
@@ -135,18 +154,31 @@ func (a *App) assetFile(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, asset.Title, stat.ModTime(), file)
 }
 
+type assetSaveInput struct {
+	Title string `json:"title"`
+	Metadata JSON `json:"metadata"`
+}
+
 func (a *App) updateAsset(c *gin.Context) {
-	var input struct { Title string `json:"title"`; Metadata JSON `json:"metadata"` }
+	var input struct {
+		assetSaveInput
+		ExpectedAssetProjectID *string `json:"expectedAssetProjectId"`
+	}
 	if !bind(c, &input) { return }
-	if err := a.UpdateAsset(currentUser(c).ID, c.Param("id"), input.Title, input.Metadata); err != nil { respondError(c, err); return }; c.Status(204)
+	if err := a.updateAssetMetadata(currentUser(c).ID, c.Param("id"), input.Title, input.Metadata, input.ExpectedAssetProjectID); err != nil { respondError(c, err); return }; c.Status(204)
 }
 
 func (a *App) UpdateAsset(userID, id, title string, metadata JSON) error {
+	return a.updateAssetMetadata(userID, id, title, metadata, nil)
+}
+
+func (a *App) updateAssetMetadata(userID, id, title string, metadata JSON, expectedAssetProjectID *string) error {
 	if err := validTitle(title); err != nil { return err }
 	if len(metadata) == 0 { metadata = JSON(`{}`) }
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var asset Asset
 		if err := tx.First(&asset, "id = ? AND user_id = ? AND delete_state = ?", id, userID, "").Error; err != nil { return err }
+		if expectedAssetProjectID != nil && asset.AssetProjectID != *expectedAssetProjectID { return problem(409, "asset_project_changed", "资产已移动，请重新读取后操作") }
 		metadata, err := validateAssetMetadata(tx, userID, metadata); if err != nil { return err }
 		return tx.Model(&asset).Updates(map[string]any{"title": strings.TrimSpace(title), "metadata": metadata, "workbench_record_id": ""}).Error
 	})
@@ -154,16 +186,22 @@ func (a *App) UpdateAsset(userID, id, title string, metadata JSON) error {
 }
 
 func (a *App) createTextAsset(c *gin.Context) {
-	var input struct { Title string `json:"title"`; Metadata JSON `json:"metadata"` }
+	var input struct {
+		assetSaveInput
+		AssetProjectID *string `json:"assetProjectId"`
+	}
 	if !bind(c, &input) { return }
-	asset, err := a.CreateTextAsset(currentUser(c).ID, input.Title, input.Metadata)
+	assetProjectID := defaultAssetProjectID
+	if input.AssetProjectID != nil { assetProjectID = *input.AssetProjectID }
+	asset, err := a.CreateTextAsset(currentUser(c).ID, input.Title, input.Metadata, assetProjectID)
 	if err != nil { respondError(c, err); return }; c.JSON(201, asset)
 }
 
-func (a *App) CreateTextAsset(userID, title string, metadata JSON) (Asset, error) {
+func (a *App) CreateTextAsset(userID, title string, metadata JSON, assetProjectID string) (Asset, error) {
 	if err := validTitle(title); err != nil { return Asset{}, err }
-	asset := Asset{ID: identifier(), UserID: userID, Kind: "text", Title: strings.TrimSpace(title), Metadata: metadata, SaveState: "saved", SyncState: "local"}
+	asset := Asset{ID: identifier(), UserID: userID, AssetProjectID: assetProjectID, Kind: "text", Title: strings.TrimSpace(title), Metadata: metadata, SaveState: "saved", SyncState: "local"}
 	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := ensureAssetProject(tx, userID, assetProjectID); err != nil { return err }
 		metadata, err := validateAssetMetadata(tx, asset.UserID, asset.Metadata); if err != nil { return err }; asset.Metadata = metadata
 		return tx.Create(&asset).Error
 	})

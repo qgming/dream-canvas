@@ -56,7 +56,7 @@ func Open(root string) (*App, error) {
 	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
-	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &Asset{}, &AssetReference{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &AssetProject{}, &Asset{}, &AssetReference{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -127,12 +127,7 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	})
 	api := r.Group("/api")
 	api.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
-	api.GET("/auth/status", func(c *gin.Context) {
-		var count int64
-		if err := a.db.Model(&User{}).Count(&count).Error; err != nil { respondError(c, err); return }
-		open, err := a.siteOpen(); if err != nil { respondError(c, err); return }
-		c.JSON(200, gin.H{"initialized": count > 0, "open": open})
-	})
+	api.GET("/auth/status", a.authStatus)
 	api.POST("/auth/login", a.login)
 	remote := a.mcpHandler()
 	r.Any("/mcp", func(c *gin.Context) {
@@ -196,6 +191,10 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	authed.DELETE("/projects/:id", a.deleteProject)
 	authed.GET("/projects/:id/history", a.projectHistory)
 	authed.POST("/projects/:id/revert", a.revertProject)
+	authed.GET("/asset-projects", a.listAssetProjects)
+	authed.POST("/asset-projects", a.createAssetProject)
+	authed.PATCH("/asset-projects/:id", a.renameAssetProject)
+	authed.DELETE("/asset-projects/:id", a.deleteAssetProject)
 	authed.GET("/assets", a.listAssets)
 	authed.GET("/asset-storages", a.assetStorageOptions)
 	authed.POST("/assets", a.uploadAsset)
@@ -207,6 +206,7 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	authed.GET("/assets/:id/file", a.assetFile)
 	authed.GET("/assets/:id/preview", a.assetPreview)
 	authed.PATCH("/assets/:id", a.updateAsset)
+	authed.PUT("/assets/:id/project", a.moveAsset)
 	authed.DELETE("/assets/:id", a.deleteAsset)
 	authed.GET("/assets/:id/voices", a.listAssetVoices)
 	authed.PUT("/assets/:id/voices/:channelId", a.saveAssetVoice)

@@ -10,7 +10,7 @@ var assistantToolGroupCatalog = []struct {
 }{
 	{"canvas", "查找、新建、编辑画布项目及节点、连线和版本历史。", []string{"projects_list", "project_get", "project_create", "project_save", "project_delete", "project_history", "project_revert", "canvas_nodes_list", "canvas_apply_ops"}},
 	{"live_canvas", "读取已绑定在线画布的选区或调整其页面、视口和选中节点。", []string{"clients_list", "client_get", "client_select", "client_viewport", "client_navigate", "client_command_get"}},
-	{"assets", "查找、读取、保存和删除资产库里的私人素材，管理音色关联。", []string{"assets_list", "asset_get", "asset_content", "asset_delete", "asset_update", "asset_text_create", "asset_voices", "asset_voice_save"}},
+	{"assets", "按资产项目查找、读取、保存、移动和删除私人素材，管理资产项目和音色关联。", []string{"asset_projects_list", "asset_project_create", "asset_project_rename", "asset_project_delete", "assets_list", "asset_get", "asset_content", "asset_move", "asset_delete", "asset_update", "asset_text_create", "asset_voices", "asset_voice_save"}},
 	{"asset_storage", "读取素材的可用存储，重试同步或清理，迁移云端副本。", []string{"asset_storages", "asset_sync", "asset_migrate", "asset_cleanup"}},
 	{"library", "在灵感库查找、读取和编辑提示词及 Skill。", []string{"prompts_search", "prompt_get", "prompt_save", "prompt_delete", "skills_list", "skill_get", "skill_save", "skill_delete"}},
 	{"generation", "查找可用生成模型与参数，提交、等待、查询或停止生成任务。", []string{"catalog_list", "generation_create", "tasks_list", "task_get", "tasks_wait", "task_cancel", "task_resume", "task_resolve", "task_delete"}},

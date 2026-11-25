@@ -42,12 +42,17 @@ func businessTools() []toolDefinition {
 		{"project_revert", "按当前版本撤销或重做历史栈顶部的一次修改，作为新版本自动保存；不删除资产或取消已提交生成", "edit", toolSchema(map[string]any{"projectId": stringField("项目 ID"), "version": numberField("当前项目版本"), "targetVersion": numberField("project_history 的 past 或 future 栈顶版本")}, "projectId", "version", "targetVersion")},
 		{"project_create", "创建项目；仅未限制项目的令牌可用", "edit", toolSchema(map[string]any{"title": stringField("项目名称"), "document": map[string]any{"type": "object"}}, "title", "document")},
 		{"project_save", "提交相对读取版本的节点、连线和设置修改；服务端合并无关并发修改，同字段按提交顺序保存，目标已删除或结构冲突时保留服务端内容并报错", "edit", toolSchema(projectFields, "projectId", "title", "version", "document")},
-		{"assets_list", "读取私人资产库元数据；工作台文件须手动保存才进入资产库，项目范围令牌仅返回范围内项目引用的素材", "read", toolSchema(map[string]any{})},
+		{"asset_projects_list", "列出本账号的资产项目、版本与固定默认项目，需要不限画布项目的授权", "read", toolSchema(map[string]any{})},
+		{"asset_project_create", "创建本账号的资产项目，需要不限画布项目的授权", "edit", toolSchema(map[string]any{"title": stringField("资产项目名称")}, "title")},
+		{"asset_project_rename", "按读取版本重命名资产项目，默认项目不可重命名，需要不限画布项目的授权", "edit", toolSchema(map[string]any{"assetProjectId": stringField("资产项目 ID"), "title": stringField("新名称"), "version": numberField("当前读取的资产项目版本")}, "assetProjectId", "title", "version")},
+		{"asset_project_delete", "按读取版本删除资产项目，其中的资产移回默认项目，默认项目不可删除，需要不限画布项目的删除授权", "delete", toolSchema(map[string]any{"assetProjectId": stringField("资产项目 ID"), "version": numberField("当前读取的资产项目版本")}, "assetProjectId", "version")},
+		{"assets_list", "读取私人资产库元数据；工作台文件须手动保存才进入资产库，画布范围令牌仅返回范围内画布引用的素材", "read", toolSchema(map[string]any{"assetProjectId": stringField("可选的资产项目 ID，default 表示默认项目，筛选需要不限画布项目的授权")})},
 		{"asset_get", "读取私人资产元数据及保存、同步、删除状态", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
+		{"asset_move", "将已入库资产移到另一资产项目，使用读取时的所属项目校验冲突，需要不限画布项目的授权", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "assetProjectId": stringField("目标资产项目 ID，default 表示默认项目"), "expectedAssetProjectId": stringField("读取到的当前所属资产项目 ID")}, "assetId", "assetProjectId", "expectedAssetProjectId")},
 		{"asset_delete", "直接全局删除当前账号资产，需要不限项目的删除授权；原件与本地、云端副本排队清理，在途任务结束后执行，deleteState=pending 不代表已清理完成", "delete", toolSchema(map[string]any{"assetId": stringField("明确目标资产 ID")}, "assetId")},
 		{"asset_content", "读取私人媒体原件；返回 base64，遵循管理员 JSON 大小边界，大文件应使用带 Bearer 的 HTTP 文件接口", "read", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_update", "修改资产名称与说明，并将工作台文件保留到资产库，不改变原件", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "title": stringField("名称"), "metadata": map[string]any{"type": "object"}}, "assetId", "title", "metadata")},
-		{"asset_text_create", "在用户资产库保存文本资产，项目范围令牌不允许创建全局资产", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content 文本正文、note 备注、source 来源、coverUrl 封面地址"}}, "title", "metadata")},
+		{"asset_text_create", "在用户资产库保存文本资产，需要不限画布项目的授权", "edit", toolSchema(map[string]any{"title": stringField("名称"), "metadata": map[string]any{"type": "object", "description": "content 文本正文、note 备注、source 来源、coverUrl 封面地址"}, "assetProjectId": stringField("可选的资产项目 ID，省略时保存到默认项目")}, "title", "metadata")},
 		{"asset_sync", "重新排队同步已有资产或重试其当前迁移；不改变既定目标，重试迁移需要不限项目的授权", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID")}, "assetId")},
 		{"asset_storages", "读取可选对象存储的 ID、名称及默认标记，不提供端点或凭据；需要不限项目的授权", "read", toolSchema(map[string]any{})},
 		{"asset_migrate", "迁移本人媒体到其他已配置存储，先复制再等待任务释放并切换、清理旧副本；需要不限项目的编辑授权，返回排队不代表完成", "edit", toolSchema(map[string]any{"assetId": stringField("资产 ID"), "storageId": stringField("asset_storages 返回的目标存储 ID"), "expectedUpdatedAt": stringField("读取资产的 updatedAt")}, "assetId", "storageId", "expectedUpdatedAt")},
@@ -78,14 +83,22 @@ func businessTools() []toolDefinition {
 	}, append(canvasTools(), managementTools()...)...)
 }
 
+func isAssetProjectTool(name string) bool {
+	switch name {
+	case "asset_projects_list", "asset_project_create", "asset_project_rename", "asset_project_delete", "asset_move":
+		return true
+	}
+	return false
+}
+
 func (a *App) mcpHandler() http.Handler {
 	return mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		principal, err := a.tokenPrincipal(raw)
 		if err != nil { return nil }
-		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.3"}, nil)
+		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.4"}, nil)
 		for _, tool := range businessTools() {
-			if !principal.allows(tool.Scope, "") { continue }
+			if !principal.allows(tool.Scope, "") || len(principal.Projects) > 0 && isAssetProjectTool(tool.Name) { continue }
 			mcp.AddTool(server, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}, func(ctx context.Context, request *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {
 				current, err := a.tokenPrincipal(raw)
 				if err != nil { return toolResult(nil, err), nil, nil }
@@ -137,6 +150,10 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	scope := ""
 	for _, tool := range businessTools() { if tool.Name == name { scope = tool.Scope; break } }
 	if scope == "" || !p.allows(scope, projectID) { return nil, problem(403, "forbidden", "令牌不允许此操作或项目") }
+	_, hasAssetProjectID := input["assetProjectId"]
+	if len(p.Projects) > 0 && (isAssetProjectTool(name) || name == "assets_list" && hasAssetProjectID) {
+		return nil, problem(403, "asset_scope", "按资产项目查找或整理资产需要不限画布项目的授权")
+	}
 	if p.FixedProject {
 		if !assistantToolAllowed(name) { return nil, problem(403, "direct_user_action", "此操作需用户主动完成，助手不能代为确认、处理凭据或启动另一个助手执行") }
 		if includes([]string{"admin_channel_save", "admin_storage_save"}, name) { for _, key := range []string{"credential", "accessKeyId", "accessKeySecret"} { if _, exists := object(input["config"])[key]; exists { return nil, problem(403, "credential_user_input", "凭据只能由管理员在配置页主动输入，助手可修改其他配置字段") } } }
@@ -174,10 +191,31 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if err != nil { return nil, err }
 		for _, id := range refs { if err := a.checkTokenAsset(p, id); err != nil { return nil, err } }
 		return a.SaveProject(p.User.ID, projectID, projectInput{Title: text("title"), Version: version, Document: document})
+	case "asset_projects_list":
+		return a.ListAssetProjects(p.User.ID)
+	case "asset_project_create":
+		return a.CreateAssetProject(p.User.ID, text("title"))
+	case "asset_project_rename":
+		return a.RenameAssetProject(p.User.ID, text("assetProjectId"), text("title"), version)
+	case "asset_project_delete":
+		assetProjectID := text("assetProjectId")
+		err := a.DeleteAssetProject(p.User.ID, assetProjectID, version)
+		return map[string]any{"assetProjectId": assetProjectID, "deleted": err == nil}, err
+	case "asset_move":
+		assetID, assetProjectID := text("assetId"), text("assetProjectId")
+		err := a.MoveAsset(p.User.ID, assetID, assetProjectID, text("expectedAssetProjectId"))
+		return map[string]any{"assetId": assetID, "assetProjectId": assetProjectID, "moved": err == nil}, err
 	case "assets_list":
+		if len(p.Projects) == 0 {
+			assetProjectID := text("assetProjectId")
+			if hasAssetProjectID && strings.TrimSpace(assetProjectID) == "" {
+				return nil, problem(400, "asset_project_required", "请选择资产项目")
+			}
+			return a.ListLibraryAssets(p.User.ID, assetProjectID)
+		}
 		assets := []Asset{}
-		query := a.db.Where("user_id = ? AND delete_state = ?", p.User.ID, "")
-		if len(p.Projects) > 0 { query = query.Where("id IN (?)", a.db.Model(&AssetReference{}).Select("asset_id").Where("project_id IN ?", p.Projects)) } else { query = query.Where("workbench_record_id = ?", "") }
+		references := a.db.Model(&AssetReference{}).Select("asset_id").Where("project_id IN ?", p.Projects)
+		query := a.db.Omit("asset_project_id").Where("user_id = ? AND delete_state = ? AND id IN (?)", p.User.ID, "", references)
 		err := query.Order("created_at DESC").Find(&assets).Error
 		if err == nil { err = a.fillAssetStorage(assets) }
 		return assets, err
@@ -185,7 +223,11 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if err := a.checkTokenAsset(p, text("assetId")); err != nil { return nil, err }
 		var asset Asset
 		err := a.db.First(&asset, "id = ? AND user_id = ?", text("assetId"), p.User.ID).Error
-		if err == nil && len(p.Projects) == 0 { err = assetCleanupBlocker(a.db, &asset) }
+		if len(p.Projects) > 0 {
+			asset.AssetProjectID = ""
+		} else if err == nil {
+			err = assetCleanupBlocker(a.db, &asset)
+		}
 		if err == nil { rows := []Asset{asset}; err = a.fillAssetStorage(rows); asset = rows[0] }
 		return asset, err
 	case "asset_storages", "asset_migrate":
@@ -217,7 +259,11 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		}
 	case "asset_text_create":
 		if len(p.Projects) > 0 { return nil, problem(403, "asset_scope", "创建全局资产需要不限项目的授权") }
-		return a.CreateTextAsset(p.User.ID, text("title"), encode(input["metadata"]))
+		assetProjectID := defaultAssetProjectID
+		if hasAssetProjectID {
+			assetProjectID = text("assetProjectId")
+		}
+		return a.CreateTextAsset(p.User.ID, text("title"), encode(input["metadata"]), assetProjectID)
 	case "prompts_search":
 		if scope := text("scope"); scope != "" && !includes([]string{"all", "builtin", "user"}, scope) { return nil, problem(400, "invalid_prompt_scope", "请选择内置提示词或我的提示词") }
 		if promptType := text("type"); promptType != "" && !includes([]string{"all", "text", "image", "video"}, promptType) { return nil, problem(400, "invalid_prompt_type", "请选择文本、图片或视频提示词") }

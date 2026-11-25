@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import appI18n from "@/i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Notice as Alert } from "@/components/ui/display";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { useAgentStore } from "@/stores/use-agent-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { cleanupUnusedImages } from "@/services/image-storage";
 import { useConfigStore } from "@/stores/use-config-store";
+import { authStatusKey, getAuthStatus } from "@/services/api/auth";
 import { modelCatalog } from "@/services/api/channels";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useWorkbenchDraftStore } from "@/stores/use-workbench-draft-store";
@@ -85,7 +86,7 @@ export default function RequireAuth() {
             if (refreshing) { pending = true; return; }
             refreshing = true;
             pending = false;
-            void Promise.allSettled([useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), useAgentSkillStore.getState().loadSkills(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugins"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin"] }), queryClient.invalidateQueries({ queryKey: ["prompts"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
+            void Promise.allSettled([queryClient.invalidateQueries({ queryKey: authStatusKey }), useCanvasStore.getState().refreshProjects(), useAssetStore.getState().loadAssets(), useAgentSkillStore.getState().loadSkills(), queryClient.invalidateQueries({ queryKey: ["model-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin-catalog"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugins"] }), queryClient.invalidateQueries({ queryKey: ["canvas-plugin"] }), queryClient.invalidateQueries({ queryKey: ["prompts"] }), queryClient.invalidateQueries({ queryKey: ["asset-projects"] })]).finally(() => { refreshing = false; if (pending) refresh(); });
             window.dispatchEvent(new Event("server-changed"));
         };
         const connect = () => {
@@ -118,4 +119,13 @@ export function RequireAdmin() {
     useTranslation();
     const user = useAuthStore((state) => state.user);
     return user?.role === "admin" ? <Outlet /> : <Navigate to="/settings" replace />;
+}
+
+export function RequireWorkbench({ kind, children }: { kind: "image" | "video"; children: ReactNode }) {
+    const { t } = useTranslation();
+    const status = useQuery({ queryKey: authStatusKey, queryFn: getAuthStatus, refetchOnMount: "always" });
+    const open = status.data?.[`${kind}WorkbenchOpen`];
+    if (!status.isFetchedAfterMount) return <div className="flex h-full items-center justify-center"><Spin /></div>;
+    if (status.error || typeof open !== "boolean") return <div className="p-6"><Alert type="error" title={t("site.workbenchStatusUnavailable")} description={status.error?.message} action={<Button loading={status.isFetching} onClick={() => void status.refetch()}>{t("workspace.retry")}</Button>} /></div>;
+    return open ? children : <Navigate to="/canvas" replace />;
 }

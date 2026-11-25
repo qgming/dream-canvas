@@ -22,6 +22,7 @@ type assistantSnapshot struct {
 	WaitingTaskIDs []string `json:"waitingTaskIds"`
 	WaitingQuestionID string `json:"waitingQuestionId,omitempty"`
 	ValidateAfterCompaction bool `json:"validateAfterCompaction,omitempty"`
+	AutoTitle bool `json:"autoTitle,omitempty"`
 	Purpose string `json:"purpose,omitempty"`
 	Draft JSON `json:"draft,omitempty"`
 	ClientID string `json:"clientId,omitempty"`
@@ -68,7 +69,7 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 		nodes := []any{}; for _, node := range array(document["nodes"]) { if includes(references, text(object(node)["id"])) { nodes = append(nodes, node) } }
 		system += "\n用户引用节点："+string(encode(nodes))
 	}
-	snapshot := assistantSnapshot{ClientID: clientID, Execution: executionSnapshot{ChannelID: channel.ID, ChannelVersion: channel.Version, BaseURL: channel.BaseURL, Credential: channel.Secret, Model: model, Policy: policy}}
+	snapshot := assistantSnapshot{AutoTitle: thread.Title == "", ClientID: clientID, Execution: executionSnapshot{ChannelID: channel.ID, ChannelVersion: channel.Version, BaseURL: channel.BaseURL, Credential: channel.Secret, Model: model, Policy: policy}}
 	snapshot.appendMessage(0, map[string]any{"role": "system", "content": system})
 	if err := hydrateModel(a.db, &model); err != nil { return AssistantTurn{}, err }; snapshot.Execution.Model = model
 	parameters, err := resolveParameters(model.Parameters, overrides); if err != nil { return AssistantTurn{}, err }; snapshot.Parameters = parameters
@@ -128,19 +129,13 @@ func (a *App) enqueueAssistantTurn(user User, thread AssistantThread, prompt, pr
 	if !assistantContextNeedsCompaction(snapshot, tools) {
 		if err := a.validateScriptInput(user.ID, snapshot.Execution, prepared, tools); err != nil { return AssistantTurn{}, err }
 	} else { snapshot.ValidateAfterCompaction = true }
-	updates := map[string]any{"version": thread.Version + 1}
-	if thread.Title == "" && thread.Version == 1 {
-		if redact, redactErr := a.assistantRedactor(snapshot.Execution); redactErr == nil {
-			updates["title"] = assistantTitleSummary(redactAssistantLabel(prompt, func(value string) string { return text(redact(value)) }))
-		}
-	}
 	turn := AssistantTurn{ID: identifier(), UserID: user.ID, ThreadID: thread.ID, ProjectID: projectID, ChannelID: channel.ID, ModelID: model.ID, Status: "queued"}
 	userItem := AssistantItem{ThreadID: thread.ID, TurnID: turn.ID, ID: identifier(), UserID: user.ID, Role: "user", Text: prompt, Detail: encode(map[string]any{"attachments": attachments, "references": references, "skill": skill, "parameters": parameters, "channelId": channel.ID, "modelId": model.ID})}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		var active int64
 		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, assistantActiveStates).Count(&active).Error; err != nil { return err }
 		if active > 0 { return problem(409, "thread_busy", "此对话仍有未结束轮次") }
-		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Updates(updates)
+		result := tx.Model(&AssistantThread{}).Where("id = ? AND user_id = ? AND version = ?", thread.ID, user.ID, thread.Version).Update("version", thread.Version + 1)
 		if result.Error != nil { return result.Error }; if result.RowsAffected != 1 { return problem(409, "version_conflict", "对话已更新，请重新读取后发送") }
 		if err := appendAssistantItem(tx, &userItem); err != nil { return err }
 		snapshot.MessageSequences[len(snapshot.MessageSequences)-1] = userItem.Sequence
@@ -421,7 +416,11 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 		if len(result.ToolCalls) == 0 {
 			err := a.prepareAssistantContext(ctx, turn, &snapshot, tools, callText)
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) { a.stopAssistant(turn); return }
-			a.finishAssistant(turn, "succeeded", result.Error); return
+			a.finishAssistant(turn, "succeeded", result.Error)
+			if snapshot.AutoTitle && runCtx.Err() == nil {
+				if err := a.generateAssistantTitle(runCtx, turn, snapshot, callText); err != nil && runCtx.Err() == nil { a.logFailure(ctx, "assistant.title_failed", err) }
+			}
+			return
 		}
 	}
 }

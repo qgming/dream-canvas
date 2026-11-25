@@ -23,6 +23,15 @@ func compactAssistantLabel(value string, limit int) string {
 	return value
 }
 
+func assistantTextOnlyParameters(snapshot assistantSnapshot, redact func(any) any) (map[string]any, error) {
+	parameters := object(redact(snapshot.Parameters))
+	delete(parameters, "systemPrompt")
+	var controls []parameterControl
+	if err := json.Unmarshal(snapshot.Execution.Model.Parameters, &controls); err != nil { return nil, err }
+	for _, control := range controls { if control.Type == "asset" { delete(parameters, control.Key) } }
+	return parameters, nil
+}
+
 // Redact copies sent to models or shown in the timeline without changing private history.
 func (a *App) assistantRedactor(snapshot executionSnapshot) (func(any) any, error) {
 	channels := []Channel{}; storages := []ObjectStorage{}

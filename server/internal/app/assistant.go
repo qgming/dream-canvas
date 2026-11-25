@@ -25,20 +25,8 @@ func (a *App) createAssistantThread(c *gin.Context) {
 }
 
 func (a *App) CreateAssistantThread(userID, title string) (AssistantThread, error) {
-	// An empty title is displayed as a localized placeholder until the first message.
 	thread := AssistantThread{ID: identifier(), UserID: userID, Title: strings.TrimSpace(title), Version: 1}
 	err := a.db.Create(&thread).Error; if err == nil { a.notify(userID) }; return thread, err
-}
-
-var assistantTitleLead = regexp.MustCompile(`(?i)^(?:(?:你好|您好|hi|hello)[，,]\s*|(?:请帮我|帮我|麻烦你|请)[，,:： ]*|(?:please|can you|could you|would you)[, ]+)+`)
-
-func assistantTitleSummary(prompt string) string {
-	for _, clause := range strings.FieldsFunc(strings.ReplaceAll(prompt, ". ", "。"), func(r rune) bool { return strings.ContainsRune("\r\n。！？!?；;", r) }) {
-		clause = strings.Trim(clause, " \t#>*`-，,：:")
-		if includes([]string{"你好", "您好", "hi", "hello"}, strings.ToLower(clause)) { continue }
-		if title := compactAssistantLabel(assistantTitleLead.ReplaceAllString(clause, ""), 36); title != "" { return title }
-	}
-	return compactAssistantLabel(prompt, 36)
 }
 
 type assistantRenameInput struct { Title string `json:"title"`; Version uint64 `json:"version"` }
@@ -199,7 +187,7 @@ func assistantToolView(detail map[string]any, body string, running bool, redact 
 			for _, id := range result.TaskIDs[:min(previewCount, len(result.TaskIDs))] { if assistantTaskID.MatchString(id) { ids = append(ids, id) } }
 			if len(ids) > 0 { view["taskIds"] = ids }
 		}
-	case "projects_list", "assets_list", "prompts_search", "skills_list", "clients_list", "canvas_nodes_list", "asset_storages", "admin_canvas_plugins_list", "admin_channels_list", "admin_scripts_list":
+	case "projects_list", "asset_projects_list", "assets_list", "prompts_search", "skills_list", "clients_list", "canvas_nodes_list", "asset_storages", "admin_canvas_plugins_list", "admin_channels_list", "admin_scripts_list":
 		var rows []assistantResultLabel
 		if json.Unmarshal([]byte(body), &rows) == nil { list(rows) }
 	case "catalog_list":
@@ -216,7 +204,7 @@ func assistantToolView(detail map[string]any, body string, running bool, redact 
 				view["nodeCount"], view["connectionCount"] = len(result.Document.Nodes), len(result.Document.Connections)
 			}
 		}
-	case "asset_get", "asset_text_create", "prompt_get", "prompt_save", "skill_get", "skill_save", "client_get":
+	case "asset_project_create", "asset_project_rename", "asset_get", "asset_text_create", "prompt_get", "prompt_save", "skill_get", "skill_save", "client_get":
 		var result assistantResultLabel
 		if json.Unmarshal([]byte(body), &result) == nil { add(result) }
 	}

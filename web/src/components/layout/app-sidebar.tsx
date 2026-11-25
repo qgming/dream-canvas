@@ -1,4 +1,5 @@
 import { useContext, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { useMotionTokens, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { EditGuardContext } from "@/hooks/use-edit-guard";
@@ -15,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
+import { authStatusKey, getAuthStatus } from "@/services/api/auth";
 import { useAppUiStore } from "@/stores/use-app-ui-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -30,6 +32,8 @@ export function AppSidebar() {
     const sidebarCollapsed = useAppUiStore((state) => state.sidebarCollapsed);
     const toggleSidebar = useAppUiStore((state) => state.toggleSidebar);
     const user = useAuthStore((state) => state.user);
+    const { data: site } = useQuery({ queryKey: authStatusKey, queryFn: getAuthStatus });
+    const visibleTools = navigationTools.filter(({ slug }) => slug === "image" ? site?.imageWorkbenchOpen === true : slug === "video" ? site?.videoWorkbenchOpen === true : true);
     const reducedMotion = useShouldReduceMotion();
     const tokens = useMotionTokens();
     const transition = reducedMotion ? tokens.transition.instant : tokens.transition.collapse;
@@ -54,7 +58,7 @@ export function AppSidebar() {
                     </Button>
                 </motion.div>
                 <nav className={cn("min-h-0 flex-1 overflow-y-auto", collapsed ? "hide-scrollbar w-[55px] space-y-2" : "space-y-1")} aria-label={t("sidebar.workspace")}>
-                    {navigationTools.map(({ slug, icon: Icon }, index) => (
+                    {visibleTools.map(({ slug, icon: Icon }, index) => (
                         <motion.div key={slug} initial={false} animate={{ paddingTop: !collapsed && slug === "inspiration" ? 20 : 0 }} transition={transition}>
                         {index === 0 || slug === "inspiration" ? <motion.p initial={false} animate={{ height: collapsed ? 0 : "auto", marginBottom: collapsed ? 0 : 8, opacity: collapsed ? 0 : 1 }} transition={transition} aria-hidden={collapsed} className="overflow-hidden whitespace-nowrap px-3 text-xs text-muted-foreground">{t(index === 0 ? "ui.creation" : "ui.resources")}</motion.p> : null}
                         <Tooltip key={slug} title={collapsed ? t(`navigation.${slug}`) : undefined} placement="right">

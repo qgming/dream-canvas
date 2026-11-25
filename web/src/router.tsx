@@ -3,7 +3,7 @@ import { lazy, Suspense } from "react";
 
 import UserLayout from "@/layouts/user-layout";
 import SettingsLayout from "@/layouts/settings-layout";
-import RequireAuth, { RequireAdmin } from "@/layouts/require-auth";
+import RequireAuth, { RequireAdmin, RequireWorkbench } from "@/layouts/require-auth";
 import LoginPage from "@/pages/login";
 import { Spinner } from "@/components/ui/display";
 const GeneralSettingsPage = lazy(() => import("@/pages/settings/general"));
@@ -21,7 +21,8 @@ const TasksPage = lazy(() => import("@/pages/settings/tasks"));
 const SitePage = lazy(() => import("@/pages/settings/site"));
 const LoggingPage = lazy(() => import("@/pages/settings/logging"));
 const StoragePage = lazy(() => import("@/pages/settings/storage"));
-import AssetsPage from "@/pages/assets";
+import AssetProjectPage from "@/pages/assets";
+import AssetProjectsPage from "@/pages/assets/overview";
 import CanvasPage from "@/pages/canvas";
 import CanvasProjectPage from "@/pages/canvas/project";
 import ConversationsPage from "@/pages/conversations";
@@ -41,9 +42,10 @@ export const router = createBrowserRouter([
                 element: <UserLayout><Outlet /></UserLayout>,
                 children: [
                     { path: "/conversations", element: <ConversationsPage /> },
-                    { path: "/image", element: <ImagePage /> },
-                    { path: "/video", element: <VideoPage /> },
-                    { path: "/assets", element: <AssetsPage /> },
+                    { path: "/image", element: <RequireWorkbench key="image" kind="image"><ImagePage /></RequireWorkbench> },
+                    { path: "/video", element: <RequireWorkbench key="video" kind="video"><VideoPage /></RequireWorkbench> },
+                    { path: "/assets", element: <AssetProjectsPage /> },
+                    { path: "/assets/:projectId", element: <AssetProjectPage /> },
                     { path: "/inspiration", element: <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner /></div>}><InspirationPage /></Suspense> },
                     { path: "/canvas", element: <CanvasPage /> },
                     { path: "/canvas/:id", element: <CanvasProjectPage /> },

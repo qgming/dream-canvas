@@ -7,19 +7,19 @@ import { previewUrlFor } from "@/services/image-storage";
 import { captureSession } from "@/services/api/client";
 
 export type AssetKind = "text" | "image" | "video" | "audio";
-type AssetBase<T extends AssetKind> = { id: string; kind: T; title: string; coverUrl: string; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; storageId?: string; storageName?: string; migration?: api.AssetMigration; error?: string };
+type AssetBase<T extends AssetKind> = { id: string; assetProjectId: string; kind: T; title: string; coverUrl: string; source?: string; note?: string; createdAt: string; updatedAt: string; metadata?: Record<string, unknown>; syncState?: string; saveState?: string; storageId?: string; storageName?: string; migration?: api.AssetMigration; error?: string };
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
 export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
 export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string; durationMs?: number } };
 export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string; durationMs?: number } };
 export type Asset = TextAsset | ImageAsset | VideoAsset | AudioAsset;
-type AssetInput = Asset extends infer T ? T extends Asset ? Omit<T, "id" | "createdAt" | "updatedAt"> : never : never;
+type AssetInput = Asset extends infer T ? T extends Asset ? Omit<T, "id" | "assetProjectId" | "createdAt" | "updatedAt"> : never : never;
 type AssetStore = {
     hydrated: boolean; assets: Asset[]; error: string; deleting: api.ServerAsset[];
     loadAssets: () => Promise<void>;
     reset: () => void;
-    addAsset: (asset: AssetInput) => Promise<string>;
-    updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => Promise<void>;
+    addAsset: (asset: AssetInput, assetProjectId?: string) => Promise<string>;
+    updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "assetProjectId" | "createdAt">>) => Promise<void>;
     removeAsset: (id: string) => Promise<string>;
     cleanupImages: (extra?: unknown) => void;
 };
@@ -27,7 +27,7 @@ type AssetStore = {
 function fromServer(record: api.ServerAsset): Asset {
     const meta = { ...record.metadata };
     delete meta.tags;
-    const base = { id: record.id, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, storageId: record.storageId, storageName: record.storageName, migration: record.migration, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
+    const base = { id: record.id, assetProjectId: record.assetProjectId, kind: record.kind, title: record.title, coverUrl: typeof meta.coverUrl === "string" ? meta.coverUrl : "", source: typeof meta.source === "string" ? meta.source : undefined, note: typeof meta.note === "string" ? meta.note : undefined, metadata: meta, createdAt: record.createdAt, updatedAt: record.updatedAt, syncState: record.syncState, saveState: record.saveState, storageId: record.storageId, storageName: record.storageName, migration: record.migration, error: [record.error, record.probeError, record.previewError].filter(Boolean).join(" · ") };
     if (record.kind === "text") return { ...base, kind: "text", data: { content: typeof meta.content === "string" ? meta.content : "" } };
     const data = { storageKey: `asset:${record.id}`, width: record.width, height: record.height, bytes: record.bytes, mimeType: record.mimeType, durationMs: record.durationMs };
     if (record.kind === "image") return { ...base, kind: "image", data: { ...data, dataUrl: api.assetUrl(record.id) } };
@@ -59,16 +59,16 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
             }
         } catch (error) { if (sequence === loadSequence && useAuthStore.getState().user?.id === owner) set({ hydrated: true, error: error instanceof Error ? error.message : i18n.t("errors.assetReadFailed") }); }
     },
-    addAsset: async (input) => {
+    addAsset: async (input, assetProjectId) => {
         const assertSession = captureSession();
         const metadata: Record<string, unknown> = { ...input.metadata, coverUrl: input.coverUrl, source: input.source, note: input.note, ...(input.kind === "text" ? input.data : {}) };
         delete metadata.tags;
         let id: string;
-        if (input.kind === "text") id = (await api.createTextAsset(input.title, metadata)).id;
+        if (input.kind === "text") id = (await api.createTextAsset(input.title, metadata, assetProjectId)).id;
         else {
             id = api.assetId((input.data as ImageAsset["data"]).storageKey) || "";
             if (!id) throw new Error(i18n.t("errors.mediaNotUploaded"));
-            await api.updateAsset(id, input.title, metadata);
+            await api.updateAsset(id, input.title, metadata, assetProjectId);
         }
         assertSession();
         await get().loadAssets();

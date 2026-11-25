@@ -140,6 +140,7 @@ export default function VideoPage() {
     };
     const hasMaterials = controls.some((control) => control.type === "reference" || control.type === "asset");
     const materialControls = controls.filter((control) => (control.type === "reference" || control.type === "asset") && inputVisible(control, resolvedParameters) && (!keyframeMode || displayedMode !== "text" && (displayedMode === "reference" || control.role === "image")));
+    const assetPickerKinds = ["text", ...materialControls.flatMap((control) => control.role ? [control.role] : [])] as const;
     const referenceAccept = [...new Set(materialControls.flatMap((control) => control.mimeTypes?.length ? control.mimeTypes : [`${control.role}/*`]))].join(",");
     const acceptsReference = (type: string) => materialControls.some((control) => type.startsWith(`${control.role}/`) && (!control.mimeTypes?.length || control.mimeTypes.some((mime) => mime.endsWith("/*") ? type.startsWith(mime.slice(0, -1)) : mime === type)));
     const visibleReferences = references.filter((reference) => materialControls.some((control) => reference.type.startsWith(`${control.role}/`)));
@@ -600,7 +601,7 @@ export default function VideoPage() {
                 </div>
             </Dialog>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} initialType="video" />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={assetPickerOpen} kinds={assetPickerKinds} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
     );
 }

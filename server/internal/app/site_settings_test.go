@@ -33,7 +33,7 @@ func TestSiteDefaultsOpenAndKeepsExecutionBounds(t *testing.T) {
 	a := siteTestApp(t)
 	if err := a.db.Delete(&RuntimeSettings{}, 1).Error; err != nil { t.Fatal(err) }
 	settings, err := a.GetSiteSettings(); if err != nil { t.Fatal(err) }
-	if !settings.Open || settings.Version != 0 || settings.AssistantSlots != 1 || settings.GenerationSlots != 4 || settings.UserSlots != 2 { t.Fatalf("unexpected initial settings: %+v", settings) }
+	if !settings.Open || !settings.ImageWorkbenchOpen || !settings.VideoWorkbenchOpen || settings.Version != 0 || settings.AssistantSlots != 1 || settings.GenerationSlots != 4 || settings.UserSlots != 2 { t.Fatalf("unexpected initial settings: %+v", settings) }
 	if _, err := a.requireExecution(); err != nil { t.Fatalf("new installations require a separate execution switch: %v", err) }
 	open := true
 	saved, err := a.SaveSiteSettings("admin", siteSettingsInput{Open: &open, AssistantSlots: 2, GenerationSlots: 6, UserSlots: 3}); if err != nil { t.Fatal(err) }
@@ -44,6 +44,33 @@ func TestSiteDefaultsOpenAndKeepsExecutionBounds(t *testing.T) {
 	if err := a.db.Model(&RuntimeSettings{}).Where("id = ?", 1).Update("policy", encode(policy)).Error; err != nil { t.Fatal(err) }
 	if _, err := a.SaveSiteSettings("admin", siteSettingsInput{Version: 1, Open: &open, AssistantSlots: 2, GenerationSlots: 7, UserSlots: 3}); err != nil { t.Fatal(err) }
 	policy, err = a.executionPolicy(); if err != nil || policy.QuerySeconds != 87 { t.Fatal("saving site settings replaced persisted server bounds") }
+}
+
+func TestSiteWorkbenchAvailabilityIsIndependent(t *testing.T) {
+	a := siteTestApp(t)
+	open, closed := true, false
+	input := siteSettingsInput{Open: &open, ImageWorkbenchOpen: &closed, AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2}
+	updates, stop := a.subscribe("owner"); defer stop()
+	_, err := a.SaveSiteSettings("owner", input); requireSiteError(t, err, "forbidden")
+	saved, err := a.SaveSiteSettings("admin", input); if err != nil { t.Fatal(err) }
+	if !saved.Open || saved.ImageWorkbenchOpen || !saved.VideoWorkbenchOpen { t.Fatalf("disabling image workbench changed other availability: %+v", saved) }
+	select { case <-updates: default: t.Fatal("connected users were not notified") }
+	_, err = a.SaveSiteSettings("admin", input); requireSiteError(t, err, "version_conflict")
+
+	response := httptest.NewRecorder()
+	a.Router(a.root, "").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	var status map[string]bool
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil { t.Fatal(err) }
+	if imageOpen, present := status["imageWorkbenchOpen"]; response.Code != http.StatusOK || !status["initialized"] || !status["open"] || imageOpen || !present || !status["videoWorkbenchOpen"] { t.Fatalf("unexpected public status: %d %s", response.Code, response.Body.String()) }
+
+	admin := Principal{User: User{ID: "admin", Role: "admin"}, Scopes: []string{"admin"}}
+	result, err := a.CallBusiness(context.Background(), admin, "admin_site_save", map[string]any{"version": float64(saved.Version), "open": true, "videoWorkbenchOpen": false, "assistantSlots": 1, "generationSlots": 4, "userSlots": 2}); if err != nil { t.Fatal(err) }
+	settings := result.(siteSettings)
+	if settings.ImageWorkbenchOpen || settings.VideoWorkbenchOpen { t.Fatalf("omitted toggle was changed or the other failed to save: %+v", settings) }
+	input.Version, input.ImageWorkbenchOpen = settings.Version, &open
+	if _, err := a.SaveSiteSettings("admin", input); err != nil { t.Fatal(err) }
+	settings, err = a.GetSiteSettings(); if err != nil { t.Fatal(err) }
+	if !settings.ImageWorkbenchOpen || settings.VideoWorkbenchOpen { t.Fatalf("workbench flags failed to persist independently: %+v", settings) }
 }
 
 func TestSiteScriptRuntimeSaveSharesValidationAndVersionAcrossEntries(t *testing.T) {
