@@ -58,5 +58,15 @@ func (a *App) assistantMaterials(snapshot assistantSnapshot) ([]map[string]any, 
 	err = json.Unmarshal(encode(redact(raw)), &result)
 	var controls []parameterControl; if err == nil { err = json.Unmarshal(snapshot.Execution.Model.Parameters, &controls) }
 	for _, control := range controls { if control.Type == "asset" { if value, exists := snapshot.Parameters[control.Key]; exists { result.Parameters[control.Key] = value } } }
+	normalizeArguments := func(call map[string]any) {
+		if assistantToolArguments(call["arguments"]) == nil { call["arguments"] = "{}" }
+	}
+	for _, message := range result.Messages {
+		for _, call := range array(message["tool_calls"]) { normalizeArguments(object(object(call)["function"])) }
+		for _, rawItem := range array(message["responseItems"]) {
+			item := object(rawItem)
+			if item["type"] == "function_call" { normalizeArguments(item) }
+		}
+	}
 	return result.Messages, result.Parameters, err
 }

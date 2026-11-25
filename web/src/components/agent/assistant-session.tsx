@@ -14,8 +14,16 @@ import { assetId, assetUrl } from "@/services/api/assets";
 import { ApiError, captureSession } from "@/services/api/client";
 import { nanoid } from "nanoid";
 import { inputVisible } from "@/lib/model-inputs";
+import { agentMessageId } from "./agent-event-formatters";
 
 const AssistantSessionContext = createContext<ReturnType<typeof useAssistantSessionState> | null>(null);
+const activeTurnStatuses = ["queued", "running", "waiting_tasks", "waiting_user"];
+type AnswerDraft = { key: string; value: string; status?: "sending" | "sent" | "failed" | "changed" };
+export type AssistantQuestionReply = AnswerDraft & {
+    change: (value: string) => void;
+    send: () => void;
+    refresh: () => void;
+};
 
 export function AssistantSessionProvider({ page, children }: { page: boolean; children: ReactNode }) {
     const session = useAssistantSessionState(page);
@@ -56,6 +64,8 @@ function useAssistantSessionState(page: boolean) {
     const uploadingRef = useRef(false);
     const [stopping, setStopping] = useState(false);
     const stoppingRef = useRef(false);
+    const [answerDraft, setAnswerDraft] = useState<AnswerDraft | null>(null);
+    const answeringRef = useRef(false);
     const sequence = useRef(0);
     const activeId = useAgentStore((state) => state.activeThreadId);
     const requestedThread = useRef(activeId);
@@ -66,7 +76,18 @@ function useAssistantSessionState(page: boolean) {
     useEffect(() => { if (!useAgentStore.getState().model && config.assistantModel) useAgentStore.setState({ model: config.assistantModel }); }, [config.assistantModel]);
     const selected = decodeChannelModel(selectedModel);
     const modelEntry = config.channels.find((channel) => channel.id === selected?.channelId)?.models.find((entry) => entry.name === selected?.model && entry.capability === "text" && entry.features.tools);
-    const running = snapshot?.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
+    const running = snapshot?.turns.find((turn) => activeTurnStatuses.includes(turn.status));
+    const snapshotThreadId = snapshot?.thread.id;
+    const question = running?.status === "waiting_user" && snapshotThreadId === activeId ? snapshot?.items.findLast((item) => {
+        const detail = api.assistantInteraction(item);
+        return item.threadId === snapshotThreadId && item.turnId === running.id && detail?.kind === "question" && detail.status === "waiting";
+    }) : undefined;
+    const questionThreadId = question?.threadId;
+    const questionKey = questionThreadId && question?.turnId ? agentMessageId(questionThreadId, question.turnId, question.id) : "";
+    const replyDraft = answerDraft?.key === questionKey ? answerDraft : null;
+    useEffect(() => {
+        if (snapshot && answerDraft?.key && answerDraft.key !== questionKey) setAnswerDraft(null);
+    }, [snapshot, questionKey, answerDraft?.key]);
     const reportedTurn = running || snapshot?.turns.at(-1);
     const busy = Boolean(running || submitting || creating);
     const editingDisabled = busy || loading || uploading || Boolean(activeId && !snapshot);
@@ -86,7 +107,7 @@ function useAssistantSessionState(page: boolean) {
         sequence.current++;
         requestedThread.current = "";
         followedTurn.current = null;
-        setSnapshot(null); setLoading(false);
+        setSnapshot(null); setLoading(false); setAnswerDraft(null);
         useAgentStore.setState({ activeThreadId: "", activeTurnId: "", messages: [] });
     };
     const refreshThreads = async () => {
@@ -116,7 +137,7 @@ function useAssistantSessionState(page: boolean) {
             const latest = record.turns.at(-1), previous = followedTurn.current;
             if (latest?.projectId && !explicitTarget.current && !routeProjectRef.current && !targetRef.current && (switching || previous?.threadId === id && previous.turnId === latest.id && !previous.projectId)) chooseTarget(latest.projectId);
             followedTurn.current = latest ? { threadId: id, turnId: latest.id, projectId: latest.projectId || "" } : null;
-            const running = record.turns.find((turn) => ["queued", "running", "waiting_tasks"].includes(turn.status));
+            const running = record.turns.find((turn) => activeTurnStatuses.includes(turn.status));
             useAgentStore.setState({ activeThreadId: id, connectError: "", messages: record.items.map((item) => {
                 const detail = item.detail as { streaming?: boolean; attachments?: string[]; skill?: string } | undefined;
                 return { ...item, itemId: item.id, streamId: item.role === "assistant" && detail?.streaming && running?.status === "running" && item.turnId === running.id ? item.id : undefined, attachments: detail?.attachments?.map((asset) => ({ id: asset, name: appI18n.t("workspace.image"), url: assetUrl(asset) })), skill: detail?.skill ? { name: detail.skill, path: `skill:${detail.skill}` } : undefined };
@@ -144,6 +165,7 @@ function useAssistantSessionState(page: boolean) {
         finally { creatingRef.current = false; setCreating(false); }
     };
     useEffect(() => {
+        setAnswerDraft(null);
         void refreshThreads().catch(showError);
         const id = useAgentStore.getState().activeThreadId;
         if (id) void openThread(id, false);
@@ -217,6 +239,30 @@ function useAssistantSessionState(page: boolean) {
         catch (error) { showError(error); }
         finally { stoppingRef.current = false; setStopping(false); }
     };
+    const answerQuestion = async () => {
+        const turnId = question?.turnId, value = replyDraft?.value || "";
+        const answer = value.trim();
+        if (!question || !questionThreadId || !turnId || !answer || requestedThread.current !== questionThreadId || answeringRef.current || stoppingRef.current || replyDraft?.status === "sent" || replyDraft?.status === "changed") return;
+        const assertSession = captureSession();
+        answeringRef.current = true;
+        setAnswerDraft({ key: questionKey, value, status: "sending" });
+        try {
+            await api.answerTurn(turnId, question.id, answer);
+            assertSession();
+            setAnswerDraft((current) => current?.key === questionKey ? { key: questionKey, value: "", status: "sent" } : current);
+            void openThread(questionThreadId, false);
+        } catch (error) {
+            if (useAuthStore.getState().user?.id !== owner || error instanceof ApiError && error.code === "session_changed") return;
+            const status = error instanceof ApiError && error.code === "assistant_question_changed" ? "changed" : "failed";
+            setAnswerDraft((current) => current?.key === questionKey ? { ...current, status } : current);
+        } finally { answeringRef.current = false; }
+    };
+    const questionReply: AssistantQuestionReply | undefined = questionKey && questionThreadId ? {
+        key: questionKey, value: replyDraft?.value || "", status: replyDraft?.status,
+        change: (value) => setAnswerDraft({ key: questionKey, value }),
+        send: () => void answerQuestion(),
+        refresh: () => void openThread(questionThreadId, false),
+    } : undefined;
     const addFiles = async (files: FileList | File[] | null) => {
         if (!files?.length || uploadingRef.current || submittingRef.current || editingDisabled) return;
         const assertSession = captureSession();
@@ -268,6 +314,6 @@ function useAssistantSessionState(page: boolean) {
             void refreshThreads().catch(showError);
         } });
     };
-    return { activeId, threads, title, snapshot, running, reportedTurn, busy, editingDisabled, error, loading, loadingThreads, submitting, uploading, stopping, target, selectTarget, config, selectedModel, modelParameters, showReasoning, renamingThread, setRenamingThread,
+    return { activeId, threads, title, snapshot, running, reportedTurn, busy, editingDisabled, error, loading, loadingThreads, submitting, uploading, stopping, questionReply, target, selectTarget, config, selectedModel, modelParameters, showReasoning, renamingThread, setRenamingThread,
         newThread, openThread, renameThread, deleteThread, reload, refreshHistory: () => void refreshThreads().catch(showError), dismissError, send, stop, addFiles };
 }

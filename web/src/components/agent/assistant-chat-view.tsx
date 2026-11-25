@@ -24,7 +24,7 @@ export function AssistantChatView({ visible = true, wide = false }: { visible?: 
     const attachments = useAgentStore((state) => state.attachments);
     const skills = useAgentSkillStore((state) => state.skills);
     const selectedSkillName = useAgentSkillStore((state) => state.selectedSkill?.name);
-    const { activeId, snapshot, running, reportedTurn, busy, editingDisabled, error, loading, loadingThreads, submitting, uploading, stopping, target, selectTarget, config, selectedModel, modelParameters, showReasoning, reload, dismissError, send, stop, addFiles } = useAssistantSession();
+    const { activeId, snapshot, running, reportedTurn, busy, editingDisabled, error, loading, loadingThreads, submitting, uploading, stopping, questionReply, target, selectTarget, config, selectedModel, modelParameters, showReasoning, reload, dismissError, send, stop, addFiles } = useAssistantSession();
     const disabled = !visible || editingDisabled;
     const column = wide ? conversationColumn : undefined;
 
@@ -34,7 +34,7 @@ export function AssistantChatView({ visible = true, wide = false }: { visible?: 
             {loading && !snapshot ? <div className="flex justify-center pt-1"><Spinner size="small" /></div> : null}
             {reportedTurn?.error ? <Notice type={reportedTurn.status === "failed" || reportedTurn.status === "interrupted" ? "error" : "warning"} title={reportedTurn.status === "partial" ? t("agent.steps.partialReply") : reportedTurn.error} description={reportedTurn.status === "partial" ? reportedTurn.error : undefined} /> : null}
         </div> : null}
-        <AgentChatTimeline visible={visible} contentClassName={column} theme={theme} sending={submitting} turnStatus={running?.status} turnId={running?.id} empty={!error && (!activeId || snapshot) ? <div className="flex flex-wrap items-center justify-center gap-2 text-center">
+        <AgentChatTimeline visible={visible} contentClassName={column} theme={theme} sending={submitting} turnStatus={running?.status} turnId={running?.id} questionReply={questionReply} stopping={stopping} empty={!error && (!activeId || snapshot) ? <div className="flex flex-wrap items-center justify-center gap-2 text-center">
             <h2 className={cn("mb-1 w-full text-xl font-medium tracking-tight", wide && "sm:text-2xl")}>{t("agent.drawer.emptyTitle")}</h2>
             {skills.filter((skill) => skill.enabled).slice(0, 5).map((skill) => <Button key={skill.path} size="sm" className="max-w-full rounded-full" disabled={disabled} aria-pressed={selectedSkillName === skill.name} onClick={() => useAgentSkillStore.getState().selectSkill(skill)}><span aria-hidden className="text-muted-foreground">/</span><span className="truncate">{skill.interface?.displayName || skill.name}</span></Button>)}
         </div> : null} />

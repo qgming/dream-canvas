@@ -339,6 +339,7 @@ export function isConnectionErrorMessage(item: AgentChatItem) {
 }
 
 export function toolName(name: string) {
+    if (name === "load_tools") return i18n.t("agent.steps.loadTools");
     if (name === "admin_script_evidence") return i18n.t("modelScripts.evidence");
     if (i18n.exists(`agent.businessTools.${name}`)) return i18n.t(`agent.businessTools.${name}`);
     if (name === "imagegen" || name.endsWith("__imagegen")) return tr("tools.generateImage");

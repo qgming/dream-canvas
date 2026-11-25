@@ -120,6 +120,37 @@ func TestAssistantThreadTitlesFollowFirstAcceptedMessageAndRespectRename(t *test
 	if current := read(); current.Title != "新对话" { t.Fatal("later message overwrote the manually chosen title", current) }
 }
 
+func TestAssistantMaterialsKeepsFailedToolCallsReplayable(t *testing.T) {
+	a := assetFileTestApp(t)
+	if err := a.db.AutoMigrate(&Channel{}); err != nil { t.Fatal(err) }
+	snapshot := assistantSnapshot{Execution: executionSnapshot{Model: ChannelModel{Parameters: JSON(`[]`)}}}
+	if err := json.Unmarshal([]byte(`[
+		{"role":"assistant","tool_calls":[
+			{"id":"saved","type":"function","function":{"name":"asset_text_create","arguments":"{\"title\":\"Saved\"}"}},
+			{"id":"rejected","type":"function","function":{"name":"asset_text_create","arguments":"{\"title\":\"Unfinished\""}}
+		],"responseItems":[
+			{"type":"function_call","call_id":"saved","name":"asset_text_create","arguments":"{\"title\":\"Saved\"}"},
+			{"type":"function_call","call_id":"rejected","name":"asset_text_create","arguments":"{\"title\":\"Unfinished\""}
+		]},
+		{"role":"tool","tool_call_id":"saved","content":"{\"id\":\"asset\"}"},
+		{"role":"tool","tool_call_id":"rejected","content":"{\"code\":\"invalid_tool_arguments\"}"},
+		{"role":"user","content":"继续"}
+	]`), &snapshot.Messages); err != nil { t.Fatal(err) }
+	stored := string(encode(snapshot.Messages))
+	messages, _, err := a.assistantMaterials(snapshot)
+	if err != nil { t.Fatal(err) }
+	if string(encode(snapshot.Messages)) != stored { t.Fatal("stored tool history changed") }
+	if len(messages) != len(snapshot.Messages) || string(encode(messages[1:])) != string(encode(snapshot.Messages[1:])) { t.Fatal("tool results or user follow-up changed") }
+	calls, items := array(messages[0]["tool_calls"]), array(messages[0]["responseItems"])
+	if len(calls) != 2 || len(items) != 2 { t.Fatal("tool calls were dropped") }
+	for index, expected := range []struct{ id, arguments string }{{"saved", `{"title":"Saved"}`}, {"rejected", `{}`}} {
+		call, item := object(calls[index]), object(items[index])
+		if call["id"] != expected.id || item["call_id"] != expected.id || object(call["function"])["arguments"] != expected.arguments || item["arguments"] != expected.arguments {
+			t.Fatalf("tool call %s did not retain its pairing and valid replay arguments", expected.id)
+		}
+	}
+}
+
 func TestAssistantReasoningAdaptersReadProviderStreams(t *testing.T) {
 	builtins, err := builtinScripts()
 	if err != nil { t.Fatal(err) }

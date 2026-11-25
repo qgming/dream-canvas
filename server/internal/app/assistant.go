@@ -80,9 +80,9 @@ func (a *App) GetAssistantThread(userID, id string) (gin.H, error) {
 		return tx.Where("thread_id = ? AND user_id = ?", id, userID).Order("created_at").Find(&turns).Error
 	}); err != nil { return nil, err }
 	prices := map[string]modelPricing{}
-	running := map[string]bool{}
+	statuses := map[string]string{}
 	for _, turn := range turns {
-		running[turn.ID] = turn.Status == "running"
+		statuses[turn.ID] = turn.Status
 		var snapshot assistantSnapshot
 		if json.Unmarshal(turn.Snapshot, &snapshot) == nil { prices[turn.ID], _ = parseModelPricing(snapshot.Execution.Model.Pricing) }
 	}
@@ -93,30 +93,37 @@ func (a *App) GetAssistantThread(userID, id string) (gin.H, error) {
 		if redactErr != nil { return "" }
 		return text(redact(value))
 	}
-	for index := range items {
-		item := &items[index]
-		if item.Role != "assistant" && item.Role != "tool" { continue }
+	visible := items[:0]
+	for _, item := range items {
+		if item.Role == assistantContextUsageRole { continue }
+		if item.Role != "assistant" && item.Role != "tool" && item.Role != assistantContextStatusRole { visible = append(visible, item); continue }
 		var detail map[string]any
 		if len(item.Detail) > 0 && json.Unmarshal(item.Detail, &detail) != nil { return nil, problem(409, "invalid_history", "历史消息无法读取，未覆盖或丢弃历史") }
-		if item.Role == "tool" {
-			item.Detail, item.Text = assistantToolView(detail, item.Text, running[item.TurnID], redactText), ""
+		status := statuses[item.TurnID]
+		if item.Role != "assistant" {
+			if view, ok := assistantInteractionView(detail, status, redactText); ok { item.Detail = view } else { item.Detail = assistantToolView(detail, item.Text, status == "running", redactText) }
+			if redactErr != nil { return nil, redactErr }
+			item.Role, item.Text = "tool", ""
+			visible = append(visible, item)
 			continue
 		}
 		view := map[string]any{}
-		if detail["streaming"] == true && running[item.TurnID] { view["streaming"] = true }
+		if detail["streaming"] == true && status == "running" { view["streaming"] = true }
 		if reasoning, _ := detail["reasoning"].(string); strings.TrimSpace(reasoning) != "" {
 			view["reasoning"] = redactText(reasoning)
 			if redactErr != nil { return nil, redactErr }
 		}
 		if usage, exists := detail["usage"]; exists { view["usage"], view["usageState"] = publicUsageValues(object(usage), prices[item.TurnID]), detail["usageState"] }
 		item.Detail = encode(view)
+		visible = append(visible, item)
 	}
-	return gin.H{"thread": thread, "items": items, "turns": turns}, nil
+	return gin.H{"thread": thread, "items": visible, "turns": turns}, nil
 }
 
 var assistantTaskID = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 var assistantTerminalStates = []string{"succeeded", "failed", "cancelled", "interrupted", "partial"}
+var assistantActiveStates = []string{"queued", "running", "waiting_tasks", assistantWaitingUser}
 
 var assistantTaskStates = []string{"queued", "waiting_assets", "submitting", "running", "saving", "succeeded", "failed", "cancelled", "interrupted", "confirmation_required"}
 
@@ -157,6 +164,13 @@ func assistantToolView(detail map[string]any, body string, running bool, redact 
 		for _, row := range rows[:min(previewCount, len(rows))] { add(row) }
 	}
 	switch name {
+	case assistantLoadToolsName:
+		var result struct { Group string `json:"group"` }
+		if json.Unmarshal([]byte(body), &result) == nil {
+			for _, group := range assistantToolGroupCatalog {
+				if group.ID == result.Group { view["toolGroup"] = group.ID; break }
+			}
+		}
 	case "generation_create", "task_get", "task_cancel", "task_resume":
 		var result struct { ID string `json:"id"`; TaskIDs []string `json:"taskIds"`; Status string `json:"status"` }
 		if json.Unmarshal([]byte(body), &result) == nil {
@@ -219,7 +233,7 @@ func (a *App) DeleteAssistantThread(userID, id string) error {
 		var thread AssistantThread
 		if err := tx.First(&thread, "id = ? AND user_id = ?", id, userID).Error; err != nil { return err }
 		var active int64
-		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"queued", "running", "waiting_tasks"}).Count(&active).Error; err != nil { return err }
+		if err := tx.Model(&AssistantTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, assistantActiveStates).Count(&active).Error; err != nil { return err }
 		if active > 0 { return problem(409, "thread_busy", "对话仍有执行中的轮次，请先停止并确认状态") }
 		var pendingUsage int64; if err := tx.Model(&AssistantItem{}).Where("thread_id = ? AND json_extract(detail, '$.usageRecordPending') = ?", thread.ID, true).Count(&pendingUsage).Error; err != nil { return err }; if pendingUsage > 0 { return problem(409, "usage_pending", "对话仍有用量待补记，请待账本保存完成后再删除") }
 		if err := tx.Delete(&AssistantItem{}, "thread_id = ? AND user_id = ?", thread.ID, thread.UserID).Error; err != nil { return err }

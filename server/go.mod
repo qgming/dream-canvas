@@ -19,6 +19,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/openai/openai-go/v3 v3.20.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
+	github.com/tiktoken-go/tokenizer v0.7.0
 	github.com/wI2L/jsondiff v0.7.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.43.0
@@ -41,6 +42,7 @@ require (
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect

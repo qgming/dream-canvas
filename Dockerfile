@@ -17,7 +17,10 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY server/ ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dream-canvas-server ./cmd/server
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dream-canvas-server ./cmd/server \
+    && mkdir -p /out/licenses \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/tiktoken-go/tokenizer)/LICENSE" /out/licenses/tokenizer-LICENSE \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/dlclark/regexp2)/LICENSE" /out/licenses/regexp2-LICENSE
 
 FROM debian:bookworm-slim AS ffmpeg-build
 # Verified against the official release signature. Update version and checksum together.
@@ -56,6 +59,7 @@ RUN apt-get update \
     && chown dream-canvas:dream-canvas /data
 WORKDIR /app
 COPY --from=server-build /out/dream-canvas-server /usr/local/bin/dream-canvas-server
+COPY --from=server-build /out/licenses/ ./licenses/
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg-build /out/licenses/ffmpeg/ ./licenses/ffmpeg/
 COPY Dockerfile ./licenses/ffmpeg/Dockerfile

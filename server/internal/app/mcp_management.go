@@ -23,6 +23,7 @@ func managementTools() []toolDefinition {
 		tool("assistant_thread_delete", "删除已停止且用量已保存的对话，历史用量账本保留", "assistant", map[string]any{"threadId": stringField("对话 ID")}, "threadId"),
 		tool("assistant_turn_start", "主动提交助手轮次，可能产生模型和生成费用；项目明确绑定，页面操作可绑定在线客户端", "assistant", map[string]any{"threadId": stringField("对话 ID"), "version": numberField("读取到的对话版本"), "prompt": stringField("用户消息"), "projectId": stringField("目标项目 ID，无项目留空"), "clientId": stringField("可选明确在线客户端 ID"), "channelId": stringField("文本渠道 ID"), "modelId": stringField("文本模型配置 ID"), "parameters": objectField("本轮声明参数；命名素材传原始资产 ID，省略采用管理员模型默认值及脚本默认值"), "skill": stringField("可选 Skill 名称"), "attachments": map[string]any{"type": "array", "items": stringField("图片资产 ID")}, "references": map[string]any{"type": "array", "items": stringField("已保存节点 ID")}}, "threadId", "version", "prompt", "channelId", "modelId"),
 		tool("assistant_turn_cancel", "停止助手轮次，已提交生成任务由任务入口单独取消", "assistant", map[string]any{"turnId": stringField("轮次 ID")}, "turnId"),
+		tool("assistant_turn_answer", "提交当前用户亲自提供的回答并恢复原助手轮次；不得替用户猜测或填写", "assistant", map[string]any{"turnId": stringField("等待回答的轮次 ID"), "questionId": stringField("从会话读取的待答问题条目 ID"), "answer": stringField("用户给出的选项或自由回答")}, "turnId", "questionId", "answer"),
 		tool("assistant_skill_draft_create", "按明确画布或对话材料提交 Skill 草稿任务，可能产生文本模型费用，不自动保存为启用 Skill", "assistant", map[string]any{"source": map[string]any{"type": "string", "enum": []string{"canvas", "conversation"}}, "projectId": stringField("画布材料的项目 ID"), "threadId": stringField("对话材料的对话 ID"), "model": stringField("明确的渠道 ID::模型 ID"), "parameters": objectField("所选文本模型的声明参数，命名素材为资产 ID；省略采用管理员模型默认值及脚本默认值")}, "source", "model"),
 		tool("assistant_skill_draft_get", "读取 Skill 草稿任务状态与结果", "assistant", map[string]any{"turnId": stringField("草稿轮次 ID")}, "turnId"),
 		tool("tokens_list", "读取自己的令牌记录，不返回令牌明文", "account", map[string]any{}),
@@ -107,6 +108,7 @@ func (a *App) callManagement(ctx context.Context, p Principal, name string, inpu
 	case "assistant_thread_delete": err = a.DeleteAssistantThread(p.User.ID, read("threadId"))
 	case "assistant_turn_start": var request assistantTurnInput; if err = decode(input, &request); err == nil { value, err = a.StartAssistantTurn(p.User, read("threadId"), request) }
 	case "assistant_turn_cancel": err = a.CancelAssistantTurn(p.User.ID, read("turnId"))
+	case "assistant_turn_answer": var request assistantAnswerInput; if err = decode(input, &request); err == nil { value, err = a.AnswerAssistantTurn(p.User, read("turnId"), request) }
 	case "assistant_skill_draft_create": var request skillDraftInput; if err = decode(input, &request); err == nil { value, err = a.CreateSkillDraft(p.User.ID, request) }
 	case "assistant_skill_draft_get": value, err = a.GetSkillDraft(p.User.ID, read("turnId"))
 	case "tokens_list": rows := []AccessToken{}; err = a.db.Where("user_id = ?", p.User.ID).Order("created_at DESC").Find(&rows).Error; return rows, true, err

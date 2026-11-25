@@ -6,11 +6,14 @@ import { Clock } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { cn } from "@/lib/utils";
+import { assistantInteraction } from "@/services/api/assistant";
 import { useAgentStore, type AgentChatItem, type AgentTokenUsage } from "@/stores/use-agent-store";
 import { AgentChatMessage, AgentWorkingMessage } from "./agent-chat-message";
 import { AgentToolSteps, isRunningAgentTool } from "./agent-chat-steps";
 import { agentMessageId, agentMessageToChatMessage, agentReasoning, groupTimelineMessages } from "./agent-event-formatters";
 import { AgentScrollToBottom } from "./agent-scroll-to-bottom";
+import { AssistantInteractionRow } from "./assistant-interaction-row";
+import type { AssistantQuestionReply } from "./assistant-session";
 
 const SCROLL_BOTTOM_THRESHOLD = 48;
 const historyMessageStyle = { contentVisibility: "auto", containIntrinsicSize: "0 80px" } as const;
@@ -22,6 +25,8 @@ export function AgentChatTimeline({
     sending,
     turnStatus,
     turnId,
+    questionReply,
+    stopping,
     empty,
 }: {
     visible?: boolean;
@@ -30,22 +35,30 @@ export function AgentChatTimeline({
     sending: boolean;
     turnStatus?: string;
     turnId?: string;
+    questionReply?: AssistantQuestionReply;
+    stopping?: boolean;
     empty?: ReactNode;
 }) {
     const { t } = useTranslation();
     const reduceMotion = useShouldReduceMotion();
     const messages = useAgentStore((state) => state.messages);
     const activeThreadId = useAgentStore((state) => state.activeThreadId);
-    const timeline = useMemo(() => groupTimelineMessages(messages), [messages]);
+    const timeline = useMemo(() => {
+        const scope = (item: AgentChatItem) => agentMessageId(item.threadId || "", item.turnId || "", "");
+        const latestTodos = new Map<string, AgentChatItem>();
+        for (const item of messages) if (assistantInteraction(item)?.kind === "todo") latestTodos.set(scope(item), item);
+        return groupTimelineMessages(messages).filter((entry) => entry.type === "tools" || assistantInteraction(entry.item)?.kind !== "todo" || latestTodos.get(scope(entry.item)) === entry.item);
+    }, [messages]);
     const listRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const followMessagesRef = useRef(true);
     const positions = useRef(new Map<string, { top: number; follow: boolean }>());
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const activeItem = turnId ? messages.findLast((item) => item.turnId === turnId) : undefined;
+    const activeInteraction = activeItem ? assistantInteraction(activeItem) : undefined;
     const liveOutput = activeItem?.streamId && (activeItem.text.trim() || agentReasoning(activeItem));
     const showEmpty = Boolean(empty && !timeline.length && !sending && !turnStatus);
-    const showWorking = (sending || turnStatus === "queued" || turnStatus === "running") && !liveOutput && !isRunningAgentTool(activeItem);
+    const showWorking = (sending || turnStatus === "queued" || turnStatus === "running") && !liveOutput && !isRunningAgentTool(activeItem) && !(activeInteraction?.kind === "context" && activeInteraction.status === "running");
     const updateScrollState = useCallback(() => {
         const list = listRef.current;
         if (!list || !list.clientHeight) return;
@@ -95,8 +108,9 @@ export function AgentChatTimeline({
                         {timeline.map((entry) => {
                             const item = entry.type === "tools" ? entry.items[0] : entry.item;
                             const key = agentMessageId(item.threadId || "", item.turnId || "", item.itemId || item.id);
-                            return entry.type === "tools"
-                                ? <AgentToolSteps key={key} items={entry.items} />
+                            if (entry.type === "tools") return <AgentToolSteps key={key} items={entry.items} />;
+                            const interaction = assistantInteraction(item);
+                            return interaction ? <AssistantInteractionRow key={key} detail={interaction} reply={questionReply?.key === key ? questionReply : undefined} disabled={!visible || stopping} />
                                 : <AgentChatMessageRow key={key} item={item} theme={theme} />;
                         })}
                         {turnStatus === "waiting_tasks" ? <p role="status" className="flex items-start gap-2 px-2 text-xs leading-5 text-muted-foreground"><Clock aria-hidden className="mt-0.5 size-4 shrink-0" />{t("workspace.assistantWaitingTasks")}</p>

@@ -70,6 +70,8 @@ function AgentToolStep({ item }: { item: AgentChatItem }) {
     const tasks = (Array.isArray(taskRows) ? taskRows.map((row) => ({ id: stringText(objectField(row, "id")), state: taskStates[stringText(objectField(row, "status"))] }))
         : Array.isArray(taskIds) ? taskIds.map((id) => ({ id: stringText(id), state: undefined })) : []).filter(({ id }) => /^[a-f0-9]{64}$/.test(id));
     const taskState = taskStates[stringText(objectField(item.detail, "taskStatus"))];
+    const toolGroup = stringText(objectField(item.detail, "toolGroup"));
+    const groupDescription = toolGroup ? t(`agent.steps.toolGroups.${toolGroup}`, { defaultValue: toolGroup }) : "";
     const count = objectField(item.detail, "resultCount");
     const resultPreview = objectField(item.detail, "resultPreview");
     const previews = Array.isArray(resultPreview) ? resultPreview.filter((label): label is string => typeof label === "string" && Boolean(label.trim())) : [];
@@ -83,8 +85,9 @@ function AgentToolStep({ item }: { item: AgentChatItem }) {
     return (
         <AgentStep label={name ? toolName(name) : t("agent.eventExtra.toolOperation")} icon={<Icon aria-hidden className={cn(state === "running" && "animate-spin motion-reduce:animate-none", state === "failed" && "text-destructive", state === "interrupted" && "text-warning")} />}
             status={<span className={cn("shrink-0 text-xs", state === "failed" && "text-destructive", state === "interrupted" && "text-warning")}>{t(`agent.steps.${state}`)}</span>}>
-            {note || typeof count === "number" || taskState || tasks.length || previews.length || canvasSummary ? <div className={cn(agentStepBodyClass, "space-y-1 break-words py-1 text-xs leading-5 text-muted-foreground")}>
+            {note || groupDescription || typeof count === "number" || taskState || tasks.length || previews.length || canvasSummary ? <div className={cn(agentStepBodyClass, "space-y-1 break-words py-1 text-xs leading-5 text-muted-foreground")}>
                 {note ? <p>{note}</p> : null}
+                {groupDescription ? <p>{groupDescription}</p> : null}
                 {typeof count === "number" ? <p>{t("agent.steps.results", { count })}</p> : null}
                 {previews.length ? <ul className="list-disc space-y-0.5 pl-4 text-foreground">{previews.map((label, index) => <li key={index}>{label}</li>)}</ul> : null}
                 {canvasSummary ? <p>{canvasSummary}</p> : null}

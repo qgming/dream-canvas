@@ -28,7 +28,7 @@ func (a *App) recoverExecution() error {
 	if err := a.db.Model(&ClientCommand{}).Where("status = ?", "pending").Updates(map[string]any{"status": "interrupted", "error": "服务重启，页面操作未确认；请重新读取明确在线的客户端"}).Error; err != nil { return err }
 	// A process restart never turns an uncertain paid submission into another POST.
 	if err := a.db.Model(&GenerationTask{}).Where("status = ? OR (status = ? AND upstream_id = ?)", "submitting", "running", "").Updates(map[string]any{"status": "confirmation_required", "error": "服务在供应商响应确认前停止，结果与用量待确认；未重新提交"}).Error; err != nil { return err }
-	if err := a.db.Model(&AssistantTurn{}).Where("status NOT IN ?", append([]string{"queued", "waiting_tasks"}, assistantTerminalStates...)).Updates(map[string]any{"status": "interrupted", "error": "轮次执行状态无法恢复；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
+	if err := a.db.Model(&AssistantTurn{}).Where("status NOT IN ?", append([]string{"queued", "waiting_tasks", assistantWaitingUser}, assistantTerminalStates...)).Updates(map[string]any{"status": "interrupted", "error": "轮次执行状态无法恢复；已保存消息与用量保留，未重新请求模型"}).Error; err != nil { return err }
 	if err := a.db.Model(&TaskAsset{}).Where("task_id IN (?)", a.db.Model(&AssistantTurn{}).Select("'turn:' || id").Where("status IN ?", assistantTerminalStates)).Update("released", true).Error; err != nil { return err }
 	if err := a.db.Model(&Asset{}).Where("sync_state = ?", "syncing").Update("sync_state", "pending").Error; err != nil { return err }
 	return nil

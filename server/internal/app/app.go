@@ -181,6 +181,7 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	authed.DELETE("/assistant/threads/:id", a.deleteAssistantThread)
 	authed.POST("/assistant/threads/:id/turns", a.startAssistantTurn)
 	authed.POST("/assistant/turns/:id/cancel", a.cancelAssistantTurn)
+	authed.POST("/assistant/turns/:id/answer", a.answerAssistantTurn)
 	authed.POST("/assistant/skill-drafts", a.createSkillDraft)
 	authed.GET("/assistant/skill-drafts/:id", a.getSkillDraft)
 	authed.GET("/assistant/skills", a.listAssistantSkills)
