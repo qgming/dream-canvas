@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -32,14 +33,60 @@ func assistantTextOnlyParameters(snapshot assistantSnapshot, redact func(any) an
 	return parameters, nil
 }
 
-// Redact copies sent to models or shown in the timeline without changing private history.
-func (a *App) assistantRedactor(snapshot executionSnapshot) (func(any) any, error) {
+func (a *App) invalidateSecretsCache() {
+	a.secretMu.Lock()
+	a.secretCached = false
+	a.secretVal = nil
+	a.secretMu.Unlock()
+}
+
+func (a *App) cachedSecrets() ([]string, error) {
+	a.secretMu.RLock()
+	if a.secretCached {
+		res := make([]string, len(a.secretVal))
+		copy(res, a.secretVal)
+		a.secretMu.RUnlock()
+		return res, nil
+	}
+	a.secretMu.RUnlock()
 	channels := []Channel{}; storages := []ObjectStorage{}
 	if err := a.db.Select("secret").Find(&channels).Error; err != nil { return nil, err }
 	if err := a.db.Select("access_key_id", "secret").Find(&storages).Error; err != nil { return nil, err }
-	secrets := []string{}; encrypted := []string{snapshot.Credential}
-	for _, channel := range channels { encrypted = append(encrypted, channel.Secret) }; for _, storage := range storages { encrypted = append(encrypted, storage.AccessKeyID, storage.Secret) }
-	for _, value := range encrypted { if value == "" { continue }; plain, err := a.decryptSecret(value); if err != nil { return nil, err }; if plain != "" && !includes(secrets, plain) { secrets = append(secrets, plain) } }
+	secrets := []string{}
+	add := func(encrypted string) error {
+		if encrypted == "" { return nil }
+		plain, err := a.decryptSecret(encrypted)
+		if err != nil { return err }
+		if len(plain) >= 4 && !includes(secrets, plain) { secrets = append(secrets, plain) }
+		return nil
+	}
+	for _, channel := range channels { if err := add(channel.Secret); err != nil { return nil, err } }
+	for _, storage := range storages {
+		if err := add(storage.AccessKeyID); err != nil { return nil, err }
+		if err := add(storage.Secret); err != nil { return nil, err }
+	}
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	a.secretMu.Lock()
+	a.secretVal = secrets
+	a.secretCached = true
+	a.secretMu.Unlock()
+	res := make([]string, len(secrets))
+	copy(res, secrets)
+	return res, nil
+}
+
+// Redact copies sent to models or shown in the timeline without changing private history.
+func (a *App) assistantRedactor(snapshot executionSnapshot) (func(any) any, error) {
+	secrets, err := a.cachedSecrets()
+	if err != nil { return nil, err }
+	if snapshot.Credential != "" {
+		plain, err := a.decryptSecret(snapshot.Credential)
+		if err != nil { return nil, err }
+		if len(plain) >= 4 && !includes(secrets, plain) {
+			secrets = append(secrets, plain)
+			sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+		}
+	}
 	clean := func(value string) string {
 		for _, secret := range secrets { value = strings.ReplaceAll(value, secret, "[REDACTED]") }
 		value = assistantCredentialPattern.ReplaceAllString(value, "[REDACTED]")

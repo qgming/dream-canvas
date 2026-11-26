@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,11 +51,39 @@ func object(value any) map[string]any { result, _ := value.(map[string]any); if 
 func text(value any) string { if value == nil { return "" }; return fmt.Sprint(value) }
 func array(value any) []any { switch result := value.(type) { case []any: return result; case []map[string]any: list := make([]any, len(result)); for index := range result { list[index] = result[index] }; return list }; return nil }
 
+var blockedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001:db8::/32"),
+}
+
+func isBlockedIP(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok { return true }
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() { return true }
+	for _, prefix := range blockedPrefixes {
+		if prefix.Contains(addr) { return true }
+	}
+	return false
+}
+
 func externalTransport(policy executionPolicy) *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.TLSHandshakeTimeout = seconds(policy.ConnectSeconds)
-	transport.DisableKeepAlives = true
+	transport.MaxIdleConns = 32
+	transport.MaxIdleConnsPerHost = 4
+	transport.IdleConnTimeout = 60 * time.Second
 	transport.ResponseHeaderTimeout = seconds(policy.FirstResponseSeconds)
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
@@ -62,7 +91,7 @@ func externalTransport(policy executionPolicy) *http.Transport {
 		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 		if err != nil { return nil, err }
 		if len(addresses) == 0 { return nil, errors.New("provider hostname has no public address") }
-		for _, address := range addresses { if !address.IP.IsGlobalUnicast() || address.IP.IsPrivate() || address.IP.IsLoopback() || address.IP.IsLinkLocalUnicast() { return nil, problem(400, "private_address", "供应商及素材地址必须指向公网 HTTPS 服务") } }
+		for _, address := range addresses { if isBlockedIP(address.IP) { return nil, problem(400, "private_address", "供应商及素材地址必须指向公网 HTTPS 服务") } }
 		var last error
 		for _, address := range addresses { connection, err := (&net.Dialer{Timeout: seconds(policy.ConnectSeconds)}).DialContext(ctx, network, net.JoinHostPort(address.IP.String(), port)); if err == nil { return connection, nil }; last = err }
 		return nil, last
@@ -70,9 +99,26 @@ func externalTransport(policy executionPolicy) *http.Transport {
 	return transport
 }
 
-type watchedBody struct { io.ReadCloser; timer *time.Timer; idle time.Duration; cancel context.CancelFunc; once sync.Once }
-func (b *watchedBody) Read(data []byte) (int, error) { n, err := b.ReadCloser.Read(data); if n > 0 { b.timer.Reset(b.idle) }; return n, err }
-func (b *watchedBody) Close() error { b.once.Do(func() { b.timer.Stop(); b.cancel() }); return b.ReadCloser.Close() }
+type watchedBody struct { io.ReadCloser; mu sync.Mutex; timer *time.Timer; idle time.Duration; cancel context.CancelFunc; closed bool }
+func (b *watchedBody) Read(data []byte) (int, error) {
+	n, err := b.ReadCloser.Read(data)
+	if n > 0 {
+		b.mu.Lock()
+		if !b.closed && b.timer != nil { b.timer.Reset(b.idle) }
+		b.mu.Unlock()
+	}
+	return n, err
+}
+func (b *watchedBody) Close() error {
+	b.mu.Lock()
+	if !b.closed {
+		b.closed = true
+		if b.timer != nil { b.timer.Stop() }
+		b.cancel()
+	}
+	b.mu.Unlock()
+	return b.ReadCloser.Close()
+}
 
 type modelResponseBody struct { io.ReadCloser; ctx context.Context; cancel context.CancelCauseFunc; idle time.Duration }
 
@@ -209,6 +255,8 @@ func (a *App) callText(ctx context.Context, turn AssistantTurn, snapshot executi
     })
 }
 
+const maxProviderResponseBytes int64 = 64 << 20
+
 func (a *App) persistProviderResponse(id string, body io.ReadCloser) (providerResult, error) {
 	defer body.Close()
 	directory := filepath.Join(a.root, "results")
@@ -217,7 +265,8 @@ func (a *App) persistProviderResponse(id string, body io.ReadCloser) (providerRe
 	file, err := os.OpenFile(name+".pending", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil { return providerResult{}, err }
 	defer os.Remove(file.Name())
-	_, err = io.Copy(file, body)
+	written, err := io.Copy(file, io.LimitReader(body, maxProviderResponseBytes+1))
+	if err == nil && written > maxProviderResponseBytes { err = problem(413, "provider_response_too_large", "供应商响应体积超过 64 MiB 限制") }
 	if err == nil { err = file.Sync() }
 	closeErr := file.Close()
 	if err == nil { err = closeErr }

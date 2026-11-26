@@ -2,7 +2,7 @@ import { saveAs } from "file-saver";
 import { z } from "zod";
 import i18n from "@/i18n";
 
-import { createZip, readZip } from "@/lib/zip";
+import { createZip, readZip, ZipLimitError } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
 import { DEFAULT_ASSET_PROJECT_ID, uploadAsset, type ServerAsset } from "@/services/api/assets";
 import { captureSession } from "@/services/api/client";
@@ -47,7 +47,10 @@ export async function importAssetPackage(file: File, createTarget?: (projectTitl
     const assertSession = captureSession();
     const invalidPackage = () => new Error(i18n.t("backup.invalidPackage"));
     const missingOriginal = () => new Error(i18n.t("backup.missingOriginal"));
-    const zip = await readZip(file).catch(() => { throw invalidPackage(); });
+    const zip = await readZip(file).catch((error) => {
+        if (error instanceof ZipLimitError) throw error;
+        throw invalidPackage();
+    });
     const assetFile = zip.get("assets.json");
     if (!assetFile) throw invalidPackage();
     const parsed = assetPackage.safeParse(await assetFile.text().then(JSON.parse).catch(() => null));

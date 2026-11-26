@@ -1,16 +1,113 @@
 package app
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-const sessionCookie = "dream_canvas_session"
+const (
+	sessionCookie          = "dream_canvas_session"
+	sessionTTL             = 30 * 24 * time.Hour
+	loginIPWindow          = time.Minute
+	loginIPMaxRequests     = 20
+	loginAccountMaxFails   = 5
+	loginAccountLockout    = 5 * time.Minute
+	loginBcryptWaitTimeout = 5 * time.Second
+)
+
+type loginAccountState struct {
+	fails     int
+	lockUntil time.Time
+	lastSeen  time.Time
+}
+
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	ips      map[string][]time.Time
+	accounts map[string]loginAccountState
+	lastTrim time.Time
+}
+
+func newLoginRateLimiter() *loginRateLimiter {
+	return &loginRateLimiter{ips: map[string][]time.Time{}, accounts: map[string]loginAccountState{}}
+}
+
+func (l *loginRateLimiter) trimLocked(now time.Time) {
+	if now.Sub(l.lastTrim) < time.Minute { return }
+	l.lastTrim = now
+	cutoff := now.Add(-loginIPWindow)
+	for ip, stamps := range l.ips {
+		kept := stamps[:0]
+		for _, ts := range stamps { if ts.After(cutoff) { kept = append(kept, ts) } }
+		if len(kept) == 0 { delete(l.ips, ip) } else { l.ips[ip] = kept }
+	}
+	for user, state := range l.accounts {
+		if !state.lockUntil.After(now) && now.Sub(state.lastSeen) > loginAccountLockout*2 { delete(l.accounts, user) }
+	}
+}
+
+func (l *loginRateLimiter) allow(ip, username string) error {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.trimLocked(now)
+	cutoff := now.Add(-loginIPWindow)
+	stamps := l.ips[ip][:0]
+	for _, ts := range l.ips[ip] { if ts.After(cutoff) { stamps = append(stamps, ts) } }
+	if len(stamps) >= loginIPMaxRequests {
+		l.ips[ip] = stamps
+		return problem(429, "rate_limited", "登录请求过于频繁，请稍后再试")
+	}
+	l.ips[ip] = append(stamps, now)
+	if username != "" {
+		if state, ok := l.accounts[username]; ok && state.lockUntil.After(now) {
+			return problem(429, "account_locked", "该账号连续登录失败次数过多，请 5 分钟后再试")
+		}
+	}
+	return nil
+}
+
+func (l *loginRateLimiter) recordFailure(username string) {
+	if username == "" { return }
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	state := l.accounts[username]
+	if !state.lockUntil.IsZero() && !state.lockUntil.After(now) { state.fails = 0; state.lockUntil = time.Time{} }
+	state.fails++
+	state.lastSeen = now
+	if state.fails >= loginAccountMaxFails { state.lockUntil = now.Add(loginAccountLockout); state.fails = 0 }
+	l.accounts[username] = state
+}
+
+func (l *loginRateLimiter) clearAccount(username string) {
+	if username == "" { return }
+	l.mu.Lock()
+	delete(l.accounts, username)
+	l.mu.Unlock()
+}
+
+func (a *App) acquireBcrypt(ctx context.Context) (func(), error) {
+	if a.bcryptGate == nil { return func() {}, nil }
+	timer := time.NewTimer(loginBcryptWaitTimeout)
+	defer timer.Stop()
+	select {
+	case a.bcryptGate <- struct{}{}:
+		return func() { <-a.bcryptGate }, nil
+	case <-timer.C:
+		return nil, problem(429, "auth_busy", "当前登录验证繁忙，请稍后重试")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func clearSessionCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteStrictMode)
@@ -64,7 +161,14 @@ func (a *App) authenticate(c *gin.Context) {
 	if err != nil { a.missingSession(c); return }
 	var session Session
 	var user User
-	if a.db.First(&session, "hash = ?", digest(token)).Error != nil || a.db.First(&user, "id = ? AND disabled = ?", session.UserID, false).Error != nil {
+	if a.db.First(&session, "hash = ?", digest(token)).Error != nil {
+		a.missingSession(c); return
+	}
+	if session.ExpiresAt.IsZero() || !session.ExpiresAt.After(time.Now()) {
+		_ = a.db.Delete(&Session{}, "hash = ?", session.Hash).Error
+		a.missingSession(c); return
+	}
+	if a.db.First(&user, "id = ? AND disabled = ?", session.UserID, false).Error != nil {
 		a.missingSession(c); return
 	}
 	if err := a.siteAccess(user); err != nil { clearSessionCookie(c); respondError(c, err); return }
@@ -82,15 +186,30 @@ func (a *App) authenticate(c *gin.Context) {
 func (a *App) login(c *gin.Context) {
 	var input struct { Username string `json:"username"`; Password string `json:"password"` }
 	if !bind(c, &input) { return }
+	username := strings.TrimSpace(input.Username)
+	if a.loginLimiter != nil {
+		if err := a.loginLimiter.allow(c.ClientIP(), strings.ToLower(username)); err != nil { respondError(c, err); return }
+	}
+	release, err := a.acquireBcrypt(c.Request.Context())
+	if err != nil { respondError(c, err); return }
 	var user User
-	err := a.db.First(&user, "username = ?", strings.TrimSpace(input.Username)).Error
+	err = a.db.First(&user, "username = ?", username).Error
 	// Still hash a missing username to avoid a cheap account-existence probe.
-	if err != nil { bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost) }
-	if err != nil || user.Disabled || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)) != nil {
+	var hashErr error
+	if err != nil {
+		_, _ = bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	} else {
+		hashErr = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password))
+	}
+	release()
+	if err != nil || user.Disabled || hashErr != nil {
+		if a.loginLimiter != nil { a.loginLimiter.recordFailure(strings.ToLower(username)) }
 		respondError(c, problem(401, "invalid_credentials", "用户名或密码不正确，或账号已停用")); return
 	}
+	if a.loginLimiter != nil { a.loginLimiter.clearAccount(strings.ToLower(username)) }
 	token := identifier()
-	session := Session{Hash: digest(token), UserID: user.ID, CSRF: identifier()}
+	expiresAt := time.Now().Add(sessionTTL)
+	session := Session{Hash: digest(token), UserID: user.ID, CSRF: identifier(), ExpiresAt: expiresAt}
 	err = a.db.Transaction(func(tx *gorm.DB) error {
 		if user.Role != "admin" {
 			var record RuntimeSettings
@@ -101,7 +220,7 @@ func (a *App) login(c *gin.Context) {
 	})
 	if err != nil { clearSessionCookie(c); respondError(c, err); return }
 	c.SetSameSite(http.SameSiteStrictMode)
-	c.SetCookie(sessionCookie, token, 0, "/", "", secureCookie(c), true)
+	c.SetCookie(sessionCookie, token, int(sessionTTL.Seconds()), "/", "", secureCookie(c), true)
 	c.JSON(200, gin.H{"user": user, "csrf": session.CSRF})
 }
 
@@ -130,7 +249,8 @@ func (a *App) setPassword(id, password string) error {
 		result := tx.Model(&User{}).Where("id = ?", id).Update("password", hash)
 		if result.Error != nil { return result.Error }
 		if result.RowsAffected == 0 { return gorm.ErrRecordNotFound }
-		return tx.Delete(&Session{}, "user_id = ?", id).Error
+		if err := tx.Delete(&Session{}, "user_id = ?", id).Error; err != nil { return err }
+		return tx.Delete(&AccessToken{}, "user_id = ?", id).Error
 	})
 	if err == nil { a.notify(id) }
 	return err

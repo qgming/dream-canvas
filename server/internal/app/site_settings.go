@@ -55,11 +55,30 @@ func (record RuntimeSettings) siteAvailability() siteAvailability {
 	return siteAvailability{Open: !record.SiteClosed, ImageWorkbenchOpen: !record.ImageWorkbenchClosed, VideoWorkbenchOpen: !record.VideoWorkbenchClosed}
 }
 
+func (a *App) invalidateSiteCache() {
+	a.siteMu.Lock()
+	a.siteCached = false
+	a.siteMu.Unlock()
+}
+
 func (a *App) getSiteAvailability() (siteAvailability, error) {
+	a.siteMu.RLock()
+	if a.siteCached {
+		val := a.siteVal
+		a.siteMu.RUnlock()
+		return val, nil
+	}
+	a.siteMu.RUnlock()
 	var record RuntimeSettings
 	err := a.db.Select("id", "site_closed", "image_workbench_closed", "video_workbench_closed").First(&record, 1).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) { err = nil }
-	return record.siteAvailability(), err
+	if err != nil { return siteAvailability{}, err }
+	val := record.siteAvailability()
+	a.siteMu.Lock()
+	a.siteVal = val
+	a.siteCached = true
+	a.siteMu.Unlock()
+	return val, nil
 }
 
 func (a *App) siteOpen() (bool, error) {
@@ -142,6 +161,7 @@ func (a *App) updateSiteSettings(userID string, version uint64, runtime *scriptR
 		return nil
 	})
 	if err != nil { return siteSettings{}, err }
+	a.invalidateSiteCache(); a.invalidatePolicyCache()
 	a.wakeFiles(); a.signalWork(); a.notifyCatalog()
 	return saved, nil
 }

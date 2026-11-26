@@ -66,6 +66,7 @@ func (a *App) SaveStorage(id string, input storageInput) (gin.H, error) {
 		return tx.Save(&row).Error
 	})
 	if err != nil { return nil, err }
+	a.invalidateSecretsCache()
 	a.signalWork(); a.notifyCatalog(); return gin.H{"storage": row, "hasCredential": true}, nil
 }
 
@@ -74,11 +75,13 @@ func (a *App) deleteStorage(c *gin.Context) {
 }
 
 func (a *App) DeleteStorage(id string) error {
-	return a.db.Transaction(func(tx *gorm.DB) error {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
 		used, err := storageInUse(tx, id); if err != nil { return err }
 		if used { return problem(409, "storage_in_use", "仍有资产、迁移或待删除文件引用此存储，不能移除") }
 		return tx.Delete(&ObjectStorage{}, "id = ?", id).Error
 	})
+	if err == nil { a.invalidateSecretsCache() }
+	return err
 }
 
 func (a *App) storageBucket(id string, policy executionPolicy) (*oss.Bucket, error) {

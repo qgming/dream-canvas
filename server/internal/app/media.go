@@ -23,10 +23,10 @@ func (a *App) probeMedia(ctx context.Context, asset *Asset, policy executionPoli
 	name, err := a.assetOriginalPath(*asset); if err != nil { a.logFailure(ctx, "asset.probe_failed", err, slog.String("asset_id", asset.ID)); asset.ProbeError = "原件路径无法读取"; return false }
 	// Upload/result writers already hold their transfer slot and file lease. Do not
 	// acquire a second file gate while holding that lease (cleanup uses the same gates).
-	a.previewMu.Lock(); defer a.previewMu.Unlock()
+	a.probeMu.Lock(); defer a.probeMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, seconds(policy.QuerySeconds)); defer cancel()
 	output := &limitedBuffer{limit: policy.JSONBytes}
-	command := exec.CommandContext(ctx, probe, "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", name)
+	command := exec.CommandContext(ctx, probe, "-v", "error", "-protocol_whitelist", "file", "-probesize", "20M", "-analyzeduration", "10M", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", name)
 	command.Stdout, command.Stderr = output, io.Discard
 	var info struct { Format struct { Duration string `json:"duration"` } `json:"format"`; Streams []struct { Type string `json:"codec_type"`; Codec string `json:"codec_name"`; Width int `json:"width"`; Height int `json:"height"`; Rate string `json:"avg_frame_rate"` } `json:"streams"` }
 	err = command.Run(); if err == nil { err = json.Unmarshal(output.Bytes(), &info) }
@@ -41,7 +41,7 @@ func (a *App) probeMedia(ctx context.Context, asset *Asset, policy executionPoli
 
 func videoPreview(ctx context.Context, source, target string) error {
 	program, err := exec.LookPath("ffmpeg"); if err != nil { return errors.New("服务器未安装 ffmpeg，原件仍保留") }
-	command := exec.CommandContext(ctx, program, "-nostdin", "-v", "error", "-protocol_whitelist", "file", "-i", source, "-frames:v", "1", "-an", "-vf", "scale=768:768:force_original_aspect_ratio=decrease", "-f", "image2", "-c:v", "png", "-y", target)
+	command := exec.CommandContext(ctx, program, "-nostdin", "-v", "error", "-protocol_whitelist", "file", "-threads", "1", "-probesize", "20M", "-analyzeduration", "10M", "-i", source, "-frames:v", "1", "-an", "-vf", "scale=768:768:force_original_aspect_ratio=decrease", "-f", "image2", "-c:v", "png", "-y", target)
 	command.Stdout, command.Stderr = io.Discard, io.Discard
 	if err := command.Run(); err != nil { return errors.New("视频封面提取失败或超出运行时限，原件仍保留") }
 	file, err := os.OpenFile(target, os.O_RDWR, 0600); if err != nil { return err }; defer file.Close(); return file.Sync()

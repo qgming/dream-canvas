@@ -25,7 +25,7 @@ function denormalize(value: Value): Value {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, denormalize(item)]));
 }
 export function projectContent(project: CanvasProject) {
-    const { id: _id, version: _version, createdAt: _created, updatedAt: _updated, ...content } = project;
+    const { id: _id, version: _version, createdAt: _created, updatedAt: _updated, viewport: _viewport, ...content } = project;
     return normalize(JSON.parse(JSON.stringify(content)) as Value);
 }
 export function projectChanges(before: CanvasProject, after: CanvasProject): Operation[] {

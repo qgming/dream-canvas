@@ -86,7 +86,7 @@ func (p executionPolicy) scriptJSONBytes() int64 {
 }
 
 func suggestedPolicy() executionPolicy {
-	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 1 << 30, JSONBytes: 8 << 20, ScriptRuntime: defaultScriptRuntime()}
+	return executionPolicy{AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2, TransferSlots: 1, PreviewSlots: 1, ConnectSeconds: 10, QuerySeconds: 60, FirstResponseSeconds: 120, IdleSeconds: 120, TextSeconds: 1800, ImageSeconds: 900, AudioSeconds: 600, PollSeconds: 10, QueryFailures: 3, MaxWaitSeconds: 86400, TransferSeconds: 3600, DownloadRetrySeconds: []int{30, 120, 600}, StorageRetrySeconds: []int{30, 120, 600, 1800}, SignedURLSeconds: 7200, ImageBytes: 50 << 20, AudioBytes: 200 << 20, VideoBytes: 4 << 30, JSONBytes: 8 << 20, ScriptRuntime: defaultScriptRuntime()}
 }
 
 func encode(value any) JSON { data, _ := json.Marshal(value); return data }
@@ -99,10 +99,48 @@ func armDeadline(limit time.Duration, expire func()) func() {
 	return func() { if !timer.Stop() { <-done } }
 }
 
+func (a *App) invalidatePolicyCache() {
+	a.policyMu.Lock()
+	a.policyCached = false
+	a.policyMu.Unlock()
+}
+
+func cloneExecutionPolicy(p executionPolicy) executionPolicy {
+	if p.ScriptRuntime != nil {
+		cp := make(scriptRuntimeSettings, len(p.ScriptRuntime))
+		for k, v := range p.ScriptRuntime { cp[k] = v }
+		p.ScriptRuntime = cp
+	}
+	if p.DownloadRetrySeconds != nil {
+		cp := make([]int, len(p.DownloadRetrySeconds))
+		copy(cp, p.DownloadRetrySeconds)
+		p.DownloadRetrySeconds = cp
+	}
+	if p.StorageRetrySeconds != nil {
+		cp := make([]int, len(p.StorageRetrySeconds))
+		copy(cp, p.StorageRetrySeconds)
+		p.StorageRetrySeconds = cp
+	}
+	return p
+}
+
 func (a *App) executionPolicy() (executionPolicy, error) {
+	a.policyMu.RLock()
+	if a.policyCached {
+		val := cloneExecutionPolicy(a.policyVal)
+		a.policyMu.RUnlock()
+		return val, nil
+	}
+	a.policyMu.RUnlock()
 	var record RuntimeSettings
 	if err := a.db.First(&record, 1).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return executionPolicy{}, err }
-	return record.executionPolicy()
+	policy, err := record.executionPolicy()
+	if err != nil { return policy, err }
+	a.policyMu.Lock()
+	a.policyVal = cloneExecutionPolicy(policy)
+	a.policyCached = true
+	a.policyMu.Unlock()
+	return policy, nil
 }
 
 func (record RuntimeSettings) executionPolicy() (executionPolicy, error) {

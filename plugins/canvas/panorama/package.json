@@ -12,6 +12,10 @@
     "devDependencies": {
         "@dream-canvas/plugin-sdk": "file:../sdk",
         "@types/react": "19.1.12",
+        "@types/three": "^0.187.0",
         "typescript": "^5"
+    },
+    "dependencies": {
+        "three": "^0.187.0"
     }
 }

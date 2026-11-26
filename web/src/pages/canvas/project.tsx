@@ -209,6 +209,7 @@ function InfiniteCanvasPage() {
     const hydrated = useCanvasStore((state) => state.hydrated);
     const createProject = useCanvasStore((state) => state.createProject);
     const updateProject = useCanvasStore((state) => state.updateProject);
+    const setProjectViewport = useCanvasStore((state) => state.setProjectViewport);
     const startEditingProject = useCanvasUiStore((state) => state.startEditingProject);
     const deleteProject = useCanvasStore((state) => state.deleteProject);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
@@ -228,8 +229,8 @@ function InfiniteCanvasPage() {
     }, [projectId, updateProject]);
     const setViewport = useCallback((value: React.SetStateAction<ViewportTransform>) => {
         const project = useCanvasStore.getState().openProject(projectId);
-        if (project) updateProject(projectId, { viewport: typeof value === "function" ? value(project.viewport) : value });
-    }, [projectId, updateProject]);
+        if (project) setProjectViewport(projectId, typeof value === "function" ? value(project.viewport) : value);
+    }, [projectId, setProjectViewport]);
     const [canvasTool, setCanvasTool] = useState<"select" | "pan">("pan");
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
@@ -242,7 +243,31 @@ function InfiniteCanvasPage() {
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [nodeCreatePosition, setNodeCreatePosition] = useState<Position | null>(null);
-    const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+    const [localRunningNodes, setLocalRunningNodes] = useState<Record<string, number>>({});
+    const markNodeRunning = useCallback((nodeId: string) => {
+        setLocalRunningNodes((prev) => ({ ...prev, [nodeId]: (prev[nodeId] || 0) + 1 }));
+    }, []);
+    const unmarkNodeRunning = useCallback((nodeId: string) => {
+        setLocalRunningNodes((prev) => {
+            const count = prev[nodeId] || 0;
+            if (count <= 0) return prev;
+            if (count === 1) {
+                const { [nodeId]: _removed, ...rest } = prev;
+                return rest;
+            }
+            return { ...prev, [nodeId]: count - 1 };
+        });
+    }, []);
+    const clearNodeRunning = useCallback((nodeIds: Iterable<string>) => {
+        setLocalRunningNodes((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const id of nodeIds) {
+                if (id in next) { delete next[id]; changed = true; }
+            }
+            return changed ? next : prev;
+        });
+    }, []);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const backgroundMode = currentProject?.backgroundMode || "lines";
     const showParameterInfo = currentProject?.showImageInfo || false;
@@ -273,9 +298,10 @@ function InfiniteCanvasPage() {
     const taskStates = useGenerationProgressStore((state) => state.tasks);
     const runningNodeIds = useMemo(() => {
         const ids = new Set(Object.values(taskStates).filter((task) => task.projectId === projectId && ["queued", "waiting_assets", "submitting", "running", "saving"].includes(task.status)).map((task) => task.nodeId));
+        for (const id of Object.keys(localRunningNodes)) ids.add(id);
         for (const connection of connections) if (ids.has(connection.toNodeId) && nodes.some((node) => node.id === connection.fromNodeId && node.type === CanvasNodeType.Config)) ids.add(connection.fromNodeId);
         return ids;
-    }, [taskStates, projectId, connections, nodes]);
+    }, [taskStates, projectId, localRunningNodes, connections, nodes]);
     const [resultsNodeId, setResultsNodeId] = useState<string | null>(null);
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [isNodeResizing, setIsNodeResizing] = useState(false);
@@ -303,6 +329,7 @@ function InfiniteCanvasPage() {
         generationRequestsRef.current.clear();
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         useCanvasStore.getState().endOperation(projectId);
+        useCanvasStore.getState().flushPending(projectId);
     }, [projectId]);
 
     useEffect(() => {
@@ -345,7 +372,7 @@ function InfiniteCanvasPage() {
             let controller: AbortController | undefined;
             try {
                 const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
-                setRunningNodeId(node.id);
+                markNodeRunning(node.id);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
                 controller = startGenerationRequest(node.id, node.id, node.id, undefined, taskId);
                 await waitForVideoGenerationTask(generationConfig, { id: taskId, provider: "server", model: generationConfig.model }, { signal: controller.signal });
@@ -372,11 +399,11 @@ function InfiniteCanvasPage() {
                 videoPollIdsRef.current.delete(node.id);
                 if (controller) {
                     finishGenerationRequest(node.id, controller);
-                    setRunningNodeId((current) => (current === node.id ? null : current));
                 }
+                unmarkNodeRunning(node.id);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, notify, openModelSettings, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, markNodeRunning, notify, openModelSettings, startGenerationRequest, t, unmarkNodeRunning],
     );
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
@@ -392,7 +419,7 @@ function InfiniteCanvasPage() {
             affectedNodeIds.add(request.targetNodeId);
             affectedNodeIds.add(request.originNodeId);
         });
-        setRunningNodeId((current) => (current === runningId ? null : current));
+        clearNodeRunning(affectedNodeIds);
         if (!affectedNodeIds.size) return;
         void Promise.all([...signals].map(cancelGenerationsForSignal).concat(Object.values(useGenerationProgressStore.getState().tasks).filter((task) => task.projectId === projectId && task.nodeId && affectedNodeIds.has(task.nodeId) && !["succeeded", "failed", "cancelled", "interrupted"].includes(task.status)).map((task) => cancelGeneration(task.id).then(() => undefined)))).catch((error: unknown) => notify.error(error instanceof Error ? error.message : t("workspace.cancelFailed")));
         setNodes((prev) =>
@@ -411,7 +438,7 @@ function InfiniteCanvasPage() {
                     : node,
             ),
         );
-    }, [notify, projectId, t]);
+    }, [clearNodeRunning, notify, projectId, t]);
 
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
@@ -789,13 +816,13 @@ function InfiniteCanvasPage() {
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
-            setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
+            clearNodeRunning(allIds);
             setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
             setResultsNodeId((current) => current && allIds.has(current) ? null : current);
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId],
+        [chatSessions, cleanupCanvasFiles, clearNodeRunning, projectId],
     );
 
     const groupSelection = useCallback(() => {
@@ -1997,7 +2024,7 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             setMaskEditNodeId(null);
             if (!payload.generate) return;
-            setRunningNodeId(childId);
+            markNodeRunning(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
                 const target = await prepareGenerationTarget(childId, controller.signal);
@@ -2009,10 +2036,10 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);
-                setRunningNodeId(null);
+                unmarkNodeRunning(childId);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, notify, openModelSettings, prepareGenerationTarget, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, markNodeRunning, notify, openModelSettings, prepareGenerationTarget, startGenerationRequest, t, unmarkNodeRunning],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -2058,7 +2085,7 @@ function InfiniteCanvasPage() {
                 { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
             ]);
             setAngleNodeId(null);
-            setRunningNodeId(childId);
+            markNodeRunning(childId);
             setNodes((prev) => [
                 ...prev,
                 {
@@ -2089,10 +2116,10 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);
-                setRunningNodeId(null);
+                unmarkNodeRunning(childId);
             }
         },
-        [effectiveConfig, finishGenerationRequest, openModelSettings, prepareGenerationTarget, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, markNodeRunning, openModelSettings, prepareGenerationTarget, startGenerationRequest, t, unmarkNodeRunning],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2347,7 +2374,7 @@ function InfiniteCanvasPage() {
             if (sourceNode && builtinPanel?.writeBackToSelf && builtinPanel.mode === "image") {
                 const scene = prompt.trim();
                 if (!scene) return;
-                setRunningNodeId(nodeId);
+                markNodeRunning(nodeId);
                 const controller = startGenerationRequest(nodeId, nodeId, nodeId);
                 setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: scene, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
                 try {
@@ -2366,12 +2393,12 @@ function InfiniteCanvasPage() {
                     }
                 } finally {
                     finishGenerationRequest(nodeId, controller);
-                    setRunningNodeId((current) => current === nodeId ? null : current);
+                    unmarkNodeRunning(nodeId);
                 }
                 return;
             }
 
-            setRunningNodeId(nodeId);
+            markNodeRunning(nodeId);
             const overwriteExisting = effectiveConfig.nodeRegenerateBehavior === "overwrite";
             const runController = startGenerationRequest(nodeId, nodeId, nodeId);
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
@@ -2599,10 +2626,10 @@ function InfiniteCanvasPage() {
             } finally {
                 for (const targetId of pendingChildIds) finishGenerationRequest(targetId, runController);
                 finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
+                unmarkNodeRunning(nodeId);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, notify, openModelSettings, prepareGenerationTarget, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, markNodeRunning, notify, openModelSettings, prepareGenerationTarget, startGenerationRequest, t, unmarkNodeRunning],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -2648,7 +2675,7 @@ function InfiniteCanvasPage() {
             }
             const retryImages = retryReferenceImages || [];
 
-            setRunningNodeId(node.id);
+            markNodeRunning(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_LOADING, errorDetails: undefined } : image)) } } : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
 
@@ -2697,10 +2724,10 @@ function InfiniteCanvasPage() {
                 );
             } finally {
                 finishGenerationRequest(node.id, controller);
-                setRunningNodeId(null);
+                unmarkNodeRunning(node.id);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, notify, openModelSettings, pollVideoNodeTask, prepareGenerationTarget, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, markNodeRunning, notify, openModelSettings, pollVideoNodeTask, prepareGenerationTarget, startGenerationRequest, t, unmarkNodeRunning],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
@@ -2788,7 +2815,7 @@ function InfiniteCanvasPage() {
                     node={panelNode}
                     nodes={nodes}
                     connections={connections}
-                    isRunning={runningNodeId === panelNode.id || runningNodeIds.has(panelNode.id)}
+                    isRunning={runningNodeIds.has(panelNode.id)}
                     mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || EMPTY_REFERENCES}
                     onPromptChange={handleNodePromptChange}
                     onConfigChange={handleConfigNodeChange}
@@ -2800,7 +2827,7 @@ function InfiniteCanvasPage() {
                     modeOverride={getNodeDefinition(panelNode.type)?.useBuiltinPanel?.mode}
                 />
             ),
-        [confirmStopGeneration, connections, disconnectNodeReference, handleAddReference, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, nodes, renderPluginPanel, reorderNodeReference, runningNodeId, runningNodeIds],
+        [confirmStopGeneration, connections, disconnectNodeReference, handleAddReference, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, nodes, renderPluginPanel, reorderNodeReference, runningNodeIds],
     );
 
     const renderNodeContentPanel = useCallback(
@@ -2809,10 +2836,10 @@ function InfiniteCanvasPage() {
                 node={contentNode}
                 nodes={nodes}
                 connections={connections}
-                isRunning={runningNodeId === contentNode.id || runningNodeIds.has(contentNode.id)}
+                isRunning={runningNodeIds.has(contentNode.id)}
             />
         ),
-        [connections, nodes, runningNodeId, runningNodeIds],
+        [connections, nodes, runningNodeIds],
     );
 
     if (!projectLoaded && projectError) return <main className="flex h-full items-center justify-center bg-background p-6"><Alert type="error" title={appI18n.t("workspace.canvasLoadFailed")} description={projectError} action={<div className="flex gap-2"><Button onClick={() => void useCanvasStore.getState().loadProjects()}>{appI18n.t("workspace.retryRead")}</Button><Button variant="outline" onClick={() => navigate("/canvas")}>{appI18n.t("workspace.projectList")}</Button></div>} /></main>;

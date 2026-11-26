@@ -95,7 +95,7 @@ func (a *App) DeleteChannel(channelID string, version uint64, confirmed bool) er
 		if err := tx.Delete(&AssetVoice{}, "channel_id = ?", channel.ID).Error; err != nil { return err }
 		return tx.Delete(&channel).Error
 	})
-	if err == nil { a.notifyCatalog() }
+	if err == nil { a.invalidateSecretsCache(); a.notifyCatalog() }
 	return err
 }
 
@@ -177,6 +177,7 @@ func (a *App) SaveChannel(channelID string, input channelInput) (gin.H, error) {
 		return tx.First(&channel, "id = ?", channel.ID).Error
 	})
 	if err != nil { return nil, err }
+	a.invalidateSecretsCache()
 	a.notifyCatalog()
 	return gin.H{"channel": channel, "hasCredential": channel.Secret != ""}, nil
 }

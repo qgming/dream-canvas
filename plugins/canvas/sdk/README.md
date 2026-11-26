@@ -73,7 +73,7 @@ await buildPlugin(import.meta.url);
 ## 设计约束
 
 - **React 单例**:JSX 与 hooks 惰性读取 `globalThis.InfiniteCanvasRuntime.React`(宿主在加载插件前注入),react 全程 external,绝不打包第二份。
-- **依赖**:后台自建包仅解析包内相对模块、宿主 React 与 SDK，不提供 npm 或远程模块导入。现有内置全景源码仍按需加载 three。
+- **依赖**:后台自建包仅解析包内相对模块、宿主 React 与 SDK，不提供 npm 或远程模块导入。现有内置全景源码随前端本地打包并按需懒加载 `three`。
 - **类型真源**:`src/types.ts` 是宿主 `web/src/types/canvas-plugin.ts` 公开契约的镜像;宿主契约变更时同步此处。
 
 后台草稿必须同时维护 `plugin.json` 和入口，元数据从清单读取，固定插件 ID 不可修改。此 SDK 的独立源码示例需要按当前后台包约定适配，完整流程见 [节点插件说明](../README.md)。

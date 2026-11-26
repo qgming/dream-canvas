@@ -8,6 +8,8 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       DREAM_CANVAS_TRUSTED_PROXIES: ${DREAM_CANVAS_TRUSTED_PROXIES:-}
+      GOMEMLIMIT: ${GOMEMLIMIT:-650MiB}
+      GOGC: ${GOGC:-75}
     ports:
       - "${DREAM_CANVAS_BIND:-127.0.0.1}:${DREAM_CANVAS_PORT:-8080}:8080"
     volumes:

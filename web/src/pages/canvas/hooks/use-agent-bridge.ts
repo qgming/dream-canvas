@@ -60,7 +60,7 @@ export function useAgentBridge(params: AgentBridgeParams) {
         const current = latestClient.current;
         if (!current || command.projectId !== projectId || command.revision !== current.revision) return false;
         if (command.kind === "client_select" && command.value.nodeIds?.every((id) => nodesRef.current.some((node) => node.id === id))) { pendingApplication.current = command; setSelectedNodeIds(new Set(command.value.nodeIds)); setSelectedConnectionId(null); return null; }
-        if (command.kind === "client_viewport" && command.value.viewport) { pendingApplication.current = command; setViewport(command.value.viewport); return null; }
+        if (command.kind === "client_viewport" && command.value.viewport) { pendingApplication.current = command; useCanvasStore.getState().setProjectViewport(projectId, command.value.viewport, true); return null; }
         if (command.kind === "client_navigate" && command.value.projectId && !editGuard?.dirty) { if (command.value.projectId === projectId) return true; navigationCommand = command; navigate(`/canvas/${encodeURIComponent(command.value.projectId)}`); return null; }
         return false;
     };
@@ -136,7 +136,8 @@ export function useAgentBridge(params: AgentBridgeParams) {
             setConnections(next.connections);
             setSelectedNodeIds(new Set(next.selectedNodeIds));
             setSelectedConnectionId(null);
-            setViewport(next.viewport);
+            if (safeOps.some((op) => op.type === "set_viewport")) useCanvasStore.getState().setProjectViewport(projectId, next.viewport, true);
+            else setViewport(next.viewport);
             setContextMenu(null);
             if (generationOps.length) {
                 queueMicrotask(() =>

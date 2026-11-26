@@ -29,13 +29,10 @@ const config: AiConfig = {
         {
             id: "replacement",
             name: "Replacement",
-            baseUrl: "https://example.com",
-            apiKey: "test-key",
-            apiFormat: "openai",
             models: [
-                { name: "video-b", capability: "video" },
-                { name: "video-a", capability: "video" },
-                { name: "image-a", capability: "image" },
+                { id: "m-video-b", name: "video-b", label: "video-b", version: 1, features: {}, capability: "video", parameters: [] },
+                { id: "m-video-a", name: "video-a", label: "video-a", version: 1, features: {}, capability: "video", parameters: [] },
+                { id: "m-image-a", name: "image-a", label: "image-a", version: 1, features: {}, capability: "image", parameters: [] },
             ],
         },
     ],
@@ -84,13 +81,13 @@ test("switching generation capability still selects a model of the new capabilit
     expect(resolveModelForCapability(config, "replacement::image-a", "video")).toBe("replacement::video-b");
 });
 
-test("changing only the key on the same provider preserves the saved model and task", () => {
+test("disabling or removing a channel invalidates readiness while keeping the saved selection and task", () => {
     const node = videoNode("replacement::video-a");
-    const selected = buildGenerationConfig({ ...config, channels: [{ ...config.channels[0], apiKey: "rotated-key" }] }, node, "video");
+    const selected = buildGenerationConfig(config, node, "video");
     expect(selected.model).toBe("replacement::video-a");
     expect(ready(selected, selected.model)).toBe(true);
     expect(node.metadata?.videoTaskId).toBe("original-task");
-    expect(ready({ ...selected, channels: [{ ...config.channels[0], apiKey: "" }] }, selected.model)).toBe(false);
+    expect(ready({ ...selected, channels: [] }, selected.model)).toBe(false);
 });
 
 test("unavailable explicit selections are preserved for every generation capability", () => {

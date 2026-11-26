@@ -240,6 +240,10 @@ func (a *App) ResumeTask(userID, id string) (GenerationTask, error) {
 	var task GenerationTask
 	if err := a.db.First(&task, "id = ? AND user_id = ?", id, userID).Error; err != nil { return task, err }
 	if task.Status != "confirmation_required" { return task, problem(409, "resume_unavailable", "仅待确认任务可继续核对") }
+	a.workMu.Lock()
+	busy := a.active["task:"+task.ID] != nil || a.active["results:"+task.ID] != nil
+	a.workMu.Unlock()
+	if busy { return task, problem(409, "task_active", "任务后台处理尚未退出，请稍后再试") }
 	if err := a.recoverTaskResponse(&task); err != nil { return task, err }
 	status := "running"
 	var result providerResult
@@ -253,14 +257,22 @@ func (a *App) ResumeTask(userID, id string) (GenerationTask, error) {
 func (a *App) taskEvents(c *gin.Context) {
 	var task GenerationTask
 	if err := a.db.First(&task, "id = ? AND user_id = ?", c.Param("id"), currentUser(c).ID).Error; err != nil { respondError(c, err); return }
-	updates, stop := a.subscribe(currentUser(c).ID)
+	updates, stop, err := a.subscribe(currentUser(c).ID)
+	if err != nil { respondError(c, err); return }
 	defer stop()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("X-Accel-Buffering", "no")
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		if !a.sessionValid(c) { return }
 		if err := a.db.First(&task, "id = ? AND user_id = ?", task.ID, currentUser(c).ID).Error; err != nil { return }
 		if writeEvent(c, "snapshot", task) != nil || terminalTask(task.Status) || task.Status == "confirmation_required" { return }
-		select { case <-c.Request.Context().Done(): return; case <-updates: }
+		select {
+		case <-c.Request.Context().Done(): return
+		case <-heartbeat.C:
+			if !a.sessionValid(c) || writeHeartbeat(c) != nil { return }
+		case <-updates:
+		}
 	}
 }

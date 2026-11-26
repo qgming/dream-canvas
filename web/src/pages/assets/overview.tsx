@@ -110,7 +110,7 @@ export default function AssetProjectsPage() {
                 {importError ? <Notice type="error" title={importError} onClose={() => setImportError("")} /> : null}
                 {transfer ? <p role="status" className="text-xs text-muted-foreground">{t(transfer === "import" ? "backup.importing" : "backup.exporting")}</p> : null}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    <AssetProjectCard count={countFor(DEFAULT_ASSET_PROJECT_ID)} />
+                    {matchesDefault ? <AssetProjectCard count={countFor(DEFAULT_ASSET_PROJECT_ID)} /> : null}
                     {visibleProjects.map((project) => <AssetProjectCard key={project.id} project={project} count={countFor(project.id)} actions={[
                         { key: "rename", label: t("assetProjects.rename"), icon: <Pencil />, disabled: Boolean(transfer), onClick: () => setEditor({ project }) },
                         { key: "export", label: t("assets.export"), icon: <Download />, disabled: Boolean(transfer), onClick: () => void exportProject(project) },

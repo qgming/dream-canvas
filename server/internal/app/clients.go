@@ -10,6 +10,9 @@ import (
 	"gorm.io/gorm"
 )
 
+const maxUserClients = 16
+const clientOfflineTTL = 10 * time.Minute
+
 type onlineClient struct {
 	ID string `json:"id"`
 	UserID string `json:"-"`
@@ -21,6 +24,7 @@ type onlineClient struct {
 	Nodes []string `json:"nodeIds"`
 	Viewport map[string]float64 `json:"viewport"`
 	connection string
+	lastSeen time.Time
 }
 
 type clientRegistry struct { sync.Mutex; entries map[string]onlineClient }
@@ -44,15 +48,48 @@ func validViewport(viewport map[string]float64) bool {
 	for _, key := range []string{"x", "y", "k"} { value, ok := viewport[key]; if !ok || math.IsNaN(value) || math.IsInf(value, 0) { return false } }; return true
 }
 
+func (a *App) pruneClientsLocked(userID string, now time.Time) {
+	for id, entry := range a.clients.entries {
+		if entry.UserID == userID && entry.connection == "" && !entry.lastSeen.IsZero() && now.Sub(entry.lastSeen) > clientOfflineTTL {
+			delete(a.clients.entries, id)
+		}
+	}
+}
+
 func (a *App) saveClient(c *gin.Context) {
 	var input onlineClient; if !bind(c, &input) { return }
 	if _, err := a.assetPath(input.ID); err != nil || input.Revision == 0 || input.Registration == 0 || !validViewport(input.Viewport) { respondError(c, problem(400, "invalid_client", "客户端编号、版本或视口不正确")); return }
 	if _, err := a.GetProject(currentUser(c).ID, input.ProjectID); err != nil { respondError(c, err); return }
 	input.UserID = currentUser(c).ID
+	now := time.Now()
 	a.clients.Lock()
+	a.pruneClientsLocked(input.UserID, now)
 	previous, exists := a.clients.entries[input.ID]
 	if exists && (previous.UserID != input.UserID || previous.Registration > input.Registration || previous.Revision > input.Revision || previous.Registration == input.Registration && previous.Revision == input.Revision && string(encode(previous)) != string(encode(input))) { a.clients.Unlock(); respondError(c, problem(409, "client_changed", "客户端状态已更新")); return }
-	if previous.Registration == input.Registration { input.connection = previous.connection }; a.clients.entries[input.ID] = input
+	if !exists {
+		count := 0
+		oldestOfflineID := ""
+		var oldestOfflineTime time.Time
+		for id, entry := range a.clients.entries {
+			if entry.UserID != input.UserID { continue }
+			count++
+			if entry.connection == "" && (oldestOfflineID == "" || entry.lastSeen.Before(oldestOfflineTime)) {
+				oldestOfflineID, oldestOfflineTime = id, entry.lastSeen
+			}
+		}
+		if count >= maxUserClients {
+			if oldestOfflineID != "" {
+				delete(a.clients.entries, oldestOfflineID)
+			} else {
+				a.clients.Unlock()
+				respondError(c, problem(429, "too_many_clients", "当前账号在线页面过多，请关闭多余标签页后重试"))
+				return
+			}
+		}
+	}
+	if previous.Registration == input.Registration { input.connection = previous.connection }
+	input.lastSeen = now
+	a.clients.entries[input.ID] = input
 	a.clients.Unlock(); c.Status(204)
 }
 
@@ -66,21 +103,42 @@ func (a *App) removeClient(c *gin.Context) {
 // Online means an authenticated SSE connection exists; no guessed heartbeat expiry is used.
 func (a *App) clientEvents(c *gin.Context) {
 	id, userID, connection := c.Param("id"), currentUser(c).ID, identifier()
-	a.clients.Lock(); client, exists := a.clients.entries[id]
-	if !exists || client.UserID != userID || text(client.Registration) != c.Query("registration") { a.clients.Unlock(); respondError(c, problem(404, "client_missing", "客户端尚未注册或连接已更新")); return }
-	client.connection = connection; a.clients.entries[id] = client; a.clients.Unlock()
+	registration := c.Query("registration")
+	a.clients.Lock(); client, exists := a.clients.entries[id]; a.clients.Unlock()
+	if !exists || client.UserID != userID || text(client.Registration) != registration { respondError(c, problem(404, "client_missing", "客户端尚未注册或连接已更新")); return }
+	updates, stop, err := a.subscribe(userID)
+	if err != nil { respondError(c, err); return }
+	defer stop()
+	a.clients.Lock()
+	client, exists = a.clients.entries[id]
+	if !exists || client.UserID != userID || text(client.Registration) != registration { a.clients.Unlock(); respondError(c, problem(404, "client_missing", "客户端尚未注册或连接已更新")); return }
+	client.connection = connection
+	client.lastSeen = time.Now()
+	a.clients.entries[id] = client
+	a.clients.Unlock()
 	defer func() {
 		a.clients.Lock(); defer a.clients.Unlock()
-		if current, ok := a.clients.entries[id]; ok && current.Registration == client.Registration && current.connection == connection { current.connection = ""; a.clients.entries[id] = current; a.db.Model(&ClientCommand{}).Where("client_id = ? AND user_id = ? AND status = ?", id, userID, "pending").Updates(map[string]any{"status": "interrupted", "error": "客户端已离线，页面操作未确认"}) }
+		if current, ok := a.clients.entries[id]; ok && current.Registration == client.Registration && current.connection == connection {
+			current.connection = ""
+			current.lastSeen = time.Now()
+			a.clients.entries[id] = current
+			a.db.Model(&ClientCommand{}).Where("client_id = ? AND user_id = ? AND status = ?", id, userID, "pending").Updates(map[string]any{"status": "interrupted", "error": "客户端已离线，页面操作未确认"})
+		}
 	}()
-	updates, stop := a.subscribe(userID); defer stop()
 	c.Header("Content-Type", "text/event-stream"); c.Header("X-Accel-Buffering", "no")
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		if !a.sessionValid(c) { return }
 		a.clients.Lock(); current, exists := a.clients.entries[id]; a.clients.Unlock(); if !exists || current.connection != connection { return }
 		commands := []ClientCommand{}; if err := a.db.Where("client_id = ? AND user_id = ? AND status = ?", id, userID, "pending").Order("created_at").Find(&commands).Error; err != nil { return }
 		if writeEvent(c, "commands", commands) != nil { return }
-		select { case <-c.Request.Context().Done(): return; case <-updates: }
+		select {
+		case <-c.Request.Context().Done(): return
+		case <-heartbeat.C:
+			if !a.sessionValid(c) || writeHeartbeat(c) != nil { return }
+		case <-updates:
+		}
 	}
 }
 

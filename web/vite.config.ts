@@ -19,11 +19,12 @@ export default defineConfig({
     },
     plugins: [react()],
     resolve: {
-        dedupe: ["react", "react-dom", "react-i18next", "lucide-react"],
+        dedupe: ["react", "react-dom", "react-i18next", "lucide-react", "three"],
         alias: {
             "@": resolve(webDir, "src"),
             "@dream-canvas/plugin-sdk": resolve(webDir, "../plugins/canvas/sdk/src"),
             "react": resolve(webDir, "node_modules/react"),
+            "three": resolve(webDir, "node_modules/three"),
         },
     },
     define: {

@@ -39,6 +39,7 @@ func TestAssetCleanupRetryReusesExistingOperation(t *testing.T) {
 					if _, err := application.CallBusiness(context.Background(), Principal{User: User{ID: "owner"}, Scopes: []string{"edit"}}, "asset_cleanup", map[string]any{"assetId": asset.ID}); err != nil { t.Fatal(err) }
 				}
 			}
+			saved = FileOperation{}
 			if err := application.db.First(&saved, "id = ?", operation.ID).Error; err != nil { t.Fatal(err) }
 			if saved.Attempts != 3 || saved.NextRunAt != nil || saved.Error != operation.Error { t.Fatal("retry replaced the operation or erased its history") }
 			var count int64
@@ -144,6 +145,7 @@ func TestLocalAssetCleanupDetachesUnavailableStorageAndMigrationCopies(t *testin
 			if err := queueAssetCleanup(a.db, asset.ID); err != nil { t.Fatal(err) }
 			if err := a.db.First(&asset, "id = ?", asset.ID).Error; err != nil { t.Fatal(err) }
 			if !asset.RetainCloud || asset.DeleteState != "pending" { t.Fatal("cloud retention was not persisted") }
+			operation = FileOperation{}
 			if err := a.db.First(&operation, "id = ?", previous.ID).Error; err != nil { t.Fatal(err) }
 			if operation.Attempts != previous.Attempts || operation.Error != previous.Error || operation.NextRunAt != nil { t.Fatal("changing cleanup mode replaced the queue or erased retry history") }
 			// Another live asset must continue protecting its storage configuration.

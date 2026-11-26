@@ -96,7 +96,7 @@ func (a *App) mcpHandler() http.Handler {
 		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		principal, err := a.tokenPrincipal(raw)
 		if err != nil { return nil }
-		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.4"}, nil)
+		server := mcp.NewServer(&mcp.Implementation{Name: "dream-canvas", Version: "0.1.5"}, nil)
 		for _, tool := range businessTools() {
 			if !principal.allows(tool.Scope, "") || len(principal.Projects) > 0 && isAssetProjectTool(tool.Name) { continue }
 			mcp.AddTool(server, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}, func(ctx context.Context, request *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {
@@ -278,6 +278,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 	case "workbench_records", "workbench_record_save", "workbench_record_remove":
 		if len(p.Projects) > 0 { return nil, problem(403, "workbench_scope", "全局工作台记录需要不限项目的授权") }
 		kind := text("kind"); if !includes([]string{"image", "video"}, kind) { return nil, problem(400, "invalid_workbench", "请选择图片或视频工作台") }
+		if err := a.requireWorkbenchOpen(kind); err != nil { return nil, err }
 		if name == "workbench_record_save" { return a.SaveWorkbenchRecord(p.User.ID, kind, text("recordId"), version, encode(input["value"])) }
 		if name == "workbench_record_remove" { pending, err := a.DeleteWorkbenchRecord(p.User.ID, kind, text("recordId"), version); return map[string]any{"removed": err == nil, "cleanupPending": pending}, err }
 		rows := []WorkbenchRecord{}; err := a.db.Where("user_id = ? AND kind = ? AND removed = ?", p.User.ID, kind, false).Order("created_at DESC").Find(&rows).Error; return rows, err
@@ -296,6 +297,7 @@ func (a *App) CallBusiness(ctx context.Context, p Principal, name string, input 
 		if err := json.Unmarshal(encode(input), &request); err != nil { return nil, err }
 		if len(p.Projects) > 0 && !includes(p.Projects, request.ProjectID) { return nil, problem(403, "project_scope", "任务需要令牌范围内的明确目标项目") }
 		for _, reference := range request.References { if err := a.checkTokenAsset(p, reference.AssetID); err != nil { return nil, err } }
+		if err := a.checkTokenParameterAssets(p, request); err != nil { return nil, err }
 		return a.CreateTask(p.User.ID, request)
 
 	case "tasks_list":
@@ -331,6 +333,24 @@ func (a *App) checkTokenAsset(p Principal, id string) error {
 	var count int64
 	if err := a.db.Model(&AssetReference{}).Where("asset_id = ? AND project_id IN ?", id, p.Projects).Count(&count).Error; err != nil { return err }
 	if count == 0 { return problem(403, "asset_scope", "资产不在令牌授权的项目范围内") }
+	return nil
+}
+
+func (a *App) checkTokenParameterAssets(p Principal, request generationInput) error {
+	if len(p.Projects) == 0 { return nil }
+	var params map[string]any
+	if len(request.Parameters) == 0 || json.Unmarshal(request.Parameters, &params) != nil || len(params) == 0 { return nil }
+	var model ChannelModel
+	if err := a.db.First(&model, "id = ? AND channel_id = ? AND enabled = ?", request.ModelID, request.ChannelID, true).Error; err != nil { return nil }
+	if err := hydrateModel(a.db, &model); err != nil { return err }
+	var controls []parameterControl
+	if json.Unmarshal(model.Parameters, &controls) != nil { return nil }
+	for _, control := range controls {
+		if control.Type != "asset" { continue }
+		if assetID := text(params[control.Key]); assetID != "" {
+			if err := a.checkTokenAsset(p, assetID); err != nil { return err }
+		}
+	}
 	return nil
 }
 

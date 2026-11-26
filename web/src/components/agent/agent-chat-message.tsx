@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { motionTokens, toCssTiming, useShouldReduceMotion } from "@animate-ui/react/utils/motion";
 import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/ui/media-preview";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Popover, Tooltip } from "@/components/ui/popover";
 import { Brain, Copy, LoaderCircle } from "lucide-react";
-import { Streamdown, type LinkSafetyModalProps } from "streamdown";
+import { Streamdown, defaultRehypePlugins, type LinkSafetyModalProps } from "streamdown";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -17,8 +17,34 @@ import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLa
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
 import { AgentStep, agentStepBodyClass } from "./agent-chat-steps";
 
+function isAllowedAssetImageSrc(src: string) {
+    const trimmed = src.trim();
+    if (!trimmed.startsWith("/api/assets/")) return false;
+    try {
+        const parsed = new URL(trimmed, window.location.origin);
+        return parsed.origin === window.location.origin && parsed.pathname.startsWith("/api/assets/");
+    } catch {
+        return false;
+    }
+}
+
+function AgentMarkdownImage({ src, alt, className, node: _node, ...rest }: ComponentProps<"img"> & { node?: unknown }) {
+    const rawSrc = typeof src === "string" ? src : "";
+    if (!isAllowedAssetImageSrc(rawSrc)) {
+        const label = alt?.trim() || rawSrc.trim();
+        return label ? <span className="text-xs text-muted-foreground">[{label}]</span> : null;
+    }
+    return <img src={rawSrc.trim()} alt={alt || ""} className={className ? `max-w-full rounded-lg ${className}` : "max-w-full rounded-lg"} loading="lazy" {...rest} />;
+}
+
+const streamdownComponents = { img: AgentMarkdownImage } as const;
+const safeRehypePlugins = [defaultRehypePlugins.sanitize, defaultRehypePlugins.harden];
+
 const streamdownProps = () => ({
     className: "agent-streamdown",
+    skipHtml: true,
+    rehypePlugins: safeRehypePlugins,
+    components: streamdownComponents,
     controls: { code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: false } },
     linkSafety: { enabled: true, renderModal: (props: LinkSafetyModalProps) => <AgentLinkModal {...props} /> },
     lineNumbers: false,
@@ -28,12 +54,28 @@ const streamdownProps = () => ({
 } as const);
 const streamdownAnimation = { ...toCssTiming(motionTokens.transition.fade), stagger: 0, sep: "word" } as const;
 
+function isAllowedExternalUrl(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    try {
+        const parsed = new URL(trimmed, window.location.origin);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
 function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProps) {
     const { t } = useTranslation();
     const copyText = useCopyText();
     const localPath = localFilePath(url);
+    const unsafeProtocol = !localPath && !isAllowedExternalUrl(url);
+    const openDisabled = Boolean(localPath) || unsafeProtocol;
+    const title = t(localPath ? "agent.message.openLocal" : unsafeProtocol ? "agent.message.unsafeLink" : "agent.message.openExternal");
+    const description = t(localPath ? "agent.message.localDescription" : unsafeProtocol ? "agent.message.unsafeLinkDescription" : "agent.message.externalDescription");
+    const confirmText = t(localPath ? "workspace.localPath" : unsafeProtocol ? "agent.message.unsafeLinkBlocked" : "agent.message.continueOpen");
     return (
-        <AlertDialog open={isOpen} onClose={onClose} title={t(localPath ? "agent.message.openLocal" : "agent.message.openExternal")} description={t(localPath ? "agent.message.localDescription" : "agent.message.externalDescription")} confirmDisabled={Boolean(localPath)} confirmText={t(localPath ? "workspace.localPath" : "agent.message.continueOpen")} onConfirm={() => { onConfirm(); onClose(); }} actions={
+        <AlertDialog open={isOpen} onClose={onClose} title={title} description={description} confirmDisabled={openDisabled} confirmText={confirmText} onConfirm={() => { if (openDisabled) return; onConfirm(); onClose(); }} actions={
                 <Button variant="outline" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.message.pathCopied" : "agent.message.linkCopied"))}>
                     {t(localPath ? "agent.message.copyPath" : "agent.message.copyLink")}
                 </Button>

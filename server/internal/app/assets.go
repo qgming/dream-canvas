@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -63,7 +64,9 @@ func (a *App) uploadAsset(c *gin.Context) {
 		respondError(c, problem(400, "invalid_media", "只支持图片、视频和音频原件")); return
 	}
 	kind := strings.Split(mimeType, "/")[0]
-	if policy, err := a.executionPolicy(); err == nil { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.mediaLimit(kind)) }
+	limit := suggestedPolicy().mediaLimit(kind)
+	if policy, err := a.executionPolicy(); err == nil && policy.mediaLimit(kind) > 0 { limit = policy.mediaLimit(kind) }
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 	source, detected, err := assetMediaSource(c.Request.Body)
 	if err != nil {
 		var limit *http.MaxBytesError
@@ -151,6 +154,8 @@ func (a *App) assetFile(c *gin.Context) {
 	c.Header("Content-Type", asset.MimeType)
 	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": asset.Title}))
 	c.Header("Content-Security-Policy", "sandbox")
+	c.Header("Cache-Control", "private, max-age=86400")
+	c.Header("ETag", fmt.Sprintf("\"%s-%d-%d\"", asset.ID, stat.Size(), stat.ModTime().UnixNano()))
 	http.ServeContent(c.Writer, c.Request, asset.Title, stat.ModTime(), file)
 }
 

@@ -1,6 +1,7 @@
-import { strToU8, unzipSync, zipSync } from "fflate";
+import { strToU8, zipSync } from "fflate";
 import { saveAs } from "file-saver";
 import i18n from "@/i18n";
+import { readZipEntries, SCRIPT_ZIP_LIMITS } from "@/lib/zip";
 
 export const validScriptFile = (name: string) => typeof name === "string" && /\.(js|json)$/.test(name) && !/[\\:\u0000\r\n]/.test(name) && name.split("/").every((part) => part && part !== "." && part !== ".." && !part.startsWith("."));
 export function scriptManifest(files: Record<string, string>) {
@@ -13,7 +14,7 @@ export function scriptManifest(files: Record<string, string>) {
 export async function importScriptPackage(file: File) {
     if (!file.name.toLowerCase().endsWith(".zip")) throw new Error(i18n.t("modelScripts.zipRequired"));
     const decoder = new TextDecoder("utf-8", { fatal: true });
-    const entries = Object.entries(unzipSync(new Uint8Array(await file.arrayBuffer()))).filter(([name]) => !name.endsWith("/")).map(([name, content]) => [name, decoder.decode(content)] as const);
+    const entries = Object.entries(await readZipEntries(file, SCRIPT_ZIP_LIMITS)).filter(([name]) => !name.endsWith("/")).map(([name, content]) => [name, decoder.decode(content)] as const);
     const manifest = entries.find(([name]) => name === "script.json") || entries.find(([name]) => name.endsWith("/script.json"));
     if (!manifest) throw new Error(i18n.t("modelScripts.invalidPackage"));
     const prefix = manifest[0].slice(0, -"script.json".length);

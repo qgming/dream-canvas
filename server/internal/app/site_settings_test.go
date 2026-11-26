@@ -50,8 +50,8 @@ func TestSiteWorkbenchAvailabilityIsIndependent(t *testing.T) {
 	a := siteTestApp(t)
 	open, closed := true, false
 	input := siteSettingsInput{Open: &open, ImageWorkbenchOpen: &closed, AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2}
-	updates, stop := a.subscribe("owner"); defer stop()
-	_, err := a.SaveSiteSettings("owner", input); requireSiteError(t, err, "forbidden")
+	updates, stop, err := a.subscribe("owner"); if err != nil { t.Fatal(err) }; defer stop()
+	_, err = a.SaveSiteSettings("owner", input); requireSiteError(t, err, "forbidden")
 	saved, err := a.SaveSiteSettings("admin", input); if err != nil { t.Fatal(err) }
 	if !saved.Open || saved.ImageWorkbenchOpen || !saved.VideoWorkbenchOpen { t.Fatalf("disabling image workbench changed other availability: %+v", saved) }
 	select { case <-updates: default: t.Fatal("connected users were not notified") }
@@ -90,7 +90,7 @@ func TestSiteScriptRuntimeSaveSharesValidationAndVersionAcrossEntries(t *testing
 	input["open"] = false
 	_, err = call(admin, input); requireSiteError(t, err, "invalid_script_runtime")
 	delete(input, "open")
-	updates, stop := a.subscribe(admin.User.ID); defer stop()
+	updates, stop, err := a.subscribe(admin.User.ID); if err != nil { t.Fatal(err) }; defer stop()
 	mcpResult, err := call(admin, input); if err != nil { t.Fatal(err) }
 	saved := mcpResult.(siteSettings)
 	select { case <-updates: default: t.Fatal("web settings readers did not receive a change event") }
@@ -118,10 +118,10 @@ func TestSiteClosureExpiresOnlyRegularSessionsAndPreservesSubmittedWork(t *testi
 	for _, value := range []any{&Session{Hash: "owner-session", UserID: "owner"}, &Session{Hash: "admin-session", UserID: "admin"}, &GenerationTask{ID: "submitted", UserID: "owner", Status: "running"}} {
 		if err := a.db.Create(value).Error; err != nil { t.Fatal(err) }
 	}
-	updates, stop := a.subscribe("owner"); defer stop()
+	updates, stop, err := a.subscribe("owner"); if err != nil { t.Fatal(err) }; defer stop()
 	open := false
 	input := siteSettingsInput{Open: &open, AssistantSlots: 1, GenerationSlots: 4, UserSlots: 2}
-	_, err := a.SaveSiteSettings("owner", input); requireSiteError(t, err, "forbidden")
+	_, err = a.SaveSiteSettings("owner", input); requireSiteError(t, err, "forbidden")
 	_, err = a.SaveSiteSettings("admin", input); requireSiteError(t, err, "confirmation_required")
 	input.Confirmed = true
 	saved, err := a.SaveSiteSettings("admin", input); if err != nil { t.Fatal(err) }

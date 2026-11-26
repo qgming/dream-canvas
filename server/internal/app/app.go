@@ -9,18 +9,25 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+type previewLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
 
 type App struct {
 	db *gorm.DB
@@ -37,7 +44,21 @@ type App struct {
 	workers sync.WaitGroup
 	workMu sync.Mutex
 	active map[string]context.CancelFunc
-	previewMu sync.Mutex
+	probeMu sync.Mutex
+	previewLocksMu sync.Mutex
+	previewLocks map[string]*previewLockEntry
+	bcryptGate chan struct{}
+	qjsGate chan struct{}
+	loginLimiter *loginRateLimiter
+	siteMu sync.RWMutex
+	siteCached bool
+	siteVal siteAvailability
+	policyMu sync.RWMutex
+	policyCached bool
+	policyVal executionPolicy
+	secretMu sync.RWMutex
+	secretCached bool
+	secretVal []string
 	clients clientRegistry
 	logs *appLogger
 }
@@ -53,10 +74,19 @@ func Open(root string) (*App, error) {
 	conn, err := db.DB()
 	if err != nil { return nil, err }
 	conn.SetMaxOpenConns(1)
-	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
+	for _, statement := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA cache_size=-8000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA mmap_size=0",
+	} {
 		if err := db.Exec(statement).Error; err != nil { conn.Close(); return nil, err }
 	}
 	if err := db.AutoMigrate(&User{}, &Session{}, &Project{}, &ProjectRevision{}, &AssetProject{}, &Asset{}, &AssetReference{}, &Channel{}, &ChannelModel{}, &ModelOrdering{}, &ModelScript{}, &ScriptDraft{}, &ScriptVersion{}, &CanvasPluginRecord{}, &CanvasPluginDraft{}, &CanvasPluginVersion{}, &AccessToken{}, &UserPreference{}, &WorkbenchRecord{}, &GenerationTask{}, &TaskAsset{}, &AssetVoice{}, &Prompt{}, &ClientCommand{}, &AssistantThread{}, &AssistantTurn{}, &AssistantItem{}, &AssistantSkill{}, &RuntimeSettings{}, &LogSettings{}, &ObjectStorage{}, &FileOperation{}, &UsageEntry{}, &UsageCorrection{}); err != nil { conn.Close(); return nil, err }
+	if err := db.Where("expires_at IS NULL OR expires_at <= ? OR expires_at = ?", time.Now(), time.Time{}).Delete(&Session{}).Error; err != nil { conn.Close(); return nil, err }
 	if _, err := os.Stat(filepath.Join(root, "credentials.key")); errors.Is(err, os.ErrNotExist) {
 		var count int64
 		if err := db.Model(&Channel{}).Where("secret <> ?", "").Count(&count).Error; err != nil { conn.Close(); return nil, err }
@@ -67,7 +97,22 @@ func Open(root string) (*App, error) {
 	credentials, err := openKey(root)
 	if err != nil { conn.Close(); return nil, err }
 	ctx, stop := context.WithCancel(context.Background())
-	service := &App{db: db, root: root, transfers: newFileGate(), previews: newFileGate(), credentials: credentials, events: map[string]map[chan string]bool{}, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), active: map[string]context.CancelFunc{}}
+	service := &App{
+		db: db,
+		root: root,
+		transfers: newFileGate(),
+		previews: newFileGate(),
+		credentials: credentials,
+		events: map[string]map[chan string]bool{},
+		ctx: ctx,
+		stop: stop,
+		wake: make(chan struct{}, 1),
+		active: map[string]context.CancelFunc{},
+		previewLocks: map[string]*previewLockEntry{},
+		bcryptGate: make(chan struct{}, 2),
+		qjsGate: make(chan struct{}, 2),
+		loginLimiter: newLoginRateLimiter(),
+	}
 	service.clients.entries = map[string]onlineClient{}
 	if err := service.openLogger(); err != nil { stop(); conn.Close(); return nil, err }
 	if err := service.installBuiltinScripts(); err != nil { stop(); conn.Close(); return nil, err }
@@ -115,7 +160,16 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 	r := gin.New()
 	if err := configureTrustedProxies(r, trustedProxies); err != nil { panic(err) }
 	r.Use(a.requestLogger(), gin.CustomRecoveryWithWriter(nil, a.recoverRequest), func(c *gin.Context) {
-		if policy, err := a.executionPolicy(); err == nil && policy.JSONBytes > 0 && strings.Contains(c.GetHeader("Content-Type"), "application/json") { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, policy.JSONBytes) }
+		if ct := c.GetHeader("Content-Type"); ct != "" {
+			mediaType, _, err := mime.ParseMediaType(ct)
+			if err != nil { mediaType = strings.TrimSpace(strings.Split(ct, ";")[0]) }
+			mediaType = strings.ToLower(mediaType)
+			if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
+				limit := suggestedPolicy().JSONBytes
+				if policy, err := a.executionPolicy(); err == nil && policy.JSONBytes > 0 { limit = policy.JSONBytes }
+				if limit > 0 { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit) }
+			}
+		}
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("Referrer-Policy", "same-origin")
 		c.Header("Cache-Control", "no-store")
@@ -262,7 +316,12 @@ func (a *App) Router(web, trustedProxies string) *gin.Engine {
 			name := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(c.Request.URL.Path, "/")))
 			rel, err := filepath.Rel(root, name)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) { c.Status(404); return }
-			if stat, err := os.Stat(name); err == nil && !stat.IsDir() { c.File(name); return }
+			if stat, err := os.Stat(name); err == nil && !stat.IsDir() {
+				if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+					c.Header("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				c.File(name); return
+			}
 			if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil { c.String(404, "前端尚未构建，请使用 Vite 开发服务"); return }
 			c.File(filepath.Join(root, "index.html"))
 		})

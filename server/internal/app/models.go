@@ -24,6 +24,7 @@ type Session struct {
 	UserID string `gorm:"index;not null"`
 	CSRF string
 	CreatedAt time.Time
+	ExpiresAt time.Time `gorm:"index"`
 }
 
 type Project struct {

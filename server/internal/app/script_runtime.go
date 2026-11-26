@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fastschema/qjs"
@@ -39,7 +40,9 @@ func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot, p
 	started := time.Now()
 	endInit := armDeadline(seconds(initLimit), func() { cancel(context.DeadlineExceeded) })
 	var initMS int64
-	closeRuntime := func() { cancel(nil) }
+	var releaseOnce sync.Once
+	releaseGate := func() {}
+	closeRuntime := func() { releaseGate(); cancel(nil) }
 	defer func() {
 		if recovered := recover(); recovered != nil { failure = panicError(recovered) }
 		endInit()
@@ -52,9 +55,18 @@ func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot, p
 		}
 	}()
 	if ctx.Err() != nil { return nil, nil, context.Cause(ctx) }
+	if a.qjsGate != nil {
+		select {
+		case a.qjsGate <- struct{}{}:
+			releaseGate = func() { releaseOnce.Do(func() { <-a.qjsGate }) }
+		case <-ctx.Done():
+			return nil, nil, context.Cause(ctx)
+		}
+	}
 	runtime, err := qjs.New(qjs.Option{Context: ctx, NoFilesystem: true, CloseOnContextDone: true, MemoryLimit: memory << 20, MemoryLimitPages: uint32(memory)*16, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil { return nil, nil, err }
 	closeRuntime = func() {
+		defer releaseGate()
 		defer cancel(nil)
 		defer func() { if recovered := recover(); recovered != nil && ctx.Err() == nil { a.logFailure(ctx, "script.runtime_close_failed", panicError(recovered)) } }()
 		runtime.Close()
@@ -82,9 +94,10 @@ func (a *App) scriptRunner(parent context.Context, snapshot executionSnapshot, p
 		}()
 		if ctx.Err() != nil { return nil, context.Cause(ctx) }
 		data, err := json.Marshal(input); if err != nil { return nil, err }; inputBytes = len(data); if int64(inputBytes) > jsonBytes { return nil, errScriptJSONLimit }
+		quotedInput, err := json.Marshal(string(data)); if err != nil { return nil, err }
 		// QJS_Eval already awaits promises; its return value is the resolved JSON string.
 		stage = "script_eval"
-		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+strconv.Quote(string(data))+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, err }; defer value.Free()
+		value, err := js.Eval("script.js", qjs.Code(`(async()=>{const run=async function(input,{encode,sign}){`+source+`};return JSON.stringify(await run(JSON.parse(`+string(quotedInput)+`),{encode:$encode,sign:$sign}));})()`)); if err != nil { return nil, err }; defer value.Free()
 		stage = "output"
 		encoded := value.String(); outputBytes = len(encoded); if int64(outputBytes) > jsonBytes { return nil, errScriptJSONLimit }
 		if json.Unmarshal([]byte(encoded), &output) != nil || output == nil { return nil, errors.New("script must return a valid JSON object") }; return output, nil
@@ -296,13 +309,29 @@ func (a *App) callModelScript(ctx context.Context, task GenerationTask, snapshot
 		var err error
 		arguments, err = a.scriptArguments(task, snapshot, input, true); if err != nil { return providerResult{}, &scriptPreparationError{cause: err, phase: phase} }
 	}
-	return a.executeModelScript(ctx, task, task.ID, snapshot, arguments, query, func(state map[string]any) error {
-		values := map[string]any{}
-		if content := text(state["text"]); task.Capability == "text" && content != task.Text { values["text"], task.Text = content, content }
-		if progress, err := scriptProgress(state); err != nil { return err } else if progress != nil && (task.Progress == nil || *task.Progress != *progress) { values["progress"], task.Progress = progress, progress }
-		if status := text(state["status"]); includes([]string{"queued", "running"}, status) && status != task.ProviderStatus { values["provider_status"], task.ProviderStatus = status, status }
-		if len(values) == 0 { return nil }; if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(values).Error; err != nil { return err }; a.notifyTopic(task.UserID, "tasks"); return nil
+	var lastFlush time.Time
+	dirty := false
+	pendingUpdates := map[string]any{}
+	flush := func() error {
+		if !dirty || len(pendingUpdates) == 0 { return nil }
+		if err := a.db.Model(&GenerationTask{}).Where("id = ?", task.ID).Updates(pendingUpdates).Error; err != nil { return err }
+		pendingUpdates = map[string]any{}
+		dirty = false
+		lastFlush = time.Now()
+		a.notifyTopic(task.UserID, "tasks")
+		return nil
+	}
+	result, err := a.executeModelScript(ctx, task, task.ID, snapshot, arguments, query, func(state map[string]any) error {
+		statusChanged := false
+		if content := text(state["text"]); task.Capability == "text" && content != task.Text { pendingUpdates["text"], task.Text, dirty = content, content, true }
+		if progress, err := scriptProgress(state); err != nil { return err } else if progress != nil && (task.Progress == nil || *task.Progress != *progress) { pendingUpdates["progress"], task.Progress, dirty = progress, progress, true }
+		if status := text(state["status"]); includes([]string{"queued", "running"}, status) && status != task.ProviderStatus { pendingUpdates["provider_status"], task.ProviderStatus, dirty, statusChanged = status, status, true, true }
+		if !dirty { return nil }
+		if statusChanged || time.Since(lastFlush) >= 200*time.Millisecond { return flush() }
+		return nil
 	})
+	_ = flush()
+	return result, err
 }
 
 func (a *App) executeModelScript(ctx context.Context, task GenerationTask, leaseID string, snapshot executionSnapshot, arguments map[string]any, query bool, onStream func(map[string]any) error) (providerResult, error) {
@@ -334,11 +363,15 @@ func (a *App) executeModelScript(ctx context.Context, task GenerationTask, lease
 		if err := a.persistScriptResponse(task.ID, phase, response, arguments); err != nil { return providerResult{}, err }
 	}
 	parseError := func(phase, detail string, cause error) error { return &scriptParseError{phase: phase, detail: detail, cause: cause, responseSaved: task.ID != ""} }
+	const maxScriptFollowups = 5
+	followups := 0
 	for {
 		if err := ctx.Err(); err != nil { return providerResult{}, parseError("结果", "", context.Cause(ctx)) }
 		parsed, err := a.runScript(ctx, snapshot, "result", scripts["result"], map[string]any{"response": response, "phase": phase, "input": arguments}); if err != nil { return providerResult{}, parseError("结果", "", err) }
 		if id := text(parsed["upstreamId"]); id != "" { arguments["upstreamId"] = id }
 		if follow := object(parsed["request"]); len(follow) > 0 {
+			followups++
+			if followups > maxScriptFollowups { return providerResult{}, parseError("后续查询", "接口插件单阶段后续查询次数超过上限（5 次）", nil) }
 			if strings.ToUpper(text(follow["method"])) != "GET" { return providerResult{}, parseError("后续只读请求", "", nil) }
 			if _, err := scriptProgress(parsed); err != nil { return providerResult{}, parseError("进度", "接口插件 progress 必须为供应商提供的 0–100 数值", err) }
 			previous := object(arguments["previousResult"]); for _, key := range []string{"usage", "usageState", "progress"} { if parsed[key] != nil { previous[key] = parsed[key] } }; arguments["previousResult"] = previous

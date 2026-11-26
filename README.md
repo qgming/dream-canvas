@@ -42,7 +42,7 @@
 
 项目面向个人与小团队自托管：前端负责交互，Go 服务统一管理账号、项目、私有资产、模型渠道、生成任务和助手执行，数据保存在自己的服务器上。界面支持中文、英文与黑白中性浅深主题。
 
-> 项目仍在持续开发与验收。文本、图片模型接入已通过用户实际测试；视频、TTS、助手工具调用、安全、任务恢复及性能等专项仍需独立验收。代码实施与实际验收进度见 [CHANGELOG](CHANGELOG.md)。
+> 项目仍在持续开发中，当前核心创作链路已可用，部分能力持续完善，详见 [更新日志](CHANGELOG.md)。
 
 ## 核心功能
 
@@ -50,12 +50,12 @@
 | --- | --- |
 | 无限画布 | 用文本、图片、视频、音频、生成配置和组节点组织创作；支持节点连线、自动保存、撤销 / 重做及项目导入导出。内置便利贴、3D 全景和超分节点。 |
 | 生图与视频工作台 | 提示词、参考素材、模型参数和生成记录集中编辑；图片保持原始比例展示，成品可下载或手动加入资产库。支持的创作模式与参数由所选模型的接口插件决定。 |
-| 私有资产库 | 统一管理文本、图片、视频和音频，跨项目复用素材；媒体原件保存在服务端，可后台同步至私有对象存储，分别显示保存与同步状态。 |
+| 私有资产库 | 统一管理文本、图片、视频和音频，按资产项目归档并跨画布复用素材；媒体原件保存在服务端，可后台同步或迁移至私有对象存储，分别显示保存与同步状态。 |
 | 灵感库 | 在同一个入口管理文本、图片、视频提示词与技能；包含项目内置内容及账号个人内容，支持搜索、筛选与在创作中选用。 |
-| 助手与 MCP | 全局助手通过业务工具整理项目、编辑节点、查找素材及提交生成任务；外部客户端通过 Streamable HTTP MCP 访问同一业务能力，按令牌限制项目和操作范围。 |
+| 助手与 MCP | 独立会话页与全局助手共用会话历史，通过业务工具整理项目、编辑节点、查找素材及提交生成任务；外部客户端通过 Streamable HTTP MCP 访问同一业务能力，按令牌限制项目和操作范围。 |
 | 渠道与接口插件 | 按「渠道 → 模型」配置和选择模型；内置 OpenAI 兼容文本、图片、TTS、视频接口及 Seedance、MiniMax 视频适配，自建 JavaScript 接口插件可配置输入、保存草稿与发布版本。 |
 | 任务与用量 | 在「设置 → 任务与用量」查看任务阶段、结果与待处理状态，以及按时间、项目、渠道、模型和类型筛选的调用次数；任务切页后继续在服务端处理。 |
-| 账号与站点管理 | 管理员创建和停用账号，配置站点开关、并发、接口插件运行时限与资源上限，以及渠道、对象存储、节点启停与日志；项目、资产和助手历史默认按用户隔离。 |
+| 账号与站点管理 | 管理员创建和停用账号，配置站点与工作台开关、并发、接口插件运行时限与资源上限，以及渠道、对象存储、节点启停与日志；项目、资产和助手历史默认按用户隔离。 |
 
 接口插件在服务端执行，画布节点插件在浏览器执行，两者的运行边界不同。节点扩展约定见 [节点插件说明](plugins/canvas/README.md)。
 
@@ -80,7 +80,7 @@ docker compose run --rm --no-deps dream-canvas -data /data -init-admin admin
 docker compose up -d
 ```
 
-打开 [http://localhost:8080](http://localhost:8080)，点击右上角「登录」，使用刚创建的管理员账号。默认仅允许部署机器本机访问；在服务器部署后，通过下方 [HTTPS 与域名](#https-与域名) 配置远程访问。请使用支持 Web Locks 的现代浏览器，通过 `localhost` 或 HTTPS 访问。
+打开 [http://localhost:8080](http://localhost:8080)，点击右上角「登录」，使用刚创建的管理员账号。默认仅允许部署机器本机访问；在服务器部署后，通过下方 [HTTPS 与域名](#https-与域名) 配置远程访问。建议使用现代浏览器通过 `localhost` 或 HTTPS 访问。
 
 ### 3. 添加模型，开始创作
 
@@ -131,7 +131,7 @@ docker compose pull
 docker compose up -d
 ```
 
-默认使用 `latest`，只随正式版本发布更新。需要固定版本时，在 `.env` 将 `DREAM_CANVAS_TAG` 设为已发布的标签（例如 0.1.4 发布后可设置 `DREAM_CANVAS_TAG=v0.1.4`）；之后升级先改为目标版本，再执行上述命令。**更新时不需要重新初始化管理员**。
+默认使用 `latest`，只随正式版本发布更新。需要固定版本时，在 `.env` 将 `DREAM_CANVAS_TAG` 设为已发布的标签（例如 `DREAM_CANVAS_TAG=v0.1.5`）；之后升级先改为目标版本，再执行上述命令。**更新时不需要重新初始化管理员**。
 
 常用管理命令：
 
@@ -231,6 +231,6 @@ docker compose -f compose.yaml -f compose.build.yaml up -d
 
 梦想画布由 **qgming** 设计、开发与维护，项目原创及新增内容署名 qgming。
 
-梦想画布项目部分理念和实现方式参考 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 和 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat)两个开源项目
+梦想画布部分理念和实现方式参考了 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 和 [DEEIX-Chat](https://github.com/DEEIX-AI/DEEIX-Chat) 两个开源项目。
 
 项目采用 [MIT License](LICENSE)，版权署名为 `Copyright (c) 2026 qgming`，同时保留上游原始版权声明。第三方组件遵循各自许可证：QuickJS WASM 绑定的来源与局部修改见 [第三方说明](server/third_party/qjs/NOTICE.md)；首页 Glyph 背景所附的 **MIT + Commons Clause** 条款见 [Animate UI 许可证](web/src/components/animate-ui/LICENSE.md)。

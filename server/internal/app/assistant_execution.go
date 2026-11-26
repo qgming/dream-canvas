@@ -199,6 +199,12 @@ func (a *App) finishAssistant(turn AssistantTurn, status, message string) {
 	a.notify(turn.UserID); a.signalWork()
 }
 
+const (
+	maxAssistantSteps        = 100
+	maxAssistantTurnDuration = 30 * time.Minute
+	streamFlushInterval      = 200 * time.Millisecond
+)
+
 func (a *App) executeAssistant(ctx context.Context, id string) {
 	a.executeAssistantWithText(ctx, id, a.callText)
 }
@@ -229,10 +235,12 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 	if a.db.Model(&AssistantTurn{}).Where("id = ? AND status IN ? AND cancel_requested = ?", turn.ID, []string{"queued", "waiting_tasks"}, false).Updates(map[string]any{"status": "running", "error": ""}).RowsAffected != 1 { return }
 	a.logEvent(ctx, slog.LevelInfo, "assistant.started", slog.Int("step", turn.Step), slog.String("channel_id", turn.ChannelID), slog.String("model_id", turn.ModelID))
 	limit := seconds(snapshot.Execution.Policy.TextSeconds)
-	runCtx, cancelRun := context.WithTimeout(ctx, limit)
-	defer func() { cancelRun() }()
+	turnCtx, cancelTurn := context.WithTimeout(ctx, maxAssistantTurnDuration)
+	defer cancelTurn()
 	for {
 		if ctx.Err() != nil { a.finishAssistantCallFailure(ctx, turn, &scriptPreparationError{phase: "submit", cause: context.Cause(ctx)}); return }
+		if turn.Step >= maxAssistantSteps { a.finishAssistant(turn, "partial", "已达到单轮最大执行步数上限（100 步），已完成内容已保留，可继续发送消息接着执行"); return }
+		if turnCtx.Err() != nil && ctx.Err() == nil { a.finishAssistant(turn, "partial", "已达到单轮最长执行时间上限（30 分钟），已完成内容已保留，可继续发送消息接着执行"); return }
 		if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，停止后续操作"); return }
 		if err := a.siteAccess(user); err != nil { a.finishAssistant(turn, "interrupted", "站点暂停访问，助手已停止后续调用；已提交的生成任务继续处理"); return }
 		principal.User = user
@@ -240,40 +248,49 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 		if snapshot.Purpose != "skill-draft" { toolCatalog = assistantTools(principal); tools = selectedAssistantTools(toolCatalog, snapshot.ToolGroup) }
 		catalogRole := user.Role
 		checkpoint := snapshot.Context
-		if err := a.prepareAssistantContext(ctx, turn, &snapshot, tools, callText); err != nil {
+		if err := a.prepareAssistantContext(turnCtx, turn, &snapshot, tools, callText); err != nil {
 			if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) { a.stopAssistant(turn); return }
+			if turnCtx.Err() != nil && ctx.Err() == nil { a.finishAssistant(turn, "partial", "已达到单轮最长执行时间上限（30 分钟），已完成内容已保留，可继续发送消息接着执行"); return }
 			a.finishAssistant(turn, "interrupted", assistantContextFailure(err)); return
 		}
 		if snapshot.Context != checkpoint {
-			cancelRun()
-			runCtx, cancelRun = context.WithTimeout(ctx, limit)
 			continue
 		}
-		if runCtx.Err() != nil { a.finishAssistantCallFailure(runCtx, turn, &scriptPreparationError{phase: "submit", cause: context.Cause(runCtx)}); return }
+		stepCtx, cancelStep := context.WithTimeout(turnCtx, limit)
+		if stepCtx.Err() != nil {
+			turnTimedOut := turnCtx.Err() != nil && ctx.Err() == nil
+			if turnTimedOut { cancelStep(); a.finishAssistant(turn, "partial", "已达到单轮最长执行时间上限（30 分钟），已完成内容已保留，可继续发送消息接着执行"); return }
+			a.finishAssistantCallFailure(stepCtx, turn, &scriptPreparationError{phase: "submit", cause: context.Cause(stepCtx)})
+			cancelStep()
+			return
+		}
 		messages, parameters, err := a.assistantMaterials(snapshot)
-		if err != nil { a.finishAssistant(turn, "interrupted", "轮次材料无法安全整理，模型未提交"); return }
+		if err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "轮次材料无法安全整理，模型未提交"); return }
 		if snapshot.ValidateAfterCompaction {
 			prepared := assistantInput(assistantSnapshot{Execution: snapshot.Execution, Messages: messages, Parameters: parameters, Media: snapshot.Media})
-			if err := a.validateScriptInput(turn.UserID, snapshot.Execution, prepared, tools); err != nil { var detail *Problem; message := "模型参数校验失败，未提交正式对话请求"; if errors.As(err, &detail) { message = detail.Message }; a.finishAssistant(turn, "failed", message); return }
+			if err := a.validateScriptInput(turn.UserID, snapshot.Execution, prepared, tools); err != nil { cancelStep(); var detail *Problem; message := "模型参数校验失败，未提交正式对话请求"; if errors.As(err, &detail) { message = detail.Message }; a.finishAssistant(turn, "failed", message); return }
 			snapshot.ValidateAfterCompaction = false
 		}
 		item := AssistantItem{ThreadID: turn.ThreadID, TurnID: turn.ID, ID: identifier(), UserID: turn.UserID, Role: "assistant", Detail: encode(map[string]any{"streaming": true})}
-		if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &item) }); err != nil { a.finishAssistant(turn, "interrupted", "消息持久保存失败，模型未提交"); return }
+		if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &item) }); err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "消息持久保存失败，模型未提交"); return }
 		usageID := fmt.Sprintf("turn:%s:%d", turn.ID, turn.Step)
 		usageStartedAt := time.Now()
-		if err := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, nil, snapshot.Execution, "unknown"); err != nil { a.finishAssistant(turn, "interrupted", "用量记录无法建立，模型未提交"); return }
+		if err := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, nil, snapshot.Execution, "unknown"); err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "用量记录无法建立，模型未提交"); return }
 		allowedTools := map[string]bool{}; for _, tool := range tools { allowedTools[assistantToolName(tool)] = true }
-		callCtx := withLogContext(runCtx, slog.Int("step", turn.Step))
+		callCtx := withLogContext(stepCtx, slog.Int("step", turn.Step))
 		a.logEvent(callCtx, slog.LevelDebug, "assistant.model_started", slog.Int("messages", len(messages)), slog.Int("tools", len(tools)))
 		a.notifyTopic(turn.UserID, "assistant")
 		callStarted := time.Now()
 		var streamedReasoning string
+		var lastStreamFlush time.Time
 		result, err := callText(callCtx, turn, snapshot.Execution, messages, parameters, snapshot.Media, tools, func(content, reasoning string) error {
 			if content == "" { content = item.Text }; if reasoning == "" { reasoning = streamedReasoning }
 			if content == item.Text && reasoning == streamedReasoning { return nil }
+			item.Text, streamedReasoning = content, reasoning
+			if time.Since(lastStreamFlush) < streamFlushInterval { return nil }
 			detail := encode(map[string]any{"streaming": true, "reasoning": reasoning})
 			if err := a.db.Model(&item).Updates(map[string]any{"text": content, "detail": detail}).Error; err != nil { return err }
-			item.Text, streamedReasoning = content, reasoning
+			lastStreamFlush = time.Now()
 			a.notifyTopic(turn.UserID, "assistant"); return nil
 		})
 		if result.Text == "" { result.Text = item.Text }; if strings.TrimSpace(result.Reasoning) == "" { result.Reasoning = streamedReasoning }
@@ -289,24 +306,31 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 			return true
 		}
 		if unsubmitted {
-			if !saveDetail() { a.finishAssistant(turn, "interrupted", "模型未提交，响应记录保存失败"); return }
-			if usageErr := a.discardUnsubmittedUsage(usageID, turn.UserID); usageErr != nil { a.finishAssistant(turn, "interrupted", "未提交供应商，但用量待确认记录无法清理"); return }
+			if !saveDetail() { cancelStep(); a.finishAssistant(turn, "interrupted", "模型未提交，响应记录保存失败"); return }
+			if usageErr := a.discardUnsubmittedUsage(usageID, turn.UserID); usageErr != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "未提交供应商，但用量待确认记录无法清理"); return }
 			detail["usageRecordPending"] = false
-			if !saveDetail() { a.finishAssistant(turn, "interrupted", "未提交供应商，用量标记无法更新"); return }
+			if !saveDetail() { cancelStep(); a.finishAssistant(turn, "interrupted", "未提交供应商，用量标记无法更新"); return }
 		} else {
-			if !saveDetail() { a.finishAssistant(turn, "interrupted", "模型响应持久保存失败，用量仍待确认，未重提模型或执行工具"); return }
-			if usageErr := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, result.Usage, snapshot.Execution, usageState); usageErr != nil { a.finishAssistant(turn, "interrupted", "模型已调用，但用量账本保存失败；用量依据已保存并等待后台补记，未执行后续工具或重提模型"); return }
+			if !saveDetail() { cancelStep(); a.finishAssistant(turn, "interrupted", "模型响应持久保存失败，用量仍待确认，未重提模型或执行工具"); return }
+			if usageErr := a.recordUsage(usageID, GenerationTask{UserID: turn.UserID, ProjectID: turn.ProjectID}, turn.ID, usageStartedAt, result.Usage, snapshot.Execution, usageState); usageErr != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "模型已调用，但用量账本保存失败；用量依据已保存并等待后台补记，未执行后续工具或重提模型"); return }
 			detail["usageRecordPending"] = false
-			if !saveDetail() { a.finishAssistant(turn, "interrupted", "用量确认记录保存失败，未执行后续工具"); return }
+			if !saveDetail() { cancelStep(); a.finishAssistant(turn, "interrupted", "用量确认记录保存失败，未执行后续工具"); return }
 		}
 		a.notifyTopic(turn.UserID, "assistant")
-		if err != nil { a.finishAssistantCallFailure(runCtx, turn, err); return }
-		if result.Status != "completed" { a.finishAssistant(turn, "failed", result.Error); return }
-		if !callsWellFormed { a.finishAssistant(turn, "interrupted", "供应商返回空白或重复工具编号，未执行本轮工具"); return }
+		if err != nil {
+			turnTimedOut := turnCtx.Err() != nil && ctx.Err() == nil
+			if turnTimedOut { cancelStep(); a.finishAssistant(turn, "partial", "已达到单轮最长执行时间上限（30 分钟），已完成内容已保留，可继续发送消息接着执行"); return }
+			a.finishAssistantCallFailure(stepCtx, turn, err)
+			cancelStep()
+			return
+		}
+		if result.Status != "completed" { cancelStep(); a.finishAssistant(turn, "failed", result.Error); return }
+		if !callsWellFormed { cancelStep(); a.finishAssistant(turn, "interrupted", "供应商返回空白或重复工具编号，未执行本轮工具"); return }
 		for id := range validCalls {
-			var count int64; if err := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, id).Count(&count).Error; err != nil { a.finishAssistant(turn, "interrupted", "工具执行记录无法核实，未执行本轮工具"); return }; if count > 0 { a.finishAssistant(turn, "interrupted", "供应商重复使用已执行工具编号，未重复执行"); return }
+			var count int64; if err := a.db.Model(&AssistantItem{}).Where("thread_id = ? AND turn_id = ? AND id = ?", turn.ThreadID, turn.ID, id).Count(&count).Error; err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "工具执行记录无法核实，未执行本轮工具"); return }; if count > 0 { cancelStep(); a.finishAssistant(turn, "interrupted", "供应商重复使用已执行工具编号，未重复执行"); return }
 		}
 		if snapshot.Purpose == "skill-draft" {
+			cancelStep()
 			var draft map[string]string
 			if json.Unmarshal([]byte(result.Text), &draft) != nil || !skillName.MatchString(draft["name"]) || draft["instructions"] == "" { a.finishAssistant(turn, "failed", "模型未返回有效 Skill 草稿，已收到内容保留，可手动整理"); return }
 			snapshot.Draft = encode(draft)
@@ -324,8 +348,13 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 		groupSelected := false
 		var pendingQuestion *AssistantItem
 		for _, call := range result.ToolCalls {
-			if runCtx.Err() != nil { a.stopAssistant(turn); return }
-			if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { a.finishAssistant(turn, "cancelled", "账号已停用，未执行后续工具"); return }
+			if stepCtx.Err() != nil {
+				turnTimedOut := turnCtx.Err() != nil && ctx.Err() == nil
+				cancelStep()
+				if turnTimedOut { a.finishAssistant(turn, "partial", "已达到单轮最长执行时间上限（30 分钟），已完成内容已保留，可继续发送消息接着执行"); return }
+				a.stopAssistant(turn); return
+			}
+			if a.db.First(&user, "id = ? AND disabled = ?", turn.UserID, false).Error != nil { cancelStep(); a.finishAssistant(turn, "cancelled", "账号已停用，未执行后续工具"); return }
 			function := object(call["function"])
 			name := text(function["name"]); allowed := allowedTools[name]
 			detail := map[string]any{"kind": "tool", "status": "running"}
@@ -361,10 +390,10 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 				todos, toolErr = parseAssistantTodos(arguments)
 				if toolErr == nil { detail["kind"], detail["todos"], value = "todo", todos, map[string]any{"todos": todos} }
 			} else {
-				if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &toolItem) }); err != nil { a.finishAssistant(turn, "interrupted", "工具调用记录保存失败，未执行操作"); return }
+				if err := a.db.Transaction(func(tx *gorm.DB) error { return appendAssistantItem(tx, &toolItem) }); err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "工具调用记录保存失败，未执行操作"); return }
 				a.notifyTopic(turn.UserID, "assistant")
 				principal.User = user
-				value, toolErr = a.CallBusiness(runCtx, principal, name, arguments)
+				value, toolErr = a.CallBusiness(stepCtx, principal, name, arguments)
 			}
 			toolFields := []slog.Attr{slog.Int("step", turn.Step), slog.String("tool_call_id_hash", digest(toolItem.ID)), slog.Int64("duration_ms", time.Since(toolStarted).Milliseconds()), slog.Bool("allowed", allowed)}
 			if allowed { toolFields = append(toolFields, slog.String("tool", name)) }
@@ -391,11 +420,12 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 				if newProject { if err := tx.Model(&AssistantTurn{}).Where("id = ?", turn.ID).Update("project_id", turn.ProjectID).Error; err != nil { return err } }
 				if toolItem.Sequence == 0 { return appendAssistantItem(tx, &toolItem) }
 				return tx.Model(&toolItem).Updates(map[string]any{"text": toolItem.Text, "detail": toolItem.Detail}).Error
-			}); err != nil { a.finishAssistant(turn, "interrupted", "工具结果保存失败，未重复执行"); return }
+			}); err != nil { cancelStep(); a.finishAssistant(turn, "interrupted", "工具结果保存失败，未重复执行"); return }
 			a.notifyTopic(turn.UserID, "assistant")
 			snapshot.appendMessage(toolItem.Sequence, map[string]any{"role": "tool", "tool_call_id": call["id"], "content": toolItem.Text})
 			if wait, ok := value.(taskWaitResult); ok && !wait.Ready { for _, id := range wait.TaskIDs { if !includes(snapshot.WaitingTaskIDs, id) { snapshot.WaitingTaskIDs = append(snapshot.WaitingTaskIDs, id) } } }
 		}
+		cancelStep()
 		if createdProject { snapshot.appendMessage(0, map[string]any{"role": "system", "content": "本轮新建项目已保存，目标项目现在固定为 "+turn.ProjectID+"，不能改用其他项目。"}) }
 		turn.Step++
 		if pendingQuestion != nil {
@@ -414,11 +444,13 @@ func (a *App) executeAssistantWithText(ctx context.Context, id string, callText 
 		a.notify(turn.UserID)
 		if nextStatus != "running" { a.logEvent(ctx, slog.LevelDebug, "assistant.waiting", slog.String("status", nextStatus), slog.Int("step", turn.Step)); return }
 		if len(result.ToolCalls) == 0 {
-			err := a.prepareAssistantContext(ctx, turn, &snapshot, tools, callText)
+			err := a.prepareAssistantContext(turnCtx, turn, &snapshot, tools, callText)
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) { a.stopAssistant(turn); return }
 			a.finishAssistant(turn, "succeeded", result.Error)
-			if snapshot.AutoTitle && runCtx.Err() == nil {
-				if err := a.generateAssistantTitle(runCtx, turn, snapshot, callText); err != nil && runCtx.Err() == nil { a.logFailure(ctx, "assistant.title_failed", err) }
+			if snapshot.AutoTitle && turnCtx.Err() == nil {
+				titleCtx, cancelTitle := context.WithTimeout(turnCtx, limit)
+				if err := a.generateAssistantTitle(titleCtx, turn, snapshot, callText); err != nil && titleCtx.Err() == nil { a.logFailure(ctx, "assistant.title_failed", err) }
+				cancelTitle()
 			}
 			return
 		}

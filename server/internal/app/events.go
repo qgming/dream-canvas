@@ -3,14 +3,22 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
+const maxUserSSEStreams = 8
+const sseHeartbeatInterval = 25 * time.Second
+
 // Notifications only wake a reader; authoritative snapshots always come from SQLite.
-func (a *App) subscribe(userID string) (<-chan string, func()) {
+func (a *App) subscribe(userID string) (<-chan string, func(), error) {
 	ch := make(chan string, 1)
 	a.eventsMu.Lock()
+	if len(a.events[userID]) >= maxUserSSEStreams {
+		a.eventsMu.Unlock()
+		return nil, nil, problem(429, "too_many_streams", "当前账号同时打开的实时连接过多，请关闭多余标签页后重试")
+	}
 	if a.events[userID] == nil { a.events[userID] = map[chan string]bool{} }
 	a.events[userID][ch] = true
 	a.eventsMu.Unlock()
@@ -19,7 +27,7 @@ func (a *App) subscribe(userID string) (<-chan string, func()) {
 		delete(a.events[userID], ch)
 		if len(a.events[userID]) == 0 { delete(a.events, userID) }
 		a.eventsMu.Unlock()
-	}
+	}, nil
 }
 
 func (a *App) notify(userID string) {
@@ -44,18 +52,25 @@ func writeEvent(c *gin.Context, name string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil { return err }
 	_, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", name, data)
-	c.Writer.Flush()
+	if err == nil { c.Writer.Flush() }
+	return err
+}
+
+func writeHeartbeat(c *gin.Context) error {
+	_, err := fmt.Fprint(c.Writer, ": ping\n\n")
+	if err == nil { c.Writer.Flush() }
 	return err
 }
 
 func (a *App) sessionValid(c *gin.Context) bool {
 	if a.siteAccess(currentUser(c)) != nil { return false }
 	var count int64
-	return a.db.Model(&Session{}).Where("hash = ? AND user_id IN (?)", c.GetString("session"), a.db.Model(&User{}).Select("id").Where("id = ? AND disabled = ?", currentUser(c).ID, false)).Count(&count).Error == nil && count == 1
+	return a.db.Model(&Session{}).Where("hash = ? AND expires_at > ? AND user_id IN (?)", c.GetString("session"), time.Now(), a.db.Model(&User{}).Select("id").Where("id = ? AND disabled = ?", currentUser(c).ID, false)).Count(&count).Error == nil && count == 1
 }
 
 func (a *App) userEvents(c *gin.Context) {
-	updates, stop := a.subscribe(currentUser(c).ID)
+	updates, stop, err := a.subscribe(currentUser(c).ID)
+	if err != nil { respondError(c, err); return }
 	defer stop()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("X-Accel-Buffering", "no")
@@ -68,9 +83,13 @@ func (a *App) userEvents(c *gin.Context) {
 	}
 	if closed() { return }
 	if writeEvent(c, "changed", map[string]bool{"refresh": true}) != nil { return }
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-c.Request.Context().Done(): return
+		case <-heartbeat.C:
+			if closed() || !a.sessionValid(c) || writeHeartbeat(c) != nil { return }
 		case topic := <-updates:
 			if closed() { return }
 			if !a.sessionValid(c) { return }

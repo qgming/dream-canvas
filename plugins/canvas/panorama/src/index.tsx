@@ -1,19 +1,71 @@
 // 3D 全景节点:等距柱状(equirectangular)360° 全景查看器。
 // 三种取图方式:① 从上游图片节点自动取图 ② 本地上传 ③ AI 生成(复用宿主内置生成面板)。
-// three.js 从 CDN 按需加载,不打进 bundle。AI 生成通过 useBuiltinPanel 声明,结果写回本节点。
+// three.js 通过本地依赖动态按需加载,仅在渲染 3D 全景节点时才加载 chunk。AI 生成通过 useBuiltinPanel 声明,结果写回本节点。
 import { definePlugin, useCallback, useEffect, useRef, useState } from "@dream-canvas/plugin-sdk";
 import type { CanvasNodeContentProps } from "@dream-canvas/plugin-sdk";
 import { useTranslation } from "react-i18next";
 import { Globe2, Upload } from "lucide-react";
+import type { MeshBasicMaterial, SphereGeometry, Texture, WebGLRenderer } from "three";
 import i18n from "../../../../web/src/i18n";
 import { useFeedback } from "../../../../web/src/hooks/use-feedback";
 import { uploadImage } from "../../../../web/src/services/image-storage";
 import { captureSession } from "../../../../web/src/services/api/client";
 
-// three 从 CDN 动态加载(env.d.ts 里声明为 any),不打进 bundle
-let threePromise: Promise<any> | undefined;
-function loadThree(): Promise<any> {
-    if (!threePromise) threePromise = import(/* @vite-ignore */ "https://esm.sh/three@0.180.0");
+type ThreeRuntime = Pick<
+    typeof import("three"),
+    | "CanvasTexture"
+    | "LinearFilter"
+    | "MathUtils"
+    | "Mesh"
+    | "MeshBasicMaterial"
+    | "PerspectiveCamera"
+    | "SRGBColorSpace"
+    | "Scene"
+    | "SphereGeometry"
+    | "Texture"
+    | "Vector3"
+    | "WebGLRenderer"
+>;
+
+// 按需动态加载 three.js;若加载失败则清理缓存 Promise,允许后续重试
+let threePromise: Promise<ThreeRuntime> | undefined;
+function loadThree(): Promise<ThreeRuntime> {
+    if (!threePromise) {
+        threePromise = import("three")
+            .then(
+                ({
+                    CanvasTexture,
+                    LinearFilter,
+                    MathUtils,
+                    Mesh,
+                    MeshBasicMaterial,
+                    PerspectiveCamera,
+                    SRGBColorSpace,
+                    Scene,
+                    SphereGeometry,
+                    Texture,
+                    Vector3,
+                    WebGLRenderer,
+                }) => ({
+                    CanvasTexture,
+                    LinearFilter,
+                    MathUtils,
+                    Mesh,
+                    MeshBasicMaterial,
+                    PerspectiveCamera,
+                    SRGBColorSpace,
+                    Scene,
+                    SphereGeometry,
+                    Texture,
+                    Vector3,
+                    WebGLRenderer,
+                }),
+            )
+            .catch((error) => {
+                threePromise = undefined;
+                throw error;
+            });
+    }
     return threePromise;
 }
 
@@ -27,7 +79,7 @@ const PANORAMA_UPLOAD_EVENT = "panorama:upload";
 
 // ---------------------------------------------------------------------------
 // 全景查看器:球体内壁贴等距柱状纹理,指针拖动转视角、滚轮缩放 fov。
-// 自适应容器尺寸(ResizeObserver);超过 GPU 上限的大图先降采样,避免加载失败。
+// 按需渲染(仅在交互、缩放、纹理载入或容器尺寸变化时调度一帧);超过 GPU 上限的大图先降采样,避免加载失败。
 // ---------------------------------------------------------------------------
 function PanoramaViewer({ src }: { src: string }) {
     const { t } = useTranslation();
@@ -39,155 +91,192 @@ function PanoramaViewer({ src }: { src: string }) {
         if (!mount || !src) return;
         let disposed = false;
         let frame = 0;
-        let renderer: any = null;
-        let geometry: any = null;
-        let material: any = null;
-        let texture: any = null;
+        let renderer: WebGLRenderer | null = null;
+        let geometry: SphereGeometry | null = null;
+        let material: MeshBasicMaterial | null = null;
+        let texture: Texture | null = null;
         let resizeObserver: ResizeObserver | null = null;
         let cleanupEvents = () => {};
 
         setStatus("loading");
 
         loadThree()
-            .then((THREE: any) => {
-                if (disposed || !mountRef.current) return;
+            .then(
+                ({
+                    CanvasTexture,
+                    LinearFilter,
+                    MathUtils,
+                    Mesh,
+                    MeshBasicMaterial,
+                    PerspectiveCamera,
+                    SRGBColorSpace,
+                    Scene,
+                    SphereGeometry,
+                    Texture,
+                    Vector3,
+                    WebGLRenderer,
+                }) => {
+                    if (disposed || !mountRef.current) return;
 
-                const scene = new THREE.Scene();
-                const camera = new THREE.PerspectiveCamera(70, 1, 1, 1100);
-                const target = new THREE.Vector3();
+                    const scene = new Scene();
+                    const camera = new PerspectiveCamera(70, 1, 1, 1100);
+                    const target = new Vector3();
 
-                renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-                renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-                renderer.setClearColor(0x000000, 1);
-                const canvas: HTMLCanvasElement = renderer.domElement;
-                canvas.style.width = "100%";
-                canvas.style.height = "100%";
-                canvas.style.display = "block";
-                canvas.style.cursor = "grab";
-                mount.appendChild(canvas);
-                const maxTextureSide = Math.min(renderer.capabilities.maxTextureSize || 4096, 4096);
-
-                geometry = new THREE.SphereGeometry(500, 96, 64);
-                geometry.scale(-1, 1, 1); // 翻转法线,从球心向内看
-                material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-                scene.add(new THREE.Mesh(geometry, material));
-
-                // 视角状态
-                let lon = 0;
-                let lat = 0;
-                let fov = 70;
-                let dragging = false;
-                let startX = 0;
-                let startY = 0;
-                let startLon = 0;
-                let startLat = 0;
-
-                const onDown = (event: PointerEvent) => {
-                    dragging = true;
-                    startX = event.clientX;
-                    startY = event.clientY;
-                    startLon = lon;
-                    startLat = lat;
-                    canvas.style.cursor = "grabbing";
-                    canvas.setPointerCapture?.(event.pointerId);
-                };
-                const onMove = (event: PointerEvent) => {
-                    if (!dragging) return;
-                    lon = startLon - (event.clientX - startX) * 0.12;
-                    lat = Math.max(-84, Math.min(84, startLat + (event.clientY - startY) * 0.12));
-                };
-                const onUp = () => {
-                    dragging = false;
+                    renderer = new WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+                    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+                    renderer.setClearColor(0x000000, 1);
+                    const canvas: HTMLCanvasElement = renderer.domElement;
+                    canvas.style.width = "100%";
+                    canvas.style.height = "100%";
+                    canvas.style.display = "block";
                     canvas.style.cursor = "grab";
-                };
-                const onWheel = (event: WheelEvent) => {
-                    event.preventDefault();
-                    fov = Math.max(38, Math.min(86, fov + event.deltaY * 0.035));
-                };
-                canvas.addEventListener("pointerdown", onDown);
-                canvas.addEventListener("pointermove", onMove);
-                canvas.addEventListener("pointerup", onUp);
-                canvas.addEventListener("pointercancel", onUp);
-                canvas.addEventListener("wheel", onWheel, { passive: false });
-                cleanupEvents = () => {
-                    canvas.removeEventListener("pointerdown", onDown);
-                    canvas.removeEventListener("pointermove", onMove);
-                    canvas.removeEventListener("pointerup", onUp);
-                    canvas.removeEventListener("pointercancel", onUp);
-                    canvas.removeEventListener("wheel", onWheel);
-                };
+                    mount.appendChild(canvas);
+                    const maxTextureSide = Math.min(renderer.capabilities.maxTextureSize || 4096, 4096);
 
-                const resize = () => {
-                    if (!renderer || !mountRef.current) return;
-                    const width = Math.max(1, mountRef.current.clientWidth);
-                    const height = Math.max(1, mountRef.current.clientHeight);
-                    renderer.setSize(width, height, false);
-                    camera.aspect = width / height;
-                    camera.updateProjectionMatrix();
-                };
-                resizeObserver = new ResizeObserver(resize);
-                resizeObserver.observe(mount);
-                resize();
+                    geometry = new SphereGeometry(500, 96, 64);
+                    geometry.scale(-1, 1, 1); // 翻转法线,从球心向内看
+                    material = new MeshBasicMaterial({ color: 0xffffff });
+                    scene.add(new Mesh(geometry, material));
 
-                const render = () => {
-                    if (disposed || !renderer) return;
-                    if (!dragging) lon += 0.02; // 缓慢自转
-                    camera.fov = fov;
-                    camera.updateProjectionMatrix();
-                    const phi = THREE.MathUtils.degToRad(90 - lat);
-                    const theta = THREE.MathUtils.degToRad(lon);
-                    target.set(500 * Math.sin(phi) * Math.cos(theta), 500 * Math.cos(phi), 500 * Math.sin(phi) * Math.sin(theta));
-                    camera.lookAt(target);
-                    renderer.render(scene, camera);
-                    frame = requestAnimationFrame(render);
-                };
-                render();
+                    // 视角状态
+                    let lon = 0;
+                    let lat = 0;
+                    let fov = 70;
+                    let dragging = false;
+                    let startX = 0;
+                    let startY = 0;
+                    let startLon = 0;
+                    let startLat = 0;
 
-                // 载入纹理:大图降采样到 GPU 上限,避免超限导致黑屏/失败
-                const image = new Image();
-                image.crossOrigin = "anonymous";
-                image.onload = () => {
-                    if (disposed || !material) return;
-                    try {
-                        const w = image.naturalWidth || image.width;
-                        const h = image.naturalHeight || image.height;
-                        const scale = Math.min(1, maxTextureSide / w, maxTextureSide / h);
-                        let source: HTMLImageElement | HTMLCanvasElement = image;
-                        if (scale < 1) {
-                            const c = document.createElement("canvas");
-                            c.width = Math.max(1, Math.round(w * scale));
-                            c.height = Math.max(1, Math.round(h * scale));
-                            c.getContext("2d")?.drawImage(image, 0, 0, c.width, c.height);
-                            source = c;
+                    const renderFrame = () => {
+                        frame = 0;
+                        if (disposed || !renderer) return;
+                        camera.fov = fov;
+                        camera.updateProjectionMatrix();
+                        const phi = MathUtils.degToRad(90 - lat);
+                        const theta = MathUtils.degToRad(lon);
+                        target.set(
+                            500 * Math.sin(phi) * Math.cos(theta),
+                            500 * Math.cos(phi),
+                            500 * Math.sin(phi) * Math.sin(theta),
+                        );
+                        camera.lookAt(target);
+                        renderer.render(scene, camera);
+                    };
+
+                    const scheduleRender = () => {
+                        if (disposed || frame) return;
+                        frame = requestAnimationFrame(renderFrame);
+                    };
+
+                    const onDown = (event: PointerEvent) => {
+                        dragging = true;
+                        startX = event.clientX;
+                        startY = event.clientY;
+                        startLon = lon;
+                        startLat = lat;
+                        canvas.style.cursor = "grabbing";
+                        canvas.setPointerCapture?.(event.pointerId);
+                    };
+                    const onMove = (event: PointerEvent) => {
+                        if (!dragging) return;
+                        lon = startLon - (event.clientX - startX) * 0.12;
+                        lat = Math.max(-84, Math.min(84, startLat + (event.clientY - startY) * 0.12));
+                        scheduleRender();
+                    };
+                    const onUp = (event: PointerEvent) => {
+                        if (!dragging) return;
+                        dragging = false;
+                        canvas.style.cursor = "grab";
+                        if (canvas.hasPointerCapture?.(event.pointerId)) {
+                            canvas.releasePointerCapture?.(event.pointerId);
                         }
-                        texture = source instanceof HTMLCanvasElement ? new THREE.CanvasTexture(source) : new THREE.Texture(source);
-                        texture.colorSpace = THREE.SRGBColorSpace;
-                        texture.minFilter = THREE.LinearFilter;
-                        texture.needsUpdate = true;
-                        material.map = texture;
-                        material.needsUpdate = true;
-                        setStatus("ready");
-                    } catch {
-                        setStatus("error");
-                    }
-                };
-                image.onerror = () => !disposed && setStatus("error");
-                image.src = src;
-            })
+                    };
+                    const onWheel = (event: WheelEvent) => {
+                        event.preventDefault();
+                        const nextFov = Math.max(38, Math.min(86, fov + event.deltaY * 0.035));
+                        if (nextFov !== fov) {
+                            fov = nextFov;
+                            scheduleRender();
+                        }
+                    };
+                    canvas.addEventListener("pointerdown", onDown);
+                    canvas.addEventListener("pointermove", onMove);
+                    canvas.addEventListener("pointerup", onUp);
+                    canvas.addEventListener("pointercancel", onUp);
+                    canvas.addEventListener("wheel", onWheel, { passive: false });
+                    cleanupEvents = () => {
+                        canvas.removeEventListener("pointerdown", onDown);
+                        canvas.removeEventListener("pointermove", onMove);
+                        canvas.removeEventListener("pointerup", onUp);
+                        canvas.removeEventListener("pointercancel", onUp);
+                        canvas.removeEventListener("wheel", onWheel);
+                    };
+
+                    const resize = () => {
+                        if (disposed || !renderer || !mountRef.current) return;
+                        const width = Math.max(1, mountRef.current.clientWidth);
+                        const height = Math.max(1, mountRef.current.clientHeight);
+                        renderer.setSize(width, height, false);
+                        camera.aspect = width / height;
+                        camera.updateProjectionMatrix();
+                        scheduleRender();
+                    };
+                    resizeObserver = new ResizeObserver(resize);
+                    resizeObserver.observe(mount);
+                    resize();
+
+                    // 载入纹理:大图降采样到 GPU 上限,避免超限导致黑屏/失败
+                    const image = new Image();
+                    image.crossOrigin = "anonymous";
+                    image.onload = () => {
+                        if (disposed || !material) return;
+                        try {
+                            const w = image.naturalWidth || image.width;
+                            const h = image.naturalHeight || image.height;
+                            const scale = Math.min(1, maxTextureSide / w, maxTextureSide / h);
+                            let source: HTMLImageElement | HTMLCanvasElement = image;
+                            if (scale < 1) {
+                                const c = document.createElement("canvas");
+                                c.width = Math.max(1, Math.round(w * scale));
+                                c.height = Math.max(1, Math.round(h * scale));
+                                c.getContext("2d")?.drawImage(image, 0, 0, c.width, c.height);
+                                source = c;
+                            }
+                            texture?.dispose();
+                            texture = source instanceof HTMLCanvasElement ? new CanvasTexture(source) : new Texture(source);
+                            texture.colorSpace = SRGBColorSpace;
+                            texture.minFilter = LinearFilter;
+                            texture.needsUpdate = true;
+                            material.map = texture;
+                            material.needsUpdate = true;
+                            setStatus("ready");
+                            scheduleRender();
+                        } catch {
+                            setStatus("error");
+                        }
+                    };
+                    image.onerror = () => !disposed && setStatus("error");
+                    image.src = src;
+                },
+            )
             .catch(() => !disposed && setStatus("error"));
 
         return () => {
             disposed = true;
             cleanupEvents();
             resizeObserver?.disconnect();
-            if (frame) cancelAnimationFrame(frame);
-            texture?.dispose?.();
-            material?.dispose?.();
-            geometry?.dispose?.();
+            if (frame) {
+                cancelAnimationFrame(frame);
+                frame = 0;
+            }
+            texture?.dispose();
+            material?.dispose();
+            geometry?.dispose();
             if (renderer) {
-                renderer.domElement?.remove?.();
-                renderer.dispose?.();
-                renderer.forceContextLoss?.();
+                renderer.domElement.remove();
+                renderer.dispose();
+                renderer.forceContextLoss();
             }
         };
     }, [src]);

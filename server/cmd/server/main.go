@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"dream-canvas/server/internal/app"
 	"golang.org/x/term"
@@ -34,6 +38,27 @@ func main() {
 		fmt.Println("管理员已创建")
 		return
 	}
+	server := &http.Server{
+		Addr:              *listen,
+		Handler:           service.Router(*web, *trustedProxies),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
 	fmt.Printf("梦想画布：http://%s\n持久目录：%s\n", *listen, root)
-	log.Fatal(http.ListenAndServe(*listen, service.Router(*web, *trustedProxies)))
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) { log.Fatal(err) }
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil { log.Printf("HTTP 关闭超时或失败: %v", err) }
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) { log.Fatal(err) }
+	}
 }

@@ -150,7 +150,11 @@ export const firstModel = (config: AiConfig, capability: ModelCapability, toolsO
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) { return value && modelOptionsFromChannels(channels).includes(value) ? value : ""; }
 export function resolveModelForCapability(config: AiConfig, current: string | undefined, capability: ModelCapability) {
     const preferred = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
-    return current || preferred;
+    if (current) {
+        const configuredCapability = modelCapabilityOf(config, current);
+        if (!configuredCapability || configuredCapability === capability) return current;
+    }
+    return preferred;
 }
 
 export const modelSupportsTools = (config: AiConfig, value: string) => findChannelModel(config, value)?.model.features.tools === true;

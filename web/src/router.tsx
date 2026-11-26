@@ -1,5 +1,5 @@
 import { createBrowserRouter, Outlet } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 
 import UserLayout from "@/layouts/user-layout";
 import SettingsLayout from "@/layouts/settings-layout";
@@ -21,15 +21,18 @@ const TasksPage = lazy(() => import("@/pages/settings/tasks"));
 const SitePage = lazy(() => import("@/pages/settings/site"));
 const LoggingPage = lazy(() => import("@/pages/settings/logging"));
 const StoragePage = lazy(() => import("@/pages/settings/storage"));
-import AssetProjectPage from "@/pages/assets";
-import AssetProjectsPage from "@/pages/assets/overview";
+const AssetProjectPage = lazy(() => import("@/pages/assets"));
+const AssetProjectsPage = lazy(() => import("@/pages/assets/overview"));
 import CanvasPage from "@/pages/canvas";
-import CanvasProjectPage from "@/pages/canvas/project";
-import ConversationsPage from "@/pages/conversations";
-import ImagePage from "@/pages/image";
+const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
+const ConversationsPage = lazy(() => import("@/pages/conversations"));
+const ImagePage = lazy(() => import("@/pages/image"));
 import NotFound from "@/pages/not-found";
 import PageError from "@/pages/error";
-import VideoPage from "@/pages/video";
+const VideoPage = lazy(() => import("@/pages/video"));
+
+const routeFallback = <div className="flex h-full items-center justify-center"><Spinner /></div>;
+const lazyElement = (element: ReactNode) => <Suspense fallback={routeFallback}>{element}</Suspense>;
 
 export const router = createBrowserRouter([
     { path: "/", element: <LoginPage />, errorElement: <PageError /> },
@@ -41,14 +44,14 @@ export const router = createBrowserRouter([
             {
                 element: <UserLayout><Outlet /></UserLayout>,
                 children: [
-                    { path: "/conversations", element: <ConversationsPage /> },
-                    { path: "/image", element: <RequireWorkbench key="image" kind="image"><ImagePage /></RequireWorkbench> },
-                    { path: "/video", element: <RequireWorkbench key="video" kind="video"><VideoPage /></RequireWorkbench> },
-                    { path: "/assets", element: <AssetProjectsPage /> },
-                    { path: "/assets/:projectId", element: <AssetProjectPage /> },
-                    { path: "/inspiration", element: <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner /></div>}><InspirationPage /></Suspense> },
+                    { path: "/conversations", element: lazyElement(<ConversationsPage />) },
+                    { path: "/image", element: <RequireWorkbench key="image" kind="image">{lazyElement(<ImagePage />)}</RequireWorkbench> },
+                    { path: "/video", element: <RequireWorkbench key="video" kind="video">{lazyElement(<VideoPage />)}</RequireWorkbench> },
+                    { path: "/assets", element: lazyElement(<AssetProjectsPage />) },
+                    { path: "/assets/:projectId", element: lazyElement(<AssetProjectPage />) },
+                    { path: "/inspiration", element: lazyElement(<InspirationPage />) },
                     { path: "/canvas", element: <CanvasPage /> },
-                    { path: "/canvas/:id", element: <CanvasProjectPage /> },
+                    { path: "/canvas/:id", element: lazyElement(<CanvasProjectPage />) },
                     { path: "/settings", element: <SettingsLayout />, children: [
                         { index: true, element: <GeneralSettingsPage /> },
                         { path: "backup", element: <BackupPage /> },

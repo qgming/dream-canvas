@@ -37,6 +37,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
+    const blurTimerRef = useRef<number | null>(null);
     // Track the last value emitted to the parent. An identical focused value is this component's own echo,
     // so skip rebuilding to preserve the caret and IME. Rebuild external changes even while focused.
     const lastEmittedRef = useRef(value);
@@ -44,6 +45,13 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+    useEffect(() => () => {
+        if (blurTimerRef.current !== null) {
+            window.clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = null;
+        }
+    }, []);
 
     const activeReferences = useMemo(() => references.filter((item) => item.active), [references]);
     const referenceKey = JSON.stringify(activeReferences.map(({ nodeId, label, previewUrl, text }) => [nodeId, label, previewUrl, text]));
@@ -157,6 +165,11 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                     composingRef.current = false;
                     syncFromEditor();
                 }}
+                onPaste={(event) => {
+                    event.preventDefault();
+                    insertTextAtCaret(event.clipboardData.getData("text/plain"));
+                    syncFromEditor();
+                }}
                 onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                     event.stopPropagation();
                     if (isImeComposing(event)) return;
@@ -194,7 +207,19 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                     }
                     requestAnimationFrame(syncMention);
                 }}
-                onBlur={() => window.setTimeout(closeMention, 120)}
+                onFocus={() => {
+                    if (blurTimerRef.current !== null) {
+                        window.clearTimeout(blurTimerRef.current);
+                        blurTimerRef.current = null;
+                    }
+                }}
+                onBlur={() => {
+                    if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
+                    blurTimerRef.current = window.setTimeout(() => {
+                        blurTimerRef.current = null;
+                        closeMention();
+                    }, 120);
+                }}
             />
             {mention && candidates.length ? (
                 <MentionMenu rect={mention.rect} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} />
@@ -396,6 +421,19 @@ function caretRect(): DOMRect | null {
 function closestEditor(node: Node) {
     const element = node instanceof Element ? node : node.parentElement;
     return element?.closest("[contenteditable='true']") || null;
+}
+
+function insertTextAtCaret(text: string) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
 }
 
 function placeCaretAtEnd(element: HTMLElement) {

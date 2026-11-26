@@ -64,7 +64,23 @@ func (a *App) launch(key string, run func(context.Context)) bool {
 	a.active[key] = cancel
 	a.workers.Add(1)
 	a.workMu.Unlock()
-	go func() { defer a.workers.Done(); before := a.workRevision(key); defer func() { cancel(); a.workMu.Lock(); delete(a.active, key); a.workMu.Unlock(); if after := a.workRevision(key); before != "" && after != "" && before != after { a.signalWork() } }(); run(ctx) }()
+	go func() {
+		defer a.workers.Done()
+		before := a.workRevision(key)
+		defer func() {
+			cancel()
+			a.workMu.Lock()
+			delete(a.active, key)
+			a.workMu.Unlock()
+			if after := a.workRevision(key); before != "" && after != "" && before != after { a.signalWork() }
+		}()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				a.logFailure(ctx, "worker.panic", panicError(recovered), slog.String("work_key", key))
+			}
+		}()
+		run(ctx)
+	}()
 	return true
 }
 

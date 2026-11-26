@@ -65,6 +65,18 @@ func (a *App) SavePreference(userID, name string, version uint64, data JSON) (Us
 	if err == nil { a.notify(userID); a.signalWork() }; return preference, err
 }
 
+func (a *App) requireWorkbenchOpen(kind string) error {
+	availability, err := a.getSiteAvailability()
+	if err != nil { return err }
+	if kind == "image" && !availability.ImageWorkbenchOpen {
+		return problem(403, "workbench_closed", "生图工作台已关闭")
+	}
+	if kind == "video" && !availability.VideoWorkbenchOpen {
+		return problem(403, "workbench_closed", "视频创作台已关闭")
+	}
+	return nil
+}
+
 func workbenchKind(c *gin.Context) bool {
 	if c.Param("kind") == "image" || c.Param("kind") == "video" { return true }
 	respondError(c, problem(400, "invalid_workbench", "工作台类型不正确"))
@@ -73,6 +85,7 @@ func workbenchKind(c *gin.Context) bool {
 
 func (a *App) listWorkbenchRecords(c *gin.Context) {
 	if !workbenchKind(c) { return }
+	if err := a.requireWorkbenchOpen(c.Param("kind")); err != nil { respondError(c, err); return }
 	records := []WorkbenchRecord{}
 	if err := a.db.Where("user_id = ? AND kind = ? AND removed = ?", currentUser(c).ID, c.Param("kind"), false).Order("created_at DESC").Find(&records).Error; err != nil { respondError(c, err); return }
 	c.JSON(200, records)
@@ -80,6 +93,7 @@ func (a *App) listWorkbenchRecords(c *gin.Context) {
 
 func (a *App) saveWorkbenchRecord(c *gin.Context) {
 	if !workbenchKind(c) { return }
+	if err := a.requireWorkbenchOpen(c.Param("kind")); err != nil { respondError(c, err); return }
 	if strings.TrimSpace(c.Param("id")) == "" { respondError(c, problem(400, "invalid_id", "记录编号不能为空")); return }
 	var input struct { Version uint64 `json:"version"`; Value JSON `json:"value"` }
 	if !bind(c, &input) { return }
@@ -89,6 +103,7 @@ func (a *App) saveWorkbenchRecord(c *gin.Context) {
 
 func (a *App) SaveWorkbenchRecord(userID, kind, id string, version uint64, data JSON) (WorkbenchRecord, error) {
 	if !includes([]string{"image", "video"}, kind) || strings.TrimSpace(id) == "" { return WorkbenchRecord{}, problem(400, "invalid_workbench", "工作台类型或记录编号不正确") }
+	if err := a.requireWorkbenchOpen(kind); err != nil { return WorkbenchRecord{}, err }
 	var value map[string]any
 	if json.Unmarshal(data, &value) != nil || value == nil || value["id"] != id { return WorkbenchRecord{}, problem(400, "invalid_record", "记录内容不正确") }
 	// These are workbench presentation records; execution and billing are never inferred from them.
@@ -124,6 +139,7 @@ func (a *App) SaveWorkbenchRecord(userID, kind, id string, version uint64, data 
 
 func (a *App) deleteWorkbenchRecord(c *gin.Context) {
 	if !workbenchKind(c) { return }
+	if err := a.requireWorkbenchOpen(c.Param("kind")); err != nil { respondError(c, err); return }
 	var input struct { Version uint64 `json:"version"` }
 	if !bind(c, &input) { return }
 	pending, err := a.DeleteWorkbenchRecord(currentUser(c).ID, c.Param("kind"), c.Param("id"), input.Version)
@@ -133,6 +149,7 @@ func (a *App) deleteWorkbenchRecord(c *gin.Context) {
 
 func (a *App) DeleteWorkbenchRecord(userID, kind, id string, version uint64) (bool, error) {
 	if !includes([]string{"image", "video"}, kind) || strings.TrimSpace(id) == "" { return false, problem(400, "invalid_workbench", "工作台类型或记录编号不正确") }
+	if err := a.requireWorkbenchOpen(kind); err != nil { return false, err }
 	pending := false
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var record WorkbenchRecord
